@@ -13,33 +13,113 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai_develop.presentation.ChatMessage
-import com.example.ai_develop.presentation.DeepSeekStateModel
-import com.example.ai_develop.presentation.DeepSeekViewModel
+import com.example.ai_develop.presentation.LLMStateModel
+import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.SourceType
 
 @Composable
-internal fun ChatScreen(viewModel: DeepSeekViewModel) {
+internal fun ChatScreen(viewModel: LLMViewModel) {
     val state by viewModel.state.collectAsState()
-    ChatContent(
-        state = state,
-        onSendMessage = { viewModel.sendMessage(it) }
-    )
+    var selectedTab by remember { mutableIntStateOf(0) }
+    
+    // Определяем видимость клавиатуры
+    val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
+    Scaffold(
+        bottomBar = {
+            // Скрываем навигацию, когда открыта клавиатура, чтобы избежать дублирования отступов
+            // и освободить место для чата
+            if (!isKeyboardVisible) {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        icon = { Text("💬") },
+                        label = { Text("Чат") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        icon = { Text("⚙️") },
+                        label = { Text("Промпт") }
+                    )
+                }
+            }
+        },
+        contentWindowInsets = WindowInsets.statusBars // Оставляем только отступ статус-бара сверху
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+                .windowInsetsPadding(WindowInsets.ime) // Корректная обработка клавиатуры
+        ) {
+            when (selectedTab) {
+                0 -> ChatContent(
+                    state = state,
+                    onSendMessage = { viewModel.sendMessage(it) }
+                )
+                1 -> SystemPromptContent(
+                    state = state,
+                    onUpdatePrompt = { viewModel.updateSystemPrompt(it) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SystemPromptContent(
+    state: LLMStateModel,
+    onUpdatePrompt: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFE3F2FD))
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Системный промпт",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Text(
+            text = "Определяет поведение ассистента в начале диалога.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.Gray,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+        
+        OutlinedTextField(
+            value = state.systemPrompt,
+            onValueChange = onUpdatePrompt,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            placeholder = { Text("Например: Ты — профессиональный переводчик...") },
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White
+            )
+        )
+    }
 }
 
 @Composable
 internal fun ChatContent(
-    state: DeepSeekStateModel,
+    state: LLMStateModel,
     onSendMessage: (String) -> Unit
 ) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    // Автоматическая прокрутка вниз
     LaunchedEffect(state.messages.size, state.isLoading) {
         if (state.messages.isNotEmpty() || state.isLoading) {
             val lastIndex = if (state.isLoading) state.messages.size else state.messages.size - 1
@@ -53,9 +133,7 @@ internal fun ChatContent(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFE3F2FD))
-            .systemBarsPadding()
-            .imePadding()
-            .padding(12.dp)
+            .padding(12.dp) // Удалили .imePadding() отсюда
     ) {
         LazyColumn(
             state = listState,
@@ -76,7 +154,6 @@ internal fun ChatContent(
                 )
             }
 
-            // Используем item с ключом и AnimatedVisibility для надежного скрытия
             item(key = "loading_indicator") {
                 AnimatedVisibility(
                     visible = state.isLoading,
@@ -178,7 +255,7 @@ private fun MessageBubble(
 @Preview(showBackground = true)
 @Composable
 private fun ChatScreenPreview() {
-    val mockState = DeepSeekStateModel(
+    val mockState = LLMStateModel(
         messages = listOf(
             ChatMessage(message = "Привет!", source = SourceType.USER),
             ChatMessage(message = "Я DeepSeek.", source = SourceType.DEEPSEEK)

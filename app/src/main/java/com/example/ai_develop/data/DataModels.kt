@@ -10,7 +10,7 @@ data class ChatRequest(
     @SerializedName("max_tokens")
     val maxTokens: Int = 300,
     @SerializedName("stream")
-    val stream: Boolean = false
+    val stream: Boolean = true
 )
 
 data class Message(
@@ -28,4 +28,19 @@ data class ChatResponse(
 data class Choice(
     @SerializedName("message")
     val message: Message
+)
+
+data class ChatStreamResponse(
+    @SerializedName("choices")
+    val choices: List<ChatStreamChoice>
+)
+
+data class ChatStreamChoice(
+    @SerializedName("delta")
+    val delta: ChatStreamDelta
+)
+
+data class ChatStreamDelta(
+    @SerializedName("content")
+    val content: String?
 )
