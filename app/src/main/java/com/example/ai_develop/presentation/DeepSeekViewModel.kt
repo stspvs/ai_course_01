@@ -1,45 +1,58 @@
 package com.example.ai_develop.presentation
 
-import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ai_develop.data.DeepSeekClientAPI
+import com.example.ai_develop.domain.SendMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 internal class DeepSeekViewModel @Inject constructor(
-    private val deepSeekClient: DeepSeekClientAPI
+    private val sendMessageUseCase: SendMessageUseCase
 ) : ViewModel() {
 
-    private val _chatMessages = mutableStateListOf<ChatMessage>()
-    val chatMessages: List<ChatMessage> = _chatMessages
-
-    private val _state: MutableSharedFlow<DeepSeekStateModel> = MutableSharedFlow()
-    private val state: SharedFlow<DeepSeekStateModel> = _state.asSharedFlow()
+    private val _state = MutableStateFlow(DeepSeekStateModel())
+    val state: StateFlow<DeepSeekStateModel> = _state.asStateFlow()
 
     fun sendMessage(message: String) {
-        _chatMessages.add(
-            ChatMessage(
-                message = message,
-                source = SourceType.USER
+        if (message.isBlank()) return
+
+        val userMessage = ChatMessage(message = message, source = SourceType.USER)
+        
+        // Добавляем сообщение пользователя и включаем загрузку
+        _state.update { currentState ->
+            currentState.copy(
+                messages = currentState.messages + userMessage,
+                isLoading = true
             )
-        )
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
-            val result = deepSeekClient.sendMessage(message)
+            val result = sendMessageUseCase(message)
             val assistantReply = result.getOrElse { "Ошибка: ${it.message}" }
-            _chatMessages.add(
-                ChatMessage(
-                    message = assistantReply,
-                    source = SourceType.DEEPSEEK
-                )
+
+            val botMessage = ChatMessage(
+                message = assistantReply,
+                source = SourceType.DEEPSEEK
             )
+
+            // РЕШЕНИЕ: Сначала выключаем индикатор загрузки
+            _state.update { it.copy(isLoading = false) }
+            
+            // Даем небольшую паузу (буквально 1 кадр), чтобы UI успел убрать "думающий" бабл
+            delay(50) 
+
+            // Теперь добавляем ответ (или ошибку)
+            _state.update { currentState ->
+                currentState.copy(messages = currentState.messages + botMessage)
+            }
         }
     }
 }

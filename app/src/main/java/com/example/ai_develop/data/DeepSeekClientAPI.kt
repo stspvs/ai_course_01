@@ -1,73 +1,61 @@
 package com.example.ai_develop.data
 
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
 
-internal class DeepSeekClientAPI(private val apiKey: String) {
-
-    companion object {
-        private val client: OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+@Singleton
+internal class DeepSeekClientAPI @Inject constructor(
+    private val apiKey: String
+) {
+    private val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS) // Время на установку соединения
+            .readTimeout(60, TimeUnit.SECONDS)    // Время на получение данных
+            .writeTimeout(60, TimeUnit.SECONDS)   // Время на отправку данных
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+                chain.proceed(request)
+            }
             .build()
-
-        private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 
-    // suspend функция для работы с coroutine
+    private val api: DeepSeekApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.deepseek.com/")
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(DeepSeekApi::class.java)
+    }
+
     suspend fun sendMessage(userMessage: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val requestBody = JSONObject().apply {
-                put("model", "deepseek-chat")
-                put("messages", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", userMessage)
-                    })
-                })
-                put("max_tokens", 300)
-                put("stream", false)
-            }.toString()
+            val request = ChatRequest(
+                messages = listOf(Message(role = "user", content = userMessage))
+            )
+            
+            val response = api.sendMessage(request)
 
-            val request = Request.Builder()
-                .url("https://api.deepseek.com/v1/chat/completions")
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .post(requestBody.toRequestBody(JSON))
-                .build()
-
-            val response = client.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("HTTP ${response.code}"))
+            if (response.isSuccessful) {
+                val content = response.body()?.choices?.firstOrNull()?.message?.content
+                if (content != null) {
+                    Result.success(content)
+                } else {
+                    Result.failure(Exception("Empty response body"))
+                }
+            } else {
+                val errorBody = response.errorBody()?.string()
+                Result.failure(Exception("HTTP Error ${response.code()}: $errorBody"))
             }
-
-            val bodyString = response.body?.string()
-                ?: return@withContext Result.failure(Exception("Empty response"))
-
-            val json = try {
-                JSONObject(bodyString)
-            } catch (e: Exception) {
-                return@withContext Result.failure(Exception("Invalid JSON"))
-            }
-
-            val message = json.optJSONArray("choices")
-                ?.optJSONObject(0)
-                ?.optJSONObject("message")
-                ?.optString("content")
-                ?: return@withContext Result.failure(Exception("Invalid response structure"))
-
-            Result.success(message)
-
-        } catch (e: IOException) {
-            Result.failure(Exception("Network error: ${e.localizedMessage}", e))
         } catch (e: Exception) {
             Result.failure(e)
         }
