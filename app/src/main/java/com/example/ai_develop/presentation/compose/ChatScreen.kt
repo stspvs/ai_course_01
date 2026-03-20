@@ -30,7 +30,6 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
     val state by viewModel.state.collectAsState()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     
-    // Текст сообщения вынесен в родителя, чтобы сохраняться при смене табов
     var chatInput by rememberSaveable { mutableStateOf("") }
     
     val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -80,7 +79,8 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                     onSendMessage = { 
                         viewModel.sendMessage(it)
                         chatInput = "" 
-                    }
+                    },
+                    onClearChat = { viewModel.clearChat() }
                 )
                 1 -> SettingsContent(
                     state = state,
@@ -189,7 +189,8 @@ internal fun ChatContent(
     state: LLMStateModel,
     input: String,
     onInputChange: (String) -> Unit,
-    onSendMessage: (String) -> Unit
+    onSendMessage: (String) -> Unit,
+    onClearChat: () -> Unit
 ) {
     val listState = rememberLazyListState()
 
@@ -261,7 +262,12 @@ internal fun ChatContent(
                     unfocusedContainerColor = inputBgColor,
                     focusedBorderColor = Color.DarkGray,
                     unfocusedBorderColor = Color.Gray,
-                )
+                ),
+                trailingIcon = {
+                    IconButton(onClick = onClearChat) {
+                        Text("➕", fontSize = 20.sp)
+                    }
+                }
             )
             
             Spacer(modifier = Modifier.width(8.dp))
@@ -272,7 +278,6 @@ internal fun ChatContent(
                         onSendMessage(input)
                     }
                 },
-                enabled = !state.isLoading,
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = buttonBgColor,
@@ -333,5 +338,5 @@ private fun ChatScreenPreview() {
             ChatMessage(message = "Я DeepSeek.", source = SourceType.DEEPSEEK)
         )
     )
-    ChatContent(state = mockState, input = "", onInputChange = {}, onSendMessage = {})
+    ChatContent(state = mockState, input = "", onInputChange = {}, onSendMessage = {}, onClearChat = {})
 }

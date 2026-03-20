@@ -6,6 +6,7 @@ import com.example.ai_develop.domain.ChatStreamingUseCase
 import com.example.ai_develop.domain.SendMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,8 @@ internal class LLMViewModel @Inject constructor(
     private val _state = MutableStateFlow(LLMStateModel())
     val state: StateFlow<LLMStateModel> = _state.asStateFlow()
 
+    private var currentJob: Job? = null
+
     fun updateSystemPrompt(prompt: String) {
         _state.update { it.copy(systemPrompt = prompt) }
     }
@@ -40,12 +43,16 @@ internal class LLMViewModel @Inject constructor(
         _state.update { it.copy(isJsonMode = isJsonMode) }
     }
 
+    fun clearChat() {
+        currentJob?.cancel()
+        _state.update { it.copy(messages = emptyList(), isLoading = false) }
+    }
+
     fun sendMessage(message: String) {
         if (message.isBlank()) return
 
         val userMessage = ChatMessage(message = message, source = SourceType.USER)
         
-        // Сначала добавляем сообщение пользователя в UI стейт
         _state.update { state ->
             state.copy(
                 messages = state.messages + userMessage,
@@ -53,10 +60,11 @@ internal class LLMViewModel @Inject constructor(
             )
         }
 
-        // Берем актуальный стейт ПОСЛЕ добавления пользовательского сообщения
         val currentState = _state.value
 
-        viewModelScope.launch(Dispatchers.IO) {
+        currentJob?.cancel()
+
+        currentJob = viewModelScope.launch(Dispatchers.IO) {
             val botMessageId = java.util.UUID.randomUUID().toString()
             var currentContent = ""
 
