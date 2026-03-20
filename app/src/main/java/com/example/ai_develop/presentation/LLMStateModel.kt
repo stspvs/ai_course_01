@@ -5,7 +5,9 @@ import java.util.UUID
 internal data class LLMStateModel(
     val messages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
-    val systemPrompt: String = "You are a helpful assistant."
+    val systemPrompt: String = "You are a helpful assistant.",
+    val maxTokens: Int = 300,
+    val stopWord: String = ""
 )
 
 internal data class ChatMessage(

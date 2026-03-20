@@ -2,6 +2,7 @@ package com.example.ai_develop.presentation.compose
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,47 +29,56 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
     val state by viewModel.state.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
     
-    // Определяем видимость клавиатуры
     val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     Scaffold(
         bottomBar = {
-            // Скрываем навигацию, когда открыта клавиатура, чтобы избежать дублирования отступов
-            // и освободить место для чата
             if (!isKeyboardVisible) {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        icon = { Text("💬") },
-                        label = { Text("Чат") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        icon = { Text("⚙️") },
-                        label = { Text("Промпт") }
-                    )
+                // Светло-фиолетовый фон и темно-фиолетовая обводка
+                Surface(
+                    color = Color(0xFFF3E5F5), 
+                    border = BorderStroke(1.dp, Color(0xFF4A148C)),
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                ) {
+                    NavigationBar(
+                        containerColor = Color.Transparent,
+                        tonalElevation = 0.dp
+                    ) {
+                        NavigationBarItem(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            icon = { Text("💬") },
+                            label = { Text("Чат") }
+                        )
+                        NavigationBarItem(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            icon = { Text("⚙️") },
+                            label = { Text("Настройки") }
+                        )
+                    }
                 }
             }
         },
-        contentWindowInsets = WindowInsets.statusBars // Оставляем только отступ статус-бара сверху
+        contentWindowInsets = WindowInsets.statusBars
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding)
-                .windowInsetsPadding(WindowInsets.ime) // Корректная обработка клавиатуры
+                .windowInsetsPadding(WindowInsets.ime)
         ) {
             when (selectedTab) {
                 0 -> ChatContent(
                     state = state,
                     onSendMessage = { viewModel.sendMessage(it) }
                 )
-                1 -> SystemPromptContent(
+                1 -> SettingsContent(
                     state = state,
-                    onUpdatePrompt = { viewModel.updateSystemPrompt(it) }
+                    onUpdatePrompt = { viewModel.updateSystemPrompt(it) },
+                    onUpdateMaxTokens = { viewModel.updateMaxTokens(it) },
+                    onUpdateStopWord = { viewModel.updateStopWord(it) }
                 )
             }
         }
@@ -76,9 +86,11 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
 }
 
 @Composable
-internal fun SystemPromptContent(
+internal fun SettingsContent(
     state: LLMStateModel,
-    onUpdatePrompt: (String) -> Unit
+    onUpdatePrompt: (String) -> Unit,
+    onUpdateMaxTokens: (Int) -> Unit,
+    onUpdateStopWord: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -87,15 +99,49 @@ internal fun SystemPromptContent(
             .padding(16.dp)
     ) {
         Text(
-            text = "Системный промпт",
+            text = "Настройки",
             style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        Text(
-            text = "Определяет поведение ассистента в начале диалога.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray,
             modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        // Панель дополнительных параметров
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = state.maxTokens.toString(),
+                onValueChange = { 
+                    it.toIntOrNull()?.let { tokens -> onUpdateMaxTokens(tokens) }
+                },
+                label = { Text("Макс. длина", fontSize = 12.sp) },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White
+                )
+            )
+
+            OutlinedTextField(
+                value = state.stopWord,
+                onValueChange = onUpdateStopWord,
+                label = { Text("Стоп-слово", fontSize = 12.sp) },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White
+                )
+            )
+        }
+
+        Text(
+            text = "Системный промпт",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 8.dp)
         )
         
         OutlinedTextField(
@@ -133,7 +179,7 @@ internal fun ChatContent(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFE3F2FD))
-            .padding(12.dp) // Удалили .imePadding() отсюда
+            .padding(12.dp)
     ) {
         LazyColumn(
             state = listState,

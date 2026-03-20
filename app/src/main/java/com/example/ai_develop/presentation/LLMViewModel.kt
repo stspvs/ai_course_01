@@ -29,6 +29,14 @@ internal class LLMViewModel @Inject constructor(
         _state.update { it.copy(systemPrompt = prompt) }
     }
 
+    fun updateMaxTokens(maxTokens: Int) {
+        _state.update { it.copy(maxTokens = maxTokens) }
+    }
+
+    fun updateStopWord(stopWord: String) {
+        _state.update { it.copy(stopWord = stopWord) }
+    }
+
     fun sendMessage(message: String) {
         if (message.isBlank()) return
 
