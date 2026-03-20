@@ -2,7 +2,7 @@ package com.example.ai_develop.presentation
 
 import java.util.UUID
 
-internal data class LLMStateModel(
+data class LLMStateModel(
     val messages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
     val systemPrompt: String = "You are a helpful assistant.",
@@ -11,14 +11,14 @@ internal data class LLMStateModel(
     val isJsonMode: Boolean = false
 )
 
-internal data class ChatMessage(
+data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val message: String,
     val source: SourceType,
 )
 
-internal enum class SourceType {
-    USER,
-    DEEPSEEK,
-    SYSTEM,
+enum class SourceType(val role: String) {
+    USER("user"),
+    DEEPSEEK("assistant"),
+    SYSTEM("system"),
 }

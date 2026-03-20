@@ -1,5 +1,7 @@
 package com.example.ai_develop.data
 
+import com.example.ai_develop.presentation.ChatMessage
+import com.example.ai_develop.presentation.SourceType
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -44,23 +46,27 @@ internal class DeepSeekClientAPI @Inject constructor(
     }
 
     suspend fun sendMessage(
-        userMessage: String, 
+        chatHistory: List<ChatMessage>, 
         systemPrompt: String,
         maxTokens: Int,
         stopWord: String,
         isJsonMode: Boolean
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val messages = mutableListOf<Message>()
+            val apiMessages = mutableListOf<Message>()
             if (systemPrompt.isNotBlank()) {
-                messages.add(Message(role = "system", content = systemPrompt))
+                apiMessages.add(Message(role = "system", content = systemPrompt))
             }
-            messages.add(Message(role = "user", content = userMessage))
+            
+            // Добавляем всю историю чата
+            chatHistory.forEach { msg ->
+                apiMessages.add(Message(role = msg.source.role, content = msg.message))
+            }
 
             val shouldEnableJson = isJsonMode && systemPrompt.contains("json", ignoreCase = true)
 
             val request = ChatRequest(
-                messages = messages,
+                messages = apiMessages,
                 maxTokens = maxTokens,
                 stream = false,
                 responseFormat = if (shouldEnableJson) ResponseFormat("json_object") else null,
@@ -86,23 +92,27 @@ internal class DeepSeekClientAPI @Inject constructor(
     }
 
     fun chatStreaming(
-        userMessage: String, 
+        chatHistory: List<ChatMessage>, 
         systemPrompt: String,
         maxTokens: Int,
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>> = flow {
         try {
-            val messages = mutableListOf<Message>()
+            val apiMessages = mutableListOf<Message>()
             if (systemPrompt.isNotBlank()) {
-                messages.add(Message(role = "system", content = systemPrompt))
+                apiMessages.add(Message(role = "system", content = systemPrompt))
             }
-            messages.add(Message(role = "user", content = userMessage))
+            
+            // Добавляем всю историю чата
+            chatHistory.forEach { msg ->
+                apiMessages.add(Message(role = msg.source.role, content = msg.message))
+            }
 
             val shouldEnableJson = isJsonMode && systemPrompt.contains("json", ignoreCase = true)
 
             val request = ChatRequest(
-                messages = messages,
+                messages = apiMessages,
                 maxTokens = maxTokens,
                 stream = true,
                 responseFormat = if (shouldEnableJson) ResponseFormat("json_object") else null,

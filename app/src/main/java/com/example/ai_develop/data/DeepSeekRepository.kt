@@ -1,6 +1,7 @@
 package com.example.ai_develop.data
 
 import com.example.ai_develop.domain.ChatRepository
+import com.example.ai_develop.presentation.ChatMessage
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -11,14 +12,14 @@ internal class DeepSeekRepository @Inject constructor(
 ) : ChatRepository {
 
     override suspend fun sendMessage(
-        message: String,
+        messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
         stopWord: String,
         isJsonMode: Boolean
     ): Result<String> {
         return deepSeekClient.sendMessage(
-            userMessage = message,
+            chatHistory = messages,
             systemPrompt = systemPrompt,
             maxTokens = maxTokens,
             stopWord = stopWord,
@@ -27,14 +28,14 @@ internal class DeepSeekRepository @Inject constructor(
     }
 
     override fun chatStreaming(
-        message: String,
+        messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>> {
         return deepSeekClient.chatStreaming(
-            userMessage = message,
+            chatHistory = messages,
             systemPrompt = systemPrompt,
             maxTokens = maxTokens,
             stopWord = stopWord,

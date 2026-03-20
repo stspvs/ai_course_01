@@ -44,8 +44,8 @@ internal class LLMViewModel @Inject constructor(
         if (message.isBlank()) return
 
         val userMessage = ChatMessage(message = message, source = SourceType.USER)
-        val currentState = _state.value
         
+        // Сначала добавляем сообщение пользователя в UI стейт
         _state.update { state ->
             state.copy(
                 messages = state.messages + userMessage,
@@ -53,12 +53,15 @@ internal class LLMViewModel @Inject constructor(
             )
         }
 
+        // Берем актуальный стейт ПОСЛЕ добавления пользовательского сообщения
+        val currentState = _state.value
+
         viewModelScope.launch(Dispatchers.IO) {
             val botMessageId = java.util.UUID.randomUUID().toString()
             var currentContent = ""
 
             chatStreamingUseCase(
-                message = message,
+                messages = currentState.messages,
                 systemPrompt = currentState.systemPrompt,
                 maxTokens = currentState.maxTokens,
                 stopWord = currentState.stopWord,

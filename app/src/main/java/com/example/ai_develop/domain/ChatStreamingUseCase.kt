@@ -1,5 +1,6 @@
 package com.example.ai_develop.domain
 
+import com.example.ai_develop.presentation.ChatMessage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import javax.inject.Inject
@@ -8,17 +9,17 @@ class ChatStreamingUseCase @Inject constructor(
     private val repository: ChatRepository
 ) {
     operator fun invoke(
-        message: String,
+        messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>> {
-        if (message.isBlank()) {
-            return flowOf(Result.failure(IllegalArgumentException("Message cannot be empty")))
+        if (messages.isEmpty() || messages.last().message.isBlank()) {
+            return flowOf(Result.failure(IllegalArgumentException("Last message cannot be empty")))
         }
         return repository.chatStreaming(
-            message = message,
+            messages = messages,
             systemPrompt = systemPrompt,
             maxTokens = maxTokens,
             stopWord = stopWord,
