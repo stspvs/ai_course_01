@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -24,6 +25,7 @@ import com.example.ai_develop.presentation.ChatMessage
 import com.example.ai_develop.presentation.LLMStateModel
 import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.SourceType
+import kotlin.math.roundToInt
 
 @Composable
 internal fun ChatScreen(viewModel: LLMViewModel) {
@@ -86,6 +88,7 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                     state = state,
                     onUpdatePrompt = { viewModel.updateSystemPrompt(it) },
                     onUpdateMaxTokens = { viewModel.updateMaxTokens(it) },
+                    onUpdateTemperature = { viewModel.updateTemperature(it) },
                     onUpdateStopWord = { viewModel.updateStopWord(it) },
                     onUpdateJsonMode = { viewModel.updateJsonMode(it) }
                 )
@@ -99,9 +102,17 @@ internal fun SettingsContent(
     state: LLMStateModel,
     onUpdatePrompt: (String) -> Unit,
     onUpdateMaxTokens: (Int) -> Unit,
+    onUpdateTemperature: (Double) -> Unit,
     onUpdateStopWord: (String) -> Unit,
     onUpdateJsonMode: (Boolean) -> Unit
 ) {
+    val temperatureDescription = when {
+        state.temperature <= 0.3 -> "максимально точные, детерминированные ответы\n→ идеально для: задач, кода, логики"
+        state.temperature <= 0.8 -> "(самый популярный диапазон)\n→ баланс точности и вариативности\n→ обычный чат"
+        state.temperature <= 1.5 -> "больше креатива\n→ возможны ошибки"
+        else -> "хаотичные, иногда странные ответы\n→ используется редко (тесты, генерация идей)"
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -117,7 +128,7 @@ internal fun SettingsContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp),
+                .padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedTextField(
@@ -144,6 +155,43 @@ internal fun SettingsContent(
                     focusedContainerColor = Color.White,
                     unfocusedContainerColor = Color.White
                 )
+            )
+        }
+
+        // Temperature Section
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+                .background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Температура: ${String.format("%.1f", state.temperature)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            Slider(
+                value = state.temperature.toFloat(),
+                onValueChange = { onUpdateTemperature(it.toDouble()) },
+                valueRange = 0f..2f,
+                steps = 19, // Чтобы был шаг 0.1
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Text(
+                text = temperatureDescription,
+                style = MaterialTheme.typography.bodySmall,
+                fontStyle = FontStyle.Italic,
+                color = Color.DarkGray,
+                lineHeight = 16.sp
             )
         }
 

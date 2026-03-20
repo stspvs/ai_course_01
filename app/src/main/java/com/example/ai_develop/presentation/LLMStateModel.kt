@@ -7,6 +7,7 @@ data class LLMStateModel(
     val isLoading: Boolean = false,
     val systemPrompt: String = "You are a helpful assistant.",
     val maxTokens: Int = 300,
+    val temperature: Double = 1.0,
     val stopWord: String = "",
     val isJsonMode: Boolean = false
 )

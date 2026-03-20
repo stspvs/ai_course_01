@@ -1,7 +1,6 @@
 package com.example.ai_develop.data
 
 import com.example.ai_develop.presentation.ChatMessage
-import com.example.ai_develop.presentation.SourceType
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -49,6 +48,7 @@ internal class DeepSeekClientAPI @Inject constructor(
         chatHistory: List<ChatMessage>, 
         systemPrompt: String,
         maxTokens: Int,
+        temperature: Double,
         stopWord: String,
         isJsonMode: Boolean
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -68,6 +68,7 @@ internal class DeepSeekClientAPI @Inject constructor(
             val request = ChatRequest(
                 messages = apiMessages,
                 maxTokens = maxTokens,
+                temperature = temperature,
                 stream = false,
                 responseFormat = if (shouldEnableJson) ResponseFormat("json_object") else null,
                 stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
@@ -95,6 +96,7 @@ internal class DeepSeekClientAPI @Inject constructor(
         chatHistory: List<ChatMessage>, 
         systemPrompt: String,
         maxTokens: Int,
+        temperature: Double,
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>> = flow {
@@ -114,6 +116,7 @@ internal class DeepSeekClientAPI @Inject constructor(
             val request = ChatRequest(
                 messages = apiMessages,
                 maxTokens = maxTokens,
+                temperature = temperature,
                 stream = true,
                 responseFormat = if (shouldEnableJson) ResponseFormat("json_object") else null,
                 stop = if (stopWord.isNotBlank()) listOf(stopWord) else null

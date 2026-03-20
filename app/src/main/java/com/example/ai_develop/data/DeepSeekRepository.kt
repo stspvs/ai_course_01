@@ -15,6 +15,7 @@ internal class DeepSeekRepository @Inject constructor(
         messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
+        temperature: Double,
         stopWord: String,
         isJsonMode: Boolean
     ): Result<String> {
@@ -22,6 +23,7 @@ internal class DeepSeekRepository @Inject constructor(
             chatHistory = messages,
             systemPrompt = systemPrompt,
             maxTokens = maxTokens,
+            temperature = temperature,
             stopWord = stopWord,
             isJsonMode = isJsonMode
         )
@@ -31,6 +33,7 @@ internal class DeepSeekRepository @Inject constructor(
         messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
+        temperature: Double,
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>> {
@@ -38,6 +41,7 @@ internal class DeepSeekRepository @Inject constructor(
             chatHistory = messages,
             systemPrompt = systemPrompt,
             maxTokens = maxTokens,
+            temperature = temperature,
             stopWord = stopWord,
             isJsonMode = isJsonMode
         )

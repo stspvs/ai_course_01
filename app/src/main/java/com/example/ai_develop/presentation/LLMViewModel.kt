@@ -35,6 +35,10 @@ internal class LLMViewModel @Inject constructor(
         _state.update { it.copy(maxTokens = maxTokens) }
     }
 
+    fun updateTemperature(temperature: Double) {
+        _state.update { it.copy(temperature = temperature) }
+    }
+
     fun updateStopWord(stopWord: String) {
         _state.update { it.copy(stopWord = stopWord) }
     }
@@ -72,6 +76,7 @@ internal class LLMViewModel @Inject constructor(
                 messages = currentState.messages,
                 systemPrompt = currentState.systemPrompt,
                 maxTokens = currentState.maxTokens,
+                temperature = currentState.temperature,
                 stopWord = currentState.stopWord,
                 isJsonMode = currentState.isJsonMode
             )

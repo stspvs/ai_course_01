@@ -12,6 +12,7 @@ class ChatStreamingUseCase @Inject constructor(
         messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
+        temperature: Double,
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>> {
@@ -22,6 +23,7 @@ class ChatStreamingUseCase @Inject constructor(
             messages = messages,
             systemPrompt = systemPrompt,
             maxTokens = maxTokens,
+            temperature = temperature,
             stopWord = stopWord,
             isJsonMode = isJsonMode
         )

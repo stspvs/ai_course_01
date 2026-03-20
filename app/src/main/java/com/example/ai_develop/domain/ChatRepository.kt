@@ -8,6 +8,7 @@ interface ChatRepository {
         messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
+        temperature: Double,
         stopWord: String,
         isJsonMode: Boolean
     ): Result<String>
@@ -16,6 +17,7 @@ interface ChatRepository {
         messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,
+        temperature: Double,
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>>
