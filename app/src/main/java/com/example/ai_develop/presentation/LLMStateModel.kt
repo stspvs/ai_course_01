@@ -7,7 +7,8 @@ internal data class LLMStateModel(
     val isLoading: Boolean = false,
     val systemPrompt: String = "You are a helpful assistant.",
     val maxTokens: Int = 300,
-    val stopWord: String = ""
+    val stopWord: String = "",
+    val isJsonMode: Boolean = false
 )
 
 internal data class ChatMessage(

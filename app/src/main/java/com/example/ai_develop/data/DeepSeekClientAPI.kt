@@ -43,7 +43,13 @@ internal class DeepSeekClientAPI @Inject constructor(
             .create(DeepSeekApi::class.java)
     }
 
-    suspend fun sendMessage(userMessage: String, systemPrompt: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun sendMessage(
+        userMessage: String, 
+        systemPrompt: String,
+        maxTokens: Int,
+        stopWord: String,
+        isJsonMode: Boolean
+    ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val messages = mutableListOf<Message>()
             if (systemPrompt.isNotBlank()) {
@@ -51,9 +57,14 @@ internal class DeepSeekClientAPI @Inject constructor(
             }
             messages.add(Message(role = "user", content = userMessage))
 
+            val shouldEnableJson = isJsonMode && systemPrompt.contains("json", ignoreCase = true)
+
             val request = ChatRequest(
                 messages = messages,
-                stream = false
+                maxTokens = maxTokens,
+                stream = false,
+                responseFormat = if (shouldEnableJson) ResponseFormat("json_object") else null,
+                stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
             )
             
             val response = api.sendMessage(request)
@@ -74,7 +85,13 @@ internal class DeepSeekClientAPI @Inject constructor(
         }
     }
 
-    fun chatStreaming(userMessage: String, systemPrompt: String): Flow<Result<String>> = flow {
+    fun chatStreaming(
+        userMessage: String, 
+        systemPrompt: String,
+        maxTokens: Int,
+        stopWord: String,
+        isJsonMode: Boolean
+    ): Flow<Result<String>> = flow {
         try {
             val messages = mutableListOf<Message>()
             if (systemPrompt.isNotBlank()) {
@@ -82,9 +99,14 @@ internal class DeepSeekClientAPI @Inject constructor(
             }
             messages.add(Message(role = "user", content = userMessage))
 
+            val shouldEnableJson = isJsonMode && systemPrompt.contains("json", ignoreCase = true)
+
             val request = ChatRequest(
                 messages = messages,
-                stream = true
+                maxTokens = maxTokens,
+                stream = true,
+                responseFormat = if (shouldEnableJson) ResponseFormat("json_object") else null,
+                stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
             )
             
             val response = api.chatStreaming(request)

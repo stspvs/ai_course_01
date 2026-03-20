@@ -5,10 +5,16 @@ import javax.inject.Inject
 class SendMessageUseCase @Inject constructor(
     private val repository: ChatRepository
 ) {
-    suspend operator fun invoke(message: String, systemPrompt: String): Result<String> {
+    suspend operator fun invoke(
+        message: String, 
+        systemPrompt: String,
+        maxTokens: Int,
+        stopWord: String,
+        isJsonMode: Boolean
+    ): Result<String> {
         if (message.isBlank()) {
             return Result.failure(IllegalArgumentException("Message cannot be empty"))
         }
-        return repository.sendMessage(message, systemPrompt)
+        return repository.sendMessage(message, systemPrompt, maxTokens, stopWord, isJsonMode)
     }
 }

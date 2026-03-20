@@ -10,11 +10,35 @@ internal class DeepSeekRepository @Inject constructor(
     private val deepSeekClient: DeepSeekClientAPI
 ) : ChatRepository {
 
-    override suspend fun sendMessage(message: String, systemPrompt: String): Result<String> {
-        return deepSeekClient.sendMessage(message, systemPrompt)
+    override suspend fun sendMessage(
+        message: String,
+        systemPrompt: String,
+        maxTokens: Int,
+        stopWord: String,
+        isJsonMode: Boolean
+    ): Result<String> {
+        return deepSeekClient.sendMessage(
+            userMessage = message,
+            systemPrompt = systemPrompt,
+            maxTokens = maxTokens,
+            stopWord = stopWord,
+            isJsonMode = isJsonMode
+        )
     }
 
-    override fun chatStreaming(message: String, systemPrompt: String): Flow<Result<String>> {
-        return deepSeekClient.chatStreaming(message, systemPrompt)
+    override fun chatStreaming(
+        message: String,
+        systemPrompt: String,
+        maxTokens: Int,
+        stopWord: String,
+        isJsonMode: Boolean
+    ): Flow<Result<String>> {
+        return deepSeekClient.chatStreaming(
+            userMessage = message,
+            systemPrompt = systemPrompt,
+            maxTokens = maxTokens,
+            stopWord = stopWord,
+            isJsonMode = isJsonMode
+        )
     }
 }

@@ -9,7 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
@@ -37,15 +36,19 @@ internal class LLMViewModel @Inject constructor(
         _state.update { it.copy(stopWord = stopWord) }
     }
 
+    fun updateJsonMode(isJsonMode: Boolean) {
+        _state.update { it.copy(isJsonMode = isJsonMode) }
+    }
+
     fun sendMessage(message: String) {
         if (message.isBlank()) return
 
         val userMessage = ChatMessage(message = message, source = SourceType.USER)
-        val currentSystemPrompt = _state.value.systemPrompt
+        val currentState = _state.value
         
-        _state.update { currentState ->
-            currentState.copy(
-                messages = currentState.messages + userMessage,
+        _state.update { state ->
+            state.copy(
+                messages = state.messages + userMessage,
                 isLoading = true
             )
         }
@@ -54,7 +57,13 @@ internal class LLMViewModel @Inject constructor(
             val botMessageId = java.util.UUID.randomUUID().toString()
             var currentContent = ""
 
-            chatStreamingUseCase(message, currentSystemPrompt)
+            chatStreamingUseCase(
+                message = message,
+                systemPrompt = currentState.systemPrompt,
+                maxTokens = currentState.maxTokens,
+                stopWord = currentState.stopWord,
+                isJsonMode = currentState.isJsonMode
+            )
                 .onStart {
                     _state.update { it.copy(isLoading = false) }
                     val initialBotMessage = ChatMessage(

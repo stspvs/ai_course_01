@@ -10,7 +10,16 @@ data class ChatRequest(
     @SerializedName("max_tokens")
     val maxTokens: Int = 300,
     @SerializedName("stream")
-    val stream: Boolean = true
+    val stream: Boolean = true,
+    @SerializedName("response_format")
+    val responseFormat: ResponseFormat? = null,
+    @SerializedName("stop")
+    val stop: List<String>? = null
+)
+
+data class ResponseFormat(
+    @SerializedName("type")
+    val type: String // "text" or "json_object"
 )
 
 data class Message(

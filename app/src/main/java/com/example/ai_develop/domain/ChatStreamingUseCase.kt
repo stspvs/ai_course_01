@@ -7,10 +7,22 @@ import javax.inject.Inject
 class ChatStreamingUseCase @Inject constructor(
     private val repository: ChatRepository
 ) {
-    operator fun invoke(message: String, systemPrompt: String): Flow<Result<String>> {
+    operator fun invoke(
+        message: String,
+        systemPrompt: String,
+        maxTokens: Int,
+        stopWord: String,
+        isJsonMode: Boolean
+    ): Flow<Result<String>> {
         if (message.isBlank()) {
             return flowOf(Result.failure(IllegalArgumentException("Message cannot be empty")))
         }
-        return repository.chatStreaming(message, systemPrompt)
+        return repository.chatStreaming(
+            message = message,
+            systemPrompt = systemPrompt,
+            maxTokens = maxTokens,
+            stopWord = stopWord,
+            isJsonMode = isJsonMode
+        )
     }
 }

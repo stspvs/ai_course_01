@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,14 +28,16 @@ import com.example.ai_develop.presentation.SourceType
 @Composable
 internal fun ChatScreen(viewModel: LLMViewModel) {
     val state by viewModel.state.collectAsState()
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    
+    // Текст сообщения вынесен в родителя, чтобы сохраняться при смене табов
+    var chatInput by rememberSaveable { mutableStateOf("") }
     
     val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     Scaffold(
         bottomBar = {
             if (!isKeyboardVisible) {
-                // Светло-фиолетовый фон и темно-фиолетовая обводка
                 Surface(
                     color = Color(0xFFF3E5F5), 
                     border = BorderStroke(1.dp, Color(0xFF4A148C)),
@@ -72,13 +75,19 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
             when (selectedTab) {
                 0 -> ChatContent(
                     state = state,
-                    onSendMessage = { viewModel.sendMessage(it) }
+                    input = chatInput,
+                    onInputChange = { chatInput = it },
+                    onSendMessage = { 
+                        viewModel.sendMessage(it)
+                        chatInput = "" 
+                    }
                 )
                 1 -> SettingsContent(
                     state = state,
                     onUpdatePrompt = { viewModel.updateSystemPrompt(it) },
                     onUpdateMaxTokens = { viewModel.updateMaxTokens(it) },
-                    onUpdateStopWord = { viewModel.updateStopWord(it) }
+                    onUpdateStopWord = { viewModel.updateStopWord(it) },
+                    onUpdateJsonMode = { viewModel.updateJsonMode(it) }
                 )
             }
         }
@@ -90,7 +99,8 @@ internal fun SettingsContent(
     state: LLMStateModel,
     onUpdatePrompt: (String) -> Unit,
     onUpdateMaxTokens: (Int) -> Unit,
-    onUpdateStopWord: (String) -> Unit
+    onUpdateStopWord: (String) -> Unit,
+    onUpdateJsonMode: (Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -104,11 +114,10 @@ internal fun SettingsContent(
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        // Панель дополнительных параметров
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
+                .padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedTextField(
@@ -138,6 +147,23 @@ internal fun SettingsContent(
             )
         }
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = state.isJsonMode,
+                onCheckedChange = onUpdateJsonMode
+            )
+            Text(
+                text = "JSON Mode (требуется инструкция в промпте)",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+
         Text(
             text = "Системный промпт",
             style = MaterialTheme.typography.titleMedium,
@@ -161,9 +187,10 @@ internal fun SettingsContent(
 @Composable
 internal fun ChatContent(
     state: LLMStateModel,
+    input: String,
+    onInputChange: (String) -> Unit,
     onSendMessage: (String) -> Unit
 ) {
-    var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
     LaunchedEffect(state.messages.size, state.isLoading) {
@@ -225,7 +252,7 @@ internal fun ChatContent(
 
             OutlinedTextField(
                 value = input,
-                onValueChange = { input = it },
+                onValueChange = onInputChange,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Введите сообщение...") },
                 shape = RoundedCornerShape(24.dp),
@@ -243,7 +270,6 @@ internal fun ChatContent(
                 onClick = {
                     if (input.isNotBlank()) {
                         onSendMessage(input)
-                        input = ""
                     }
                 },
                 enabled = !state.isLoading,
@@ -307,5 +333,5 @@ private fun ChatScreenPreview() {
             ChatMessage(message = "Я DeepSeek.", source = SourceType.DEEPSEEK)
         )
     )
-    ChatContent(state = mockState, onSendMessage = {})
+    ChatContent(state = mockState, input = "", onInputChange = {}, onSendMessage = {})
 }
