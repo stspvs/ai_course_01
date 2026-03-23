@@ -27,7 +27,12 @@ android {
             localProperties.load(localPropertiesFile.inputStream())
         }
         val deepseekKey = localProperties.getProperty("DEEPSEEK_KEY") ?: ""
+        val yandexKey = localProperties.getProperty("YANDEX_KEY") ?: ""
+        val yandexFolderId = localProperties.getProperty("YANDEX_FOLDER_ID") ?: ""
+        
         buildConfigField("String", "DEEPSEEK_KEY", "\"$deepseekKey\"")
+        buildConfigField("String", "YANDEX_KEY", "\"$yandexKey\"")
+        buildConfigField("String", "YANDEX_FOLDER_ID", "\"$yandexFolderId\"")
     }
 
     buildTypes {

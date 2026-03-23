@@ -50,7 +50,8 @@ internal class DeepSeekClientAPI @Inject constructor(
         maxTokens: Int,
         temperature: Double,
         stopWord: String,
-        isJsonMode: Boolean
+        isJsonMode: Boolean,
+        model: String = "deepseek-chat"
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val apiMessages = mutableListOf<Message>()
@@ -58,14 +59,14 @@ internal class DeepSeekClientAPI @Inject constructor(
                 apiMessages.add(Message(role = "system", content = systemPrompt))
             }
             
-            // Добавляем всю историю чата
             chatHistory.forEach { msg ->
                 apiMessages.add(Message(role = msg.source.role, content = msg.message))
             }
 
-            val shouldEnableJson = isJsonMode && systemPrompt.contains("json", ignoreCase = true)
+            val shouldEnableJson = isJsonMode && (systemPrompt.contains("json", ignoreCase = true) || model.contains("reasoner"))
 
             val request = ChatRequest(
+                model = model,
                 messages = apiMessages,
                 maxTokens = maxTokens,
                 temperature = temperature,
@@ -98,7 +99,8 @@ internal class DeepSeekClientAPI @Inject constructor(
         maxTokens: Int,
         temperature: Double,
         stopWord: String,
-        isJsonMode: Boolean
+        isJsonMode: Boolean,
+        model: String = "deepseek-chat"
     ): Flow<Result<String>> = flow {
         try {
             val apiMessages = mutableListOf<Message>()
@@ -106,14 +108,14 @@ internal class DeepSeekClientAPI @Inject constructor(
                 apiMessages.add(Message(role = "system", content = systemPrompt))
             }
             
-            // Добавляем всю историю чата
             chatHistory.forEach { msg ->
                 apiMessages.add(Message(role = msg.source.role, content = msg.message))
             }
 
-            val shouldEnableJson = isJsonMode && systemPrompt.contains("json", ignoreCase = true)
+            val shouldEnableJson = isJsonMode && (systemPrompt.contains("json", ignoreCase = true) || model.contains("reasoner"))
 
             val request = ChatRequest(
+                model = model,
                 messages = apiMessages,
                 maxTokens = maxTokens,
                 temperature = temperature,

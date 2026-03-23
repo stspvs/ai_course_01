@@ -8,7 +8,8 @@ import javax.inject.Singleton
 
 @Singleton
 internal class DeepSeekRepository @Inject constructor(
-    private val deepSeekClient: DeepSeekClientAPI
+    private val deepSeekClient: DeepSeekClientAPI,
+    private val yandexClient: YandexClientAPI
 ) : ChatRepository {
 
     override suspend fun sendMessage(
@@ -19,14 +20,25 @@ internal class DeepSeekRepository @Inject constructor(
         stopWord: String,
         isJsonMode: Boolean
     ): Result<String> {
-        return deepSeekClient.sendMessage(
-            chatHistory = messages,
-            systemPrompt = systemPrompt,
-            maxTokens = maxTokens,
-            temperature = temperature,
-            stopWord = stopWord,
-            isJsonMode = isJsonMode
-        )
+        // Если системный промпт начинается с "yandex:", используем Яндекс GPT
+        return if (systemPrompt.trim().startsWith("yandex:", ignoreCase = true)) {
+            val actualPrompt = systemPrompt.trim().removePrefix("yandex:").trim()
+            yandexClient.sendMessage(
+                chatHistory = messages,
+                systemPrompt = actualPrompt,
+                maxTokens = maxTokens,
+                temperature = temperature
+            )
+        } else {
+            deepSeekClient.sendMessage(
+                chatHistory = messages,
+                systemPrompt = systemPrompt,
+                maxTokens = maxTokens,
+                temperature = temperature,
+                stopWord = stopWord,
+                isJsonMode = isJsonMode
+            )
+        }
     }
 
     override fun chatStreaming(
@@ -37,13 +49,24 @@ internal class DeepSeekRepository @Inject constructor(
         stopWord: String,
         isJsonMode: Boolean
     ): Flow<Result<String>> {
-        return deepSeekClient.chatStreaming(
-            chatHistory = messages,
-            systemPrompt = systemPrompt,
-            maxTokens = maxTokens,
-            temperature = temperature,
-            stopWord = stopWord,
-            isJsonMode = isJsonMode
-        )
+        // Если системный промпт начинается с "yandex:", используем Яндекс GPT
+        return if (systemPrompt.trim().startsWith("yandex:", ignoreCase = true)) {
+            val actualPrompt = systemPrompt.trim().removePrefix("yandex:").trim()
+            yandexClient.chatStreaming(
+                chatHistory = messages,
+                systemPrompt = actualPrompt,
+                maxTokens = maxTokens,
+                temperature = temperature
+            )
+        } else {
+            deepSeekClient.chatStreaming(
+                chatHistory = messages,
+                systemPrompt = systemPrompt,
+                maxTokens = maxTokens,
+                temperature = temperature,
+                stopWord = stopWord,
+                isJsonMode = isJsonMode
+            )
+        }
     }
 }
