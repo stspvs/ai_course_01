@@ -105,7 +105,7 @@ internal class LLMViewModel @Inject constructor(
                     val initialBotMessage = ChatMessage(
                         id = botMessageId,
                         message = "",
-                        source = SourceType.DEEPSEEK
+                        source = SourceType.ASSISTANT
                     )
                     _state.update { it.copy(messages = it.messages + initialBotMessage) }
                 }
@@ -143,7 +143,7 @@ internal class LLMViewModel @Inject constructor(
                 val botMessage = ChatMessage(
                     id = botMessageId,
                     message = finalMessage,
-                    source = SourceType.DEEPSEEK
+                    source = SourceType.ASSISTANT
                 )
                 _state.update { it.copy(messages = it.messages + botMessage) }
             }

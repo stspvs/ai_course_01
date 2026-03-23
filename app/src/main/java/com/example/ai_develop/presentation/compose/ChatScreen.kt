@@ -303,8 +303,15 @@ private fun LLMSelector(
     var providerExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
 
-    val providers = listOf("Yandex", "DeepSeek")
+    val providers = listOf("Yandex", "DeepSeek", "OpenRouter")
     val deepSeekModels = listOf("deepseek-chat", "deepseek-coder")
+    val openRouterModels = listOf(
+        "google/gemini-2.0-flash-001",
+        "anthropic/claude-3.5-sonnet",
+        "openai/gpt-4o",
+        "deepseek/deepseek-r1:free",
+        "meta-llama/llama-3.3-70b-instruct"
+    )
     val yandexModels = listOf(
         "yandexgpt-5.1/latest",
         "yandexgpt-lite/latest",
@@ -333,8 +340,13 @@ private fun LLMSelector(
             expanded = providerExpanded,
             onExpandedChange = { providerExpanded = it }
         ) {
+            val providerName = when(currentProvider) {
+                is LLMProvider.DeepSeek -> "DeepSeek"
+                is LLMProvider.Yandex -> "Yandex"
+                is LLMProvider.OpenRouter -> "OpenRouter"
+            }
             OutlinedTextField(
-                value = if (currentProvider is LLMProvider.DeepSeek) "DeepSeek" else "Yandex",
+                value = providerName,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Провайдер") },
@@ -353,10 +365,10 @@ private fun LLMSelector(
                     DropdownMenuItem(
                         text = { Text(provider) },
                         onClick = {
-                            if (provider == "DeepSeek") {
-                                onProviderChange(LLMProvider.DeepSeek(deepSeekModels.first()))
-                            } else {
-                                onProviderChange(LLMProvider.Yandex(yandexModels.first()))
+                            when (provider) {
+                                "DeepSeek" -> onProviderChange(LLMProvider.DeepSeek(deepSeekModels.first()))
+                                "OpenRouter" -> onProviderChange(LLMProvider.OpenRouter(openRouterModels.first()))
+                                else -> onProviderChange(LLMProvider.Yandex(yandexModels.first()))
                             }
                             providerExpanded = false
                         }
@@ -386,16 +398,19 @@ private fun LLMSelector(
                 expanded = modelExpanded,
                 onDismissRequest = { modelExpanded = false }
             ) {
-                val models =
-                    if (currentProvider is LLMProvider.DeepSeek) deepSeekModels else yandexModels
+                val models = when(currentProvider) {
+                    is LLMProvider.DeepSeek -> deepSeekModels
+                    is LLMProvider.OpenRouter -> openRouterModels
+                    is LLMProvider.Yandex -> yandexModels
+                }
                 models.forEach { model ->
                     DropdownMenuItem(
                         text = { Text(model) },
                         onClick = {
-                            if (currentProvider is LLMProvider.DeepSeek) {
-                                onProviderChange(LLMProvider.DeepSeek(model))
-                            } else {
-                                onProviderChange(LLMProvider.Yandex(model))
+                            when (currentProvider) {
+                                is LLMProvider.DeepSeek -> onProviderChange(LLMProvider.DeepSeek(model))
+                                is LLMProvider.OpenRouter -> onProviderChange(LLMProvider.OpenRouter(model))
+                                is LLMProvider.Yandex -> onProviderChange(LLMProvider.Yandex(model))
                             }
                             modelExpanded = false
                         }
@@ -461,9 +476,10 @@ internal fun ChatContent(
                     val loadingText = when (state.selectedProvider) {
                         is LLMProvider.DeepSeek -> "DeepSeek думает..."
                         is LLMProvider.Yandex -> "Yandex GPT думает..."
+                        is LLMProvider.OpenRouter -> "OpenRouter думает..."
                     }
                     MessageBubble(
-                        message = ChatMessage(message = loadingText, source = SourceType.DEEPSEEK),
+                        message = ChatMessage(message = loadingText, source = SourceType.ASSISTANT),
                         backgroundColor = Color(0xFFFFF59D)
                     )
                 }
@@ -606,7 +622,7 @@ private fun ChatScreenPreview() {
     val mockState = LLMStateModel(
         messages = listOf(
             ChatMessage(message = "Привет!", source = SourceType.USER),
-            ChatMessage(message = "Я DeepSeek.", source = SourceType.DEEPSEEK)
+            ChatMessage(message = "Я DeepSeek.", source = SourceType.ASSISTANT)
         )
     )
     ChatContent(

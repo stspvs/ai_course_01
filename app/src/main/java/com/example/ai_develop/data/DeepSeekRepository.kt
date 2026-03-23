@@ -10,7 +10,8 @@ import javax.inject.Singleton
 @Singleton
 internal class DeepSeekRepository @Inject constructor(
     private val deepSeekClient: DeepSeekClientAPI,
-    private val yandexClient: YandexClientAPI
+    private val yandexClient: YandexClientAPI,
+    private val openRouterClient: OpenRouterClientAPI
 ) : ChatRepository {
 
     override fun chatStreaming(
@@ -40,6 +41,17 @@ internal class DeepSeekRepository @Inject constructor(
                     systemPrompt = systemPrompt,
                     maxTokens = maxTokens,
                     temperature = temperature,
+                    model = provider.model
+                )
+            }
+            is LLMProvider.OpenRouter -> {
+                openRouterClient.chatStreaming(
+                    chatHistory = messages,
+                    systemPrompt = systemPrompt,
+                    maxTokens = maxTokens,
+                    temperature = temperature,
+                    stopWord = stopWord,
+                    isJsonMode = isJsonMode,
                     model = provider.model
                 )
             }

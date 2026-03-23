@@ -24,6 +24,6 @@ data class ChatMessage(
 
 enum class SourceType(val role: String) {
     USER("user"),
-    DEEPSEEK("assistant"),
+    ASSISTANT("assistant"),
     SYSTEM("system"),
 }

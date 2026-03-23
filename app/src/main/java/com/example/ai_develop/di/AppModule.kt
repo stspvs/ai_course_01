@@ -4,6 +4,7 @@ import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.DeepSeekClientAPI
 import com.example.ai_develop.data.DeepSeekRepository
 import com.example.ai_develop.data.YandexClientAPI
+import com.example.ai_develop.data.OpenRouterClientAPI
 import com.example.ai_develop.domain.ChatRepository
 import dagger.Module
 import dagger.Provides
@@ -28,6 +29,12 @@ internal object AppModule {
             apiKey = BuildConfig.YANDEX_KEY,
             folderId = BuildConfig.YANDEX_FOLDER_ID
         )
+    }
+
+    @Provides
+    @Singleton
+    fun provideOpenRouterClientAPI(): OpenRouterClientAPI {
+        return OpenRouterClientAPI(BuildConfig.OPENROUTER_KEY)
     }
 
     @Provides

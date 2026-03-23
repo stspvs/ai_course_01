@@ -10,4 +10,8 @@ sealed class LLMProvider {
     data class Yandex(
         override val model: String = "yandexgpt/latest"
     ) : LLMProvider()
+
+    data class OpenRouter(
+        override val model: String = "google/gemini-2.0-flash-001"
+    ) : LLMProvider()
 }
