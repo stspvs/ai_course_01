@@ -8,13 +8,6 @@ import retrofit2.http.POST
 import retrofit2.http.Streaming
 
 internal interface YandexApi {
-    @POST("foundationModels/v1/completion")
-    suspend fun sendMessage(
-        @Header("Authorization") auth: String,
-        @Header("x-folder-id") folderId: String,
-        @Body request: YandexChatRequest
-    ): Response<YandexChatResponse>
-
     @Streaming
     @POST("foundationModels/v1/completion")
     suspend fun chatStreaming(

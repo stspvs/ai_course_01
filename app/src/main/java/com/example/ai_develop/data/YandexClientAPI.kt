@@ -6,7 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -36,51 +35,6 @@ internal class YandexClientAPI @Inject constructor(
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(YandexApi::class.java)
-    }
-
-    suspend fun sendMessage(
-        chatHistory: List<ChatMessage>,
-        systemPrompt: String,
-        maxTokens: Int,
-        temperature: Double,
-        modelUri: String = "gpt://\$folderId/yandexgpt/latest"
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val yandexMessages = mutableListOf<YandexMessage>()
-            if (systemPrompt.isNotBlank()) {
-                yandexMessages.add(YandexMessage(role = "system", text = systemPrompt))
-            }
-
-            chatHistory.forEach { msg ->
-                yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message))
-            }
-
-            val request = YandexChatRequest(
-                modelUri = modelUri.replace("\$folderId", folderId),
-                completionOptions = YandexCompletionOptions(
-                    stream = false,
-                    temperature = temperature,
-                    maxTokens = maxTokens.toString()
-                ),
-                messages = yandexMessages
-            )
-
-            val response = api.sendMessage("Api-Key $apiKey", folderId, request)
-
-            if (response.isSuccessful) {
-                val content = response.body()?.result?.alternatives?.firstOrNull()?.message?.text
-                if (content != null) {
-                    Result.success(content)
-                } else {
-                    Result.failure(Exception("Empty response body"))
-                }
-            } else {
-                val errorBody = response.errorBody()?.string()
-                Result.failure(Exception("HTTP Error \${response.code()}: \$errorBody"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
     }
 
     fun chatStreaming(

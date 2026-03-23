@@ -3,7 +3,6 @@ package com.example.ai_develop.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.domain.ChatStreamingUseCase
-import com.example.ai_develop.domain.SendMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,7 +17,6 @@ import javax.inject.Inject
 
 @HiltViewModel
 internal class LLMViewModel @Inject constructor(
-    private val sendMessageUseCase: SendMessageUseCase,
     private val chatStreamingUseCase: ChatStreamingUseCase
 ) : ViewModel() {
 

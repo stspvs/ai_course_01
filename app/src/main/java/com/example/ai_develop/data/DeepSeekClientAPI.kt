@@ -6,7 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -42,55 +41,6 @@ internal class DeepSeekClientAPI @Inject constructor(
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(DeepSeekApi::class.java)
-    }
-
-    suspend fun sendMessage(
-        chatHistory: List<ChatMessage>, 
-        systemPrompt: String,
-        maxTokens: Int,
-        temperature: Double,
-        stopWord: String,
-        isJsonMode: Boolean,
-        model: String = "deepseek-chat"
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val apiMessages = mutableListOf<Message>()
-            if (systemPrompt.isNotBlank()) {
-                apiMessages.add(Message(role = "system", content = systemPrompt))
-            }
-            
-            chatHistory.forEach { msg ->
-                apiMessages.add(Message(role = msg.source.role, content = msg.message))
-            }
-
-            val shouldEnableJson = isJsonMode && (systemPrompt.contains("json", ignoreCase = true) || model.contains("reasoner"))
-
-            val request = ChatRequest(
-                model = model,
-                messages = apiMessages,
-                maxTokens = maxTokens,
-                temperature = temperature,
-                stream = false,
-                responseFormat = if (shouldEnableJson) ResponseFormat("json_object") else null,
-                stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
-            )
-            
-            val response = api.sendMessage(request)
-
-            if (response.isSuccessful) {
-                val content = response.body()?.choices?.firstOrNull()?.message?.content
-                if (content != null) {
-                    Result.success(content)
-                } else {
-                    Result.failure(Exception("Empty response body"))
-                }
-            } else {
-                val errorBody = response.errorBody()?.string()
-                Result.failure(Exception("HTTP Error ${response.code()}: $errorBody"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
     }
 
     fun chatStreaming(
