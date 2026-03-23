@@ -14,7 +14,8 @@ class ChatStreamingUseCase @Inject constructor(
         maxTokens: Int,
         temperature: Double,
         stopWord: String,
-        isJsonMode: Boolean
+        isJsonMode: Boolean,
+        provider: LLMProvider
     ): Flow<Result<String>> {
         if (messages.isEmpty() || messages.last().message.isBlank()) {
             return flowOf(Result.failure(IllegalArgumentException("Last message cannot be empty")))
@@ -25,7 +26,8 @@ class ChatStreamingUseCase @Inject constructor(
             maxTokens = maxTokens,
             temperature = temperature,
             stopWord = stopWord,
-            isJsonMode = isJsonMode
+            isJsonMode = isJsonMode,
+            provider = provider
         )
     }
 }

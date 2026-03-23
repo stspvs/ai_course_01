@@ -1,6 +1,7 @@
 package com.example.ai_develop.data
 
 import com.example.ai_develop.domain.ChatRepository
+import com.example.ai_develop.domain.LLMProvider
 import com.example.ai_develop.presentation.ChatMessage
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -18,26 +19,30 @@ internal class DeepSeekRepository @Inject constructor(
         maxTokens: Int,
         temperature: Double,
         stopWord: String,
-        isJsonMode: Boolean
+        isJsonMode: Boolean,
+        provider: LLMProvider
     ): Flow<Result<String>> {
-        // Если системный промпт начинается с "yandex:", используем Яндекс GPT
-        return if (systemPrompt.trim().startsWith("yandex:", ignoreCase = true)) {
-            val actualPrompt = systemPrompt.trim().removePrefix("yandex:").trim()
-            yandexClient.chatStreaming(
-                chatHistory = messages,
-                systemPrompt = actualPrompt,
-                maxTokens = maxTokens,
-                temperature = temperature
-            )
-        } else {
-            deepSeekClient.chatStreaming(
-                chatHistory = messages,
-                systemPrompt = systemPrompt,
-                maxTokens = maxTokens,
-                temperature = temperature,
-                stopWord = stopWord,
-                isJsonMode = isJsonMode
-            )
+        return when (provider) {
+            is LLMProvider.DeepSeek -> {
+                deepSeekClient.chatStreaming(
+                    chatHistory = messages,
+                    systemPrompt = systemPrompt,
+                    maxTokens = maxTokens,
+                    temperature = temperature,
+                    stopWord = stopWord,
+                    isJsonMode = isJsonMode,
+                    model = provider.model
+                )
+            }
+            is LLMProvider.Yandex -> {
+                yandexClient.chatStreaming(
+                    chatHistory = messages,
+                    systemPrompt = systemPrompt,
+                    maxTokens = maxTokens,
+                    temperature = temperature,
+                    model = provider.model
+                )
+            }
         }
     }
 }

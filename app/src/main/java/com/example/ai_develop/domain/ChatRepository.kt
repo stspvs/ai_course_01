@@ -10,6 +10,7 @@ interface ChatRepository {
         maxTokens: Int,
         temperature: Double,
         stopWord: String,
-        isJsonMode: Boolean
+        isJsonMode: Boolean,
+        provider: LLMProvider
     ): Flow<Result<String>>
 }

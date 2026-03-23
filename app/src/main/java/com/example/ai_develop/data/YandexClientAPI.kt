@@ -42,7 +42,7 @@ internal class YandexClientAPI @Inject constructor(
         systemPrompt: String,
         maxTokens: Int,
         temperature: Double,
-        modelUri: String = "gpt://\$folderId/yandexgpt/latest"
+        model: String
     ): Flow<Result<String>> = flow {
         try {
             val yandexMessages = mutableListOf<YandexMessage>()
@@ -54,12 +54,16 @@ internal class YandexClientAPI @Inject constructor(
                 yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message))
             }
 
+            // Формируем modelUri напрямую, используя folderId
+            val modelPath = if (model.contains("/")) model else "$model/latest"
+            val fullModelUri = "gpt://$folderId/$modelPath"
+
             val request = YandexChatRequest(
-                modelUri = modelUri.replace("\$folderId", folderId),
+                modelUri = fullModelUri,
                 completionOptions = YandexCompletionOptions(
                     stream = true,
                     temperature = temperature,
-                    maxTokens = maxTokens.toString()
+                    maxTokens = maxTokens.toLong()
                 ),
                 messages = yandexMessages
             )
@@ -89,8 +93,8 @@ internal class YandexClientAPI @Inject constructor(
                     emit(Result.failure(Exception("Empty response body")))
                 }
             } else {
-                val errorBody = response.errorBody()?.string()
-                emit(Result.failure(Exception("HTTP Error \${response.code()}: \$errorBody")))
+                val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                emit(Result.failure(Exception("HTTP Error ${response.code()}: $errorBody")))
             }
         } catch (e: Exception) {
             emit(Result.failure(e))

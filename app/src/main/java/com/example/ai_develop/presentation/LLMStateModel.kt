@@ -1,5 +1,6 @@
 package com.example.ai_develop.presentation
 
+import com.example.ai_develop.domain.LLMProvider
 import java.util.UUID
 
 data class LLMStateModel(
@@ -9,7 +10,8 @@ data class LLMStateModel(
     val maxTokens: Int = 300,
     val temperature: Double = 1.0,
     val stopWord: String = "",
-    val isJsonMode: Boolean = false
+    val isJsonMode: Boolean = false,
+    val selectedProvider: LLMProvider = LLMProvider.DeepSeek()
 )
 
 data class ChatMessage(

@@ -3,6 +3,7 @@ package com.example.ai_develop.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.domain.ChatStreamingUseCase
+import com.example.ai_develop.domain.LLMProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,6 +46,10 @@ internal class LLMViewModel @Inject constructor(
         _state.update { it.copy(isJsonMode = isJsonMode) }
     }
 
+    fun updateProvider(provider: LLMProvider) {
+        _state.update { it.copy(selectedProvider = provider) }
+    }
+
     fun clearChat() {
         currentJob?.cancel()
         _state.update { it.copy(messages = emptyList(), isLoading = false) }
@@ -76,7 +81,8 @@ internal class LLMViewModel @Inject constructor(
                 maxTokens = currentState.maxTokens,
                 temperature = currentState.temperature,
                 stopWord = currentState.stopWord,
-                isJsonMode = currentState.isJsonMode
+                isJsonMode = currentState.isJsonMode,
+                provider = currentState.selectedProvider
             )
                 .onStart {
                     _state.update { it.copy(isLoading = false) }
