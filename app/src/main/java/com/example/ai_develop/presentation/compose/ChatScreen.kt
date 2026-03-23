@@ -300,11 +300,11 @@ private fun LLMSelector(
     var providerExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
 
-    val providers = listOf("Yandex","DeepSeek")
+    val providers = listOf("Yandex", "DeepSeek")
     val deepSeekModels = listOf("deepseek-chat", "deepseek-coder")
     val yandexModels = listOf(
         "yandexgpt-5.1/latest",
-        "yandexgpt-lite/latest", 
+        "yandexgpt-lite/latest",
         "yandexgpt/latest",
         "qwen3-0.6b/latest",
         "qwq-32b/latest",
