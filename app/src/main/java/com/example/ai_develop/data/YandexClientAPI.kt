@@ -116,6 +116,7 @@ internal class YandexClientAPI @Inject constructor(
             val body = response.body()
             if (body != null) {
                 body.source().use { source ->
+                    var lastTextLength = 0
                     while (!source.exhausted()) {
                         val line = source.readUtf8Line() ?: break
                         if (line.isBlank()) continue
@@ -134,9 +135,13 @@ internal class YandexClientAPI @Inject constructor(
                                 }
                             } else {
                                 val chunk = gson.fromJson(line, YandexStreamResponse::class.java)
-                                val content = chunk.result.alternatives.firstOrNull()?.message?.text
-                                if (content != null) {
-                                    collector.emit(Result.success(content))
+                                val fullText = chunk.result.alternatives.firstOrNull()?.message?.text
+                                if (fullText != null) {
+                                    if (fullText.length > lastTextLength) {
+                                        val delta = fullText.substring(lastTextLength)
+                                        lastTextLength = fullText.length
+                                        collector.emit(Result.success(delta))
+                                    }
                                 }
                             }
                         } catch (e: Exception) {

@@ -6,6 +6,8 @@ import java.util.UUID
 data class LLMStateModel(
     val messages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
+    val isStreamingEnabled: Boolean = true,
+    val sendFullHistory: Boolean = true,
     val systemPrompt: String = "You are a helpful assistant.",
     val maxTokens: Int = 3000,
     val temperature: Double = 1.0,

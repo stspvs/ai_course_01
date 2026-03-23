@@ -128,7 +128,9 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                         viewModel.sendMessage(it)
                         chatInput = ""
                     },
-                    onClearChat = { viewModel.clearChat() }
+                    onClearChat = { viewModel.clearChat() },
+                    onToggleStreaming = { viewModel.updateStreamingEnabled(it) },
+                    onToggleHistory = { viewModel.updateSendFullHistory(it) }
                 )
 
                 1 -> SettingsContent(
@@ -410,7 +412,9 @@ internal fun ChatContent(
     input: String,
     onInputChange: (String) -> Unit,
     onSendMessage: (String) -> Unit,
-    onClearChat: () -> Unit
+    onClearChat: () -> Unit,
+    onToggleStreaming: (Boolean) -> Unit,
+    onToggleHistory: (Boolean) -> Unit
 ) {
     val listState = rememberLazyListState()
 
@@ -467,6 +471,47 @@ internal fun ChatContent(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
+
+        // Control Panel
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End
+        ) {
+            // Streaming toggle
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (state.isStreamingEnabled) "Поток: ВКЛ" else "Поток: ВЫКЛ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.DarkGray
+                )
+                IconButton(
+                    onClick = { onToggleStreaming(!state.isStreamingEnabled) },
+                    modifier = Modifier.height(32.dp).width(32.dp)
+                ) {
+                    Text(text = if (state.isStreamingEnabled) "🌊" else "📄", fontSize = 16.sp)
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // History toggle
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (state.sendFullHistory) "История: ВСЯ" else "История: ПОСЛ.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.DarkGray
+                )
+                IconButton(
+                    onClick = { onToggleHistory(!state.sendFullHistory) },
+                    modifier = Modifier.height(32.dp).width(32.dp)
+                ) {
+                    Text(text = if (state.sendFullHistory) "📚" else "🎯", fontSize = 16.sp)
+                }
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -569,5 +614,7 @@ private fun ChatScreenPreview() {
         input = "",
         onInputChange = {},
         onSendMessage = {},
-        onClearChat = {})
+        onClearChat = {},
+        onToggleStreaming = {},
+        onToggleHistory = {})
 }

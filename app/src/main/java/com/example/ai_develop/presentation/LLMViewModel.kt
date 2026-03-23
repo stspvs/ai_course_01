@@ -50,6 +50,14 @@ internal class LLMViewModel @Inject constructor(
         _state.update { it.copy(selectedProvider = provider) }
     }
 
+    fun updateStreamingEnabled(isEnabled: Boolean) {
+        _state.update { it.copy(isStreamingEnabled = isEnabled) }
+    }
+
+    fun updateSendFullHistory(sendFull: Boolean) {
+        _state.update { it.copy(sendFullHistory = sendFull) }
+    }
+
     fun clearChat() {
         currentJob?.cancel()
         _state.update { it.copy(messages = emptyList(), isLoading = false) }
@@ -75,8 +83,14 @@ internal class LLMViewModel @Inject constructor(
             val botMessageId = java.util.UUID.randomUUID().toString()
             var currentContent = ""
 
-            chatStreamingUseCase(
-                messages = currentState.messages,
+            val messagesToSend = if (currentState.sendFullHistory) {
+                currentState.messages + userMessage
+            } else {
+                listOf(userMessage)
+            }
+
+            val flow = chatStreamingUseCase(
+                messages = messagesToSend,
                 systemPrompt = currentState.systemPrompt,
                 maxTokens = currentState.maxTokens,
                 temperature = currentState.temperature,
@@ -84,7 +98,9 @@ internal class LLMViewModel @Inject constructor(
                 isJsonMode = currentState.isJsonMode,
                 provider = currentState.selectedProvider
             )
-                .onStart {
+
+            if (currentState.isStreamingEnabled) {
+                flow.onStart {
                     _state.update { it.copy(isLoading = false) }
                     val initialBotMessage = ChatMessage(
                         id = botMessageId,
@@ -105,6 +121,32 @@ internal class LLMViewModel @Inject constructor(
                         updateBotMessage(botMessageId, currentContent + "\n[$errorMessage]")
                     }
                 }
+            } else {
+                var fullResponse = ""
+                var errorOccurred: Throwable? = null
+                
+                flow.collect { result ->
+                    result.onSuccess { chunk ->
+                        fullResponse += chunk
+                    }.onFailure { error ->
+                        errorOccurred = error
+                    }
+                }
+                
+                _state.update { it.copy(isLoading = false) }
+                val finalMessage = if (errorOccurred != null) {
+                    fullResponse + "\n[Ошибка: ${errorOccurred.message}]"
+                } else {
+                    fullResponse
+                }
+                
+                val botMessage = ChatMessage(
+                    id = botMessageId,
+                    message = finalMessage,
+                    source = SourceType.DEEPSEEK
+                )
+                _state.update { it.copy(messages = it.messages + botMessage) }
+            }
         }
     }
 
