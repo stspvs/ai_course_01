@@ -15,4 +15,12 @@ internal interface YandexApi {
         @Header("x-folder-id") folderId: String,
         @Body request: YandexChatRequest
     ): Response<ResponseBody>
+
+    @Streaming
+    @POST("v1/chat/completions")
+    suspend fun openAiChatStreaming(
+        @Header("Authorization") auth: String,
+        @Header("x-folder-id") folderId: String,
+        @Body request: OpenAiChatRequest
+    ): Response<ResponseBody>
 }

@@ -48,3 +48,24 @@ data class YandexStreamResponse(
     @SerializedName("result")
     val result: YandexResult
 )
+
+// OpenAI-compatible models for Qwen/QWQ
+data class OpenAiChatRequest(
+    @SerializedName("model")
+    val model: String,
+    @SerializedName("messages")
+    val messages: List<OpenAiMessage>,
+    @SerializedName("max_tokens")
+    val maxTokens: Int,
+    @SerializedName("temperature")
+    val temperature: Double,/*
+    @SerializedName("stream")
+    val stream: Boolean*/
+)
+
+data class OpenAiMessage(
+    @SerializedName("role")
+    val role: String,
+    @SerializedName("content")
+    val content: String
+)

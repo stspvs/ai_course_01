@@ -45,59 +45,111 @@ internal class YandexClientAPI @Inject constructor(
         model: String
     ): Flow<Result<String>> = flow {
         try {
-            val yandexMessages = mutableListOf<YandexMessage>()
-            if (systemPrompt.isNotBlank()) {
-                yandexMessages.add(YandexMessage(role = "system", text = systemPrompt))
-            }
-
-            chatHistory.forEach { msg ->
-                yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message))
-            }
-
-            // Формируем modelUri напрямую, используя folderId
-            val modelPath = if (model.contains("/")) model else "$model/latest"
-            val fullModelUri = "gpt://$folderId/$modelPath"
-
-            val request = YandexChatRequest(
-                modelUri = fullModelUri,
-                completionOptions = YandexCompletionOptions(
-                    stream = true,
-                    temperature = temperature,
-                    maxTokens = maxTokens.toLong()
-                ),
-                messages = yandexMessages
-            )
-
-            val response = api.chatStreaming("Api-Key $apiKey", folderId, request)
-
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body != null) {
-                    body.source().use { source ->
-                        while (!source.exhausted()) {
-                            val line = source.readUtf8Line() ?: break
-                            if (line.isBlank()) continue
-                            
-                            try {
-                                val chunk = gson.fromJson(line, YandexStreamResponse::class.java)
-                                val content = chunk.result.alternatives.firstOrNull()?.message?.text
-                                if (content != null) {
-                                    emit(Result.success(content))
-                                }
-                            } catch (e: Exception) {
-                                // Skip invalid chunks or partial JSON
-                            }
-                        }
-                    }
-                } else {
-                    emit(Result.failure(Exception("Empty response body")))
+            // Если модель — одна из Qwen/QWQ, используем OpenAI-совместимый эндпоинт
+            if (!model.contains("yandex")) {
+                val openAiMessages = mutableListOf<OpenAiMessage>()
+                if (systemPrompt.isNotBlank()) {
+                    openAiMessages.add(OpenAiMessage(role = "system", content = systemPrompt))
                 }
+                chatHistory.forEach { msg ->
+                    openAiMessages.add(OpenAiMessage(role = msg.source.role, content = msg.message))
+                }
+
+                // Извлекаем короткое имя модели
+                val shortModelName = if (model.startsWith("gpt://")) {
+                    model.substringBeforeLast("/").substringAfterLast("/")
+                } else {
+                    model
+                }
+
+                val request = OpenAiChatRequest(
+                    model = shortModelName,
+                    messages = openAiMessages,
+                    maxTokens = maxTokens,
+                    temperature = temperature,
+                    //stream = true
+                )
+
+                val response = api.openAiChatStreaming("Api-Key $apiKey", folderId, request)
+                handleStreamResponse(response, this, true)
             } else {
-                val errorBody = response.errorBody()?.string() ?: "Unknown error"
-                emit(Result.failure(Exception("HTTP Error ${response.code()}: $errorBody")))
+                // Стандартный путь для YandexGPT
+                val yandexMessages = mutableListOf<YandexMessage>()
+                if (systemPrompt.isNotBlank()) {
+                    yandexMessages.add(YandexMessage(role = "system", text = systemPrompt))
+                }
+                chatHistory.forEach { msg ->
+                    yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message))
+                }
+
+                val fullModelUri = if (model.startsWith("gpt://")) {
+                    model
+                } else {
+                    val modelPath = if (model.contains("/")) model else "$model/latest"
+                    "gpt://$folderId/$modelPath"
+                }
+
+                val request = YandexChatRequest(
+                    modelUri = fullModelUri,
+                    completionOptions = YandexCompletionOptions(
+                        stream = true,
+                        temperature = temperature,
+                        maxTokens = maxTokens.toLong()
+                    ),
+                    messages = yandexMessages
+                )
+
+                val response = api.chatStreaming("Api-Key $apiKey", folderId, request)
+                handleStreamResponse(response, this, false)
             }
         } catch (e: Exception) {
             emit(Result.failure(e))
         }
     }.flowOn(Dispatchers.IO)
+
+    private suspend fun handleStreamResponse(
+        response: retrofit2.Response<okhttp3.ResponseBody>,
+        collector: kotlinx.coroutines.flow.FlowCollector<Result<String>>,
+        isOpenAiFormat: Boolean
+    ) {
+        if (response.isSuccessful) {
+            val body = response.body()
+            if (body != null) {
+                body.source().use { source ->
+                    while (!source.exhausted()) {
+                        val line = source.readUtf8Line() ?: break
+                        if (line.isBlank()) continue
+                        
+                        try {
+                            if (isOpenAiFormat) {
+                                if (line.startsWith("data: ")) {
+                                    val data = line.substring(6)
+                                    if (data.trim() == "[DONE]") break
+                                    
+                                    val chunk = gson.fromJson(data, ChatStreamResponse::class.java)
+                                    val content = chunk.choices.firstOrNull()?.delta?.content
+                                    if (content != null) {
+                                        collector.emit(Result.success(content))
+                                    }
+                                }
+                            } else {
+                                val chunk = gson.fromJson(line, YandexStreamResponse::class.java)
+                                val content = chunk.result.alternatives.firstOrNull()?.message?.text
+                                if (content != null) {
+                                    collector.emit(Result.success(content))
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Skip invalid chunks
+                        }
+                    }
+                }
+            } else {
+                collector.emit(Result.failure(Exception("Empty response body")))
+            }
+        } else {
+            val errorBody = response.errorBody()?.string() ?: "Unknown error"
+            collector.emit(Result.failure(Exception("HTTP Error ${response.code()}: $errorBody")))
+        }
+    }
 }
