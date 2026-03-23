@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -538,16 +539,18 @@ private fun MessageBubble(
             tonalElevation = 2.dp,
             shadowElevation = 1.dp
         ) {
-            Text(
-                text = message.message,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                color = Color.Black,
-                style = if (backgroundColor != null) {
-                    MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic)
-                } else {
-                    MaterialTheme.typography.bodyLarge
-                }
-            )
+            SelectionContainer {
+                Text(
+                    text = message.message,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    color = Color.Black,
+                    style = if (backgroundColor != null) {
+                        MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic)
+                    } else {
+                        MaterialTheme.typography.bodyLarge
+                    }
+                )
+            }
         }
     }
 }
