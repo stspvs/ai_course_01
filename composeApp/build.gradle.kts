@@ -32,6 +32,16 @@ kotlin {
                     static = (static ?: mutableListOf()).apply {
                         add(projectDirPath)
                     }
+                    // Корректная конфигурация прокси для WASM/JS
+                    proxy = mutableListOf(
+                        KotlinWebpackConfig.DevServer.Proxy(
+                            context = mutableListOf("/yandex-api"),
+                            target = "https://llm.api.cloud.yandex.net",
+                            pathRewrite = mutableMapOf("^/yandex-api" to ""),
+                            secure = true,
+                            changeOrigin = true
+                        )
+                    )
                 }
             }
         }
@@ -49,7 +59,6 @@ kotlin {
                 implementation(compose.components.uiToolingPreview)
                 implementation(libs.androidx.lifecycle.viewmodel)
                 implementation(libs.androidx.lifecycle.runtime.compose)
-                // implementation(libs.androidx.collection)
                 
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.serialization.json)
@@ -128,7 +137,6 @@ compose.desktop {
     }
 }
 
-// Читаем local.properties
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -152,7 +160,3 @@ buildConfig {
 dependencies {
     debugImplementation(compose.uiTooling)
 }
-
-// configurations.all {
-//    resolutionStrategy.force(libs.androidx.collection)
-// }

@@ -41,6 +41,7 @@ class KtorChatRepository(
             val url: String
             val headers = mutableMapOf<String, String>()
             val body: Any
+            val platform = getPlatform()
 
             when (provider) {
                 is LLMProvider.DeepSeek -> {
@@ -60,7 +61,9 @@ class KtorChatRepository(
                     )
                 }
                 is LLMProvider.Yandex -> {
-                    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+                    val baseUrl = if (platform.isWeb) "/yandex-api" else "https://llm.api.cloud.yandex.net"
+                    url = "$baseUrl/foundationModels/v1/completion"
+                    
                     headers["Authorization"] = "Api-Key $yandexKey"
                     headers["x-folder-id"] = yandexFolderId
                     val yandexMessages = mutableListOf<YandexMessage>()
@@ -112,12 +115,9 @@ class KtorChatRepository(
 
                         try {
                             if (provider is LLMProvider.Yandex) {
-                                // Yandex возвращает либо YandexStreamResponse, либо YandexResponse
-                                // В режиме стриминга это обычно YandexStreamResponse в каждой строке
                                 val chunk = try {
                                     json.decodeFromString<YandexStreamResponse>(trimmedLine)
                                 } catch (e: Exception) {
-                                    // Если не удалось как стрим, пробуем как обычный ответ
                                     val resp = json.decodeFromString<YandexResponse>(trimmedLine)
                                     YandexStreamResponse(result = resp.result ?: YandexResult())
                                 }
@@ -132,19 +132,17 @@ class KtorChatRepository(
                                         lastFullText = currentFullText
                                         emit(Result.success(delta))
                                     } else if (lastFullText.isEmpty()) {
-                                         // Первый чанк
                                          lastFullText = currentFullText
                                          emit(Result.success(currentFullText))
                                     }
                                 }
                             } else {
-                                // Обработка OpenAI-совместимых ответов (DeepSeek, OpenRouter)
                                 val jsonData = when {
                                     trimmedLine.startsWith("data:") -> {
                                         val content = trimmedLine.substringAfter("data:").trim()
                                         if (content == "[DONE]") null else content
                                     }
-                                    trimmedLine.startsWith("{") -> trimmedLine // Полный JSON ответ
+                                    trimmedLine.startsWith("{") -> trimmedLine 
                                     else -> null
                                 }
 
@@ -169,7 +167,7 @@ class KtorChatRepository(
                                 }
                             }
                         } catch (e: Exception) {
-                            // Игнорируем ошибки парсинга неполных JSON строк
+                            // Ignore partial JSONs
                         }
                     }
                 } else {
