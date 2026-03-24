@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.domain.ChatStreamingUseCase
 import com.example.ai_develop.domain.LLMProvider
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,30 +23,76 @@ class LLMViewModel(
     private val _state = MutableStateFlow(LLMStateModel())
     val state: StateFlow<LLMStateModel> = _state.asStateFlow()
 
+    private val agentManager = AgentManager()
     private var currentJob: Job? = null
 
-    fun updateSystemPrompt(prompt: String) {
-        _state.update { it.copy(systemPrompt = prompt) }
+    val agentTemplates: List<AgentTemplate> = agentManager.templates
+
+    // --- Управление агентами ---
+
+    fun createAgent() {
+        val currentProvider = _state.value.selectedAgent?.provider ?: LLMProvider.Yandex()
+        val newAgent = agentManager.createDefaultAgent(currentProvider)
+        _state.update { it.copy(
+            agents = it.agents + newAgent,
+            selectedAgentId = newAgent.id 
+        ) }
     }
 
-    fun updateMaxTokens(maxTokens: Int) {
-        _state.update { it.copy(maxTokens = maxTokens) }
+    fun updateAgent(
+        agentId: String,
+        name: String,
+        systemPrompt: String,
+        temperature: Double,
+        provider: LLMProvider,
+        stopWord: String,
+        maxTokens: Int
+    ) {
+        _state.update { currentState ->
+            val updatedAgents = currentState.agents.map { agent ->
+                if (agent.id == agentId) {
+                    agentManager.updateAgent(agent, name, systemPrompt, temperature, provider, stopWord, maxTokens)
+                } else agent
+            }
+            currentState.copy(agents = updatedAgents)
+        }
     }
 
-    fun updateTemperature(temperature: Double) {
-        _state.update { it.copy(temperature = temperature) }
+    fun duplicateAgent(agentId: String) {
+        if (agentId == GENERAL_CHAT_ID) return // Не дублируем общий чат (или можно разрешить, но обычно не нужно)
+        
+        _state.update { currentState ->
+            val agentToDuplicate = currentState.agents.find { it.id == agentId }
+            if (agentToDuplicate != null) {
+                val duplicatedAgent = agentToDuplicate.copy(
+                    id = Uuid.random().toString(),
+                    name = "${agentToDuplicate.name} (копия)",
+                    messages = emptyList(), 
+                    totalTokensUsed = 0
+                )
+                currentState.copy(
+                    agents = currentState.agents + duplicatedAgent,
+                    selectedAgentId = duplicatedAgent.id
+                )
+            } else {
+                currentState
+            }
+        }
     }
 
-    fun updateStopWord(stopWord: String) {
-        _state.update { it.copy(stopWord = stopWord) }
+    fun deleteAgent(agentId: String) {
+        if (agentId == GENERAL_CHAT_ID) return // Запрет удаления общего чата
+        
+        _state.update { currentState ->
+            val updatedAgents = currentState.agents.filter { it.id != agentId }
+            val newSelectedId = if (currentState.selectedAgentId == agentId) GENERAL_CHAT_ID else currentState.selectedAgentId
+            currentState.copy(agents = updatedAgents, selectedAgentId = newSelectedId)
+        }
     }
 
-    fun updateJsonMode(isJsonMode: Boolean) {
-        _state.update { it.copy(isJsonMode = isJsonMode) }
-    }
-
-    fun updateProvider(provider: LLMProvider) {
-        _state.update { it.copy(selectedProvider = provider) }
+    fun selectAgent(agentId: String?) {
+        currentJob?.cancel()
+        _state.update { it.copy(selectedAgentId = agentId ?: GENERAL_CHAT_ID, isLoading = false) }
     }
 
     fun updateStreamingEnabled(isEnabled: Boolean) {
@@ -60,22 +105,42 @@ class LLMViewModel(
 
     fun clearChat() {
         currentJob?.cancel()
-        _state.update { it.copy(messages = emptyList(), isLoading = false) }
+        val agentId = _state.value.selectedAgentId
+        if (agentId != null) {
+            _state.update { currentState ->
+                val updatedAgents = currentState.agents.map { agent ->
+                    if (agent.id == agentId) agent.copy(messages = emptyList(), totalTokensUsed = 0) else agent
+                }
+                currentState.copy(agents = updatedAgents, isLoading = false)
+            }
+        }
+    }
+
+    private fun estimateTokens(text: String): Int {
+        return (text.length / 4).coerceAtLeast(1)
     }
 
     fun sendMessage(message: String) {
         if (message.isBlank()) return
 
-        val userMessage = ChatMessage(message = message, source = SourceType.USER)
-        
+        val tokenCount = estimateTokens(message)
+        val userMessage = ChatMessage(message = message, source = SourceType.USER, tokenCount = tokenCount)
+        val agentId = _state.value.selectedAgentId ?: GENERAL_CHAT_ID
+
         _state.update { state ->
-            state.copy(
-                messages = state.messages + userMessage,
-                isLoading = true
-            )
+            val updatedAgents = state.agents.map { agent ->
+                if (agent.id == agentId) {
+                    agent.copy(
+                        messages = agent.messages + userMessage,
+                        totalTokensUsed = agent.totalTokensUsed + tokenCount
+                    )
+                } else agent
+            }
+            state.copy(agents = updatedAgents, isLoading = true)
         }
 
         val currentState = _state.value
+        val currentAgent = currentState.agents.find { it.id == agentId } ?: return
 
         currentJob?.cancel()
 
@@ -83,20 +148,28 @@ class LLMViewModel(
             val botMessageId = Uuid.random().toString()
             var currentContent = ""
 
+            val systemPrompt = currentAgent.systemPrompt
+            val temperature = currentAgent.temperature
+            val maxTokens = currentAgent.maxTokens
+            val provider = currentAgent.provider
+            val stopWord = currentAgent.stopWord
+            
+            val messagesInContext = currentAgent.messages
+
             val messagesToSend = if (currentState.sendFullHistory) {
-                currentState.messages + userMessage
+                messagesInContext
             } else {
                 listOf(userMessage)
             }
 
             val flow = chatStreamingUseCase(
                 messages = messagesToSend,
-                systemPrompt = currentState.systemPrompt,
-                maxTokens = currentState.maxTokens,
-                temperature = currentState.temperature,
-                stopWord = currentState.stopWord,
+                systemPrompt = systemPrompt,
+                maxTokens = maxTokens,
+                temperature = temperature,
+                stopWord = stopWord,
                 isJsonMode = currentState.isJsonMode,
-                provider = currentState.selectedProvider
+                provider = provider
             )
 
             if (currentState.isStreamingEnabled) {
@@ -107,18 +180,20 @@ class LLMViewModel(
                         message = "",
                         source = SourceType.ASSISTANT
                     )
-                    _state.update { it.copy(messages = it.messages + initialBotMessage) }
+                    addBotMessage(agentId, initialBotMessage)
                 }
                 .onCompletion {
                     _state.update { it.copy(isLoading = false) }
+                    val finalTokens = estimateTokens(currentContent)
+                    updateBotTokens(agentId, botMessageId, finalTokens)
                 }
                 .collect { result ->
                     result.onSuccess { chunk ->
                         currentContent += chunk
-                        updateBotMessage(botMessageId, currentContent)
+                        updateBotMessage(agentId, botMessageId, currentContent)
                     }.onFailure { error ->
                         val errorMessage = "Ошибка: ${error.message}"
-                        updateBotMessage(botMessageId, currentContent + "\n[$errorMessage]")
+                        updateBotMessage(agentId, botMessageId, currentContent + "\n[$errorMessage]")
                     }
                 }
             } else {
@@ -134,29 +209,68 @@ class LLMViewModel(
                 }
                 
                 _state.update { it.copy(isLoading = false) }
-                val finalMessage = if (errorOccurred != null) {
+                val finalMessageText = if (errorOccurred != null) {
                     fullResponse + "\n[Ошибка: ${errorOccurred.message}]"
                 } else {
                     fullResponse
                 }
                 
+                val finalTokens = estimateTokens(finalMessageText)
                 val botMessage = ChatMessage(
                     id = botMessageId,
-                    message = finalMessage,
-                    source = SourceType.ASSISTANT
+                    message = finalMessageText,
+                    source = SourceType.ASSISTANT,
+                    tokenCount = finalTokens
                 )
-                _state.update { it.copy(messages = it.messages + botMessage) }
+                addBotMessage(agentId, botMessage)
+                updateTotalTokens(agentId, finalTokens)
             }
         }
     }
 
-    private fun updateBotMessage(id: String, newMessage: String) {
-        _state.update { currentState ->
-            currentState.copy(
-                messages = currentState.messages.map { msg ->
-                    if (msg.id == id) msg.copy(message = newMessage) else msg
-                }
-            )
+    private fun addBotMessage(agentId: String, message: ChatMessage) {
+        _state.update { state ->
+            val updatedAgents = state.agents.map { agent ->
+                if (agent.id == agentId) agent.copy(messages = agent.messages + message) else agent
+            }
+            state.copy(agents = updatedAgents)
+        }
+    }
+
+    private fun updateBotMessage(agentId: String, messageId: String, newMessage: String) {
+        _state.update { state ->
+            val updatedAgents = state.agents.map { agent ->
+                if (agent.id == agentId) {
+                    val updatedMessages = agent.messages.map { msg ->
+                        if (msg.id == messageId) msg.copy(message = newMessage) else msg
+                    }
+                    agent.copy(messages = updatedMessages)
+                } else agent
+            }
+            state.copy(agents = updatedAgents)
+        }
+    }
+
+    private fun updateBotTokens(agentId: String, messageId: String, tokens: Int) {
+        _state.update { state ->
+            val updatedAgents = state.agents.map { agent ->
+                if (agent.id == agentId) {
+                    val updatedMessages = agent.messages.map { msg ->
+                        if (msg.id == messageId) msg.copy(tokenCount = tokens) else msg
+                    }
+                    agent.copy(messages = updatedMessages, totalTokensUsed = agent.totalTokensUsed + tokens)
+                } else agent
+            }
+            state.copy(agents = updatedAgents)
+        }
+    }
+
+    private fun updateTotalTokens(agentId: String, tokens: Int) {
+        _state.update { state ->
+            val updatedAgents = state.agents.map { agent ->
+                if (agent.id == agentId) agent.copy(totalTokensUsed = agent.totalTokensUsed + tokens) else agent
+            }
+            state.copy(agents = updatedAgents)
         }
     }
 }
