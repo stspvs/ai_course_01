@@ -29,6 +29,7 @@ val commonModule = module {
                     ignoreUnknownKeys = true
                     prettyPrint = true
                     isLenient = true
+                    encodeDefaults = true
                 })
             }
             install(Logging) {
