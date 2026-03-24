@@ -16,6 +16,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,13 +67,13 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                     NavigationBarItem(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        icon = { Text("💬") },
+                        icon = { Icon(Icons.Default.Email, contentDescription = "Чат") },
                         label = { Text("Чат") }
                     )
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        icon = { Text("⚙️") },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = "Настройки") },
                         label = { Text("Настройки") }
                     )
                 }
@@ -357,13 +364,22 @@ internal fun ChatContent(
 
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = { onToggleStreaming(!state.isStreamingEnabled) }) {
-                Text(if (state.isStreamingEnabled) "🌊" else "📄")
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Streaming",
+                    tint = if (state.isStreamingEnabled) MaterialTheme.colorScheme.primary else Color.Gray
+                )
             }
             IconButton(onClick = { onToggleHistory(!state.sendFullHistory) }) {
-                Text(if (state.sendFullHistory) "📚" else "🎯")
+                Icon(
+                    imageVector = Icons.Default.List,
+                    contentDescription = "Full History",
+                    tint = if (state.sendFullHistory) MaterialTheme.colorScheme.primary else Color.Gray
+                )
             }
         }
 
@@ -378,7 +394,9 @@ internal fun ChatContent(
                 placeholder = { Text("Введите сообщение...") },
                 shape = RoundedCornerShape(24.dp),
                 trailingIcon = {
-                    IconButton(onClick = onClearChat) { Text("➕") }
+                    IconButton(onClick = onClearChat) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Clear")
+                    }
                 }
             )
 
@@ -386,9 +404,10 @@ internal fun ChatContent(
 
             Button(
                 onClick = { if (input.isNotBlank()) onSendMessage(input) },
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(24.dp),
+                contentPadding = PaddingValues(12.dp)
             ) {
-                Text("🚀")
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }
         }
     }

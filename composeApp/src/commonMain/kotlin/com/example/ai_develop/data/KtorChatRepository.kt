@@ -112,15 +112,30 @@ class KtorChatRepository(
 
                         try {
                             if (provider is LLMProvider.Yandex) {
-                                val chunk = json.decodeFromString<YandexResponse>(trimmedLine)
-                                val currentFullText = chunk.result?.alternatives?.firstOrNull()?.let { 
+                                // Yandex возвращает либо YandexStreamResponse, либо YandexResponse
+                                // В режиме стриминга это обычно YandexStreamResponse в каждой строке
+                                val chunk = try {
+                                    json.decodeFromString<YandexStreamResponse>(trimmedLine)
+                                } catch (e: Exception) {
+                                    // Если не удалось как стрим, пробуем как обычный ответ
+                                    val resp = json.decodeFromString<YandexResponse>(trimmedLine)
+                                    YandexStreamResponse(result = resp.result ?: YandexResult())
+                                }
+
+                                val currentFullText = chunk.result.alternatives?.firstOrNull()?.let { 
                                     it.message?.text ?: it.text 
                                 } ?: ""
                                 
-                                if (currentFullText.length > lastFullText.length) {
-                                    val delta = currentFullText.substring(lastFullText.length)
-                                    lastFullText = currentFullText
-                                    emit(Result.success(delta))
+                                if (currentFullText.isNotEmpty()) {
+                                    if (currentFullText.length > lastFullText.length) {
+                                        val delta = currentFullText.substring(lastFullText.length)
+                                        lastFullText = currentFullText
+                                        emit(Result.success(delta))
+                                    } else if (lastFullText.isEmpty()) {
+                                         // Первый чанк
+                                         lastFullText = currentFullText
+                                         emit(Result.success(currentFullText))
+                                    }
                                 }
                             } else {
                                 // Обработка OpenAI-совместимых ответов (DeepSeek, OpenRouter)
@@ -142,7 +157,6 @@ class KtorChatRepository(
                                     }
 
                                     val choice = chunk.choices?.firstOrNull()
-                                    // Проверяем и delta (стриминг), и message (полный ответ)
                                     val delta = choice?.delta ?: choice?.message
                                     
                                     val text = delta?.content 
