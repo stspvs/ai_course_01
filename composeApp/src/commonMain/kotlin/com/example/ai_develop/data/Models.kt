@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ChatRequest(
     @SerialName("model")
-    val model: String,
+    val model: String = "deepseek-chat",
     @SerialName("messages")
     val messages: List<Message>,
     @SerialName("max_tokens")
@@ -33,6 +33,18 @@ data class Message(
     val role: String,
     @SerialName("content")
     val content: String
+)
+
+@Serializable
+data class ChatResponse(
+    @SerialName("choices")
+    val choices: List<Choice>
+)
+
+@Serializable
+data class Choice(
+    @SerialName("message")
+    val message: Message
 )
 
 @Serializable
@@ -74,45 +86,91 @@ data class ChatStreamDelta(
 // Yandex GPT Models
 @Serializable
 data class YandexChatRequest(
+    @SerialName("modelUri")
     val modelUri: String,
+    @SerialName("completionOptions")
     val completionOptions: YandexCompletionOptions,
+    @SerialName("messages")
     val messages: List<YandexMessage>
 )
 
 @Serializable
 data class YandexCompletionOptions(
+    @SerialName("stream")
     val stream: Boolean = true,
+    @SerialName("temperature")
     val temperature: Double = 0.6,
+    @SerialName("maxTokens")
     val maxTokens: Int = 2000
 )
 
 @Serializable
 data class YandexMessage(
+    @SerialName("role")
     val role: String? = null,
+    @SerialName("text")
     val text: String? = null
 )
 
 @Serializable
 data class YandexResponse(
+    @SerialName("result")
     val result: YandexResult? = null,
+    @SerialName("error")
     val error: YandexError? = null
 )
 
 @Serializable
 data class YandexResult(
+    @SerialName("alternatives")
     val alternatives: List<YandexAlternative>? = null
 )
 
 @Serializable
 data class YandexAlternative(
+    @SerialName("message")
     val message: YandexMessage? = null,
+    @SerialName("text")
     val text: String? = null,
+    @SerialName("status")
     val status: String? = null
 )
 
 @Serializable
 data class YandexError(
+    @SerialName("message")
     val message: String? = null,
+    @SerialName("grpcCode")
     val grpcCode: Int? = null,
+    @SerialName("httpCode")
     val httpCode: Int? = null
+)
+
+@Serializable
+data class YandexStreamResponse(
+    @SerialName("result")
+    val result: YandexResult
+)
+
+// OpenAI-compatible models for Qwen/QWQ
+@Serializable
+data class OpenAiChatRequest(
+    @SerialName("model")
+    val model: String,
+    @SerialName("messages")
+    val messages: List<OpenAiMessage>,
+    @SerialName("max_tokens")
+    val maxTokens: Int,
+    @SerialName("temperature")
+    val temperature: Double,
+    @SerialName("stream")
+    val stream: Boolean = false
+)
+
+@Serializable
+data class OpenAiMessage(
+    @SerialName("role")
+    val role: String,
+    @SerialName("content")
+    val content: String
 )

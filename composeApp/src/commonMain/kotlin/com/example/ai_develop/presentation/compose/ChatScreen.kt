@@ -219,8 +219,22 @@ private fun LLMSelector(
 
     val providers = listOf("Yandex", "DeepSeek", "OpenRouter")
     val deepSeekModels = listOf("deepseek-chat", "deepseek-coder")
-    val openRouterModels = listOf("google/gemini-2.0-flash-001", "anthropic/claude-3.5-sonnet")
-    val yandexModels = listOf("yandexgpt/latest")
+    val openRouterModels = listOf(
+        "google/gemini-2.0-flash-001",
+        "anthropic/claude-3.5-sonnet",
+        "openai/gpt-4o",
+        "deepseek/deepseek-r1:free",
+        "meta-llama/llama-3.3-70b-instruct"
+    )
+    val yandexModels = listOf(
+        "yandexgpt-5.1/latest",
+        "yandexgpt-lite/latest",
+        "yandexgpt/latest",
+        "qwen3-0.6b/latest",
+        "qwq-32b/latest",
+        "qwen3-235b-a22b-fp8/latest",
+        "gemma-3-27b-it/latest"
+    )
 
     Column(
         modifier = Modifier
