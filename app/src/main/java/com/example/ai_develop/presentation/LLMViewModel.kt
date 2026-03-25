@@ -35,7 +35,8 @@ internal class LLMViewModel @Inject constructor(
     }
 
     fun updateTemperature(temperature: Double) {
-        _state.update { it.copy(temperature = temperature) }
+        val maxAllowed = if (_state.value.selectedProvider is LLMProvider.DeepSeek) 2.0 else 1.0
+        _state.update { it.copy(temperature = temperature.coerceIn(0.0, maxAllowed)) }
     }
 
     fun updateStopWord(stopWord: String) {
@@ -47,7 +48,14 @@ internal class LLMViewModel @Inject constructor(
     }
 
     fun updateProvider(provider: LLMProvider) {
-        _state.update { it.copy(selectedProvider = provider) }
+        _state.update { currentState ->
+            val maxAllowed = if (provider is LLMProvider.DeepSeek) 2.0 else 1.0
+            val newTemp = if (currentState.temperature > maxAllowed) maxAllowed else currentState.temperature
+            currentState.copy(
+                selectedProvider = provider,
+                temperature = newTemp
+            )
+        }
     }
 
     fun updateStreamingEnabled(isEnabled: Boolean) {

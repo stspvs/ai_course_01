@@ -1,70 +1,28 @@
 package com.example.ai_develop.presentation.compose
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.LLMProvider
@@ -76,37 +34,29 @@ import com.example.ai_develop.presentation.SourceType
 @Composable
 internal fun ChatScreen(viewModel: LLMViewModel) {
     val state by viewModel.state.collectAsState()
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-
-    var chatInput by rememberSaveable { mutableStateOf("") }
-
-    val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var chatInput by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(
         bottomBar = {
-            if (!isKeyboardVisible) {
-                Surface(
-                    color = Color(0xFFF3E5F5),
-                    border = BorderStroke(1.dp, Color(0xFF4A148C)),
-                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+            Column {
+                HorizontalDivider()
+                NavigationBar(
+                    containerColor = Color.White,
+                    modifier = Modifier.height(64.dp)
                 ) {
-                    NavigationBar(
-                        containerColor = Color.Transparent,
-                        tonalElevation = 0.dp
-                    ) {
-                        NavigationBarItem(
-                            selected = selectedTab == 0,
-                            onClick = { selectedTab = 0 },
-                            icon = { Text("💬") },
-                            label = { Text("Чат") }
-                        )
-                        NavigationBarItem(
-                            selected = selectedTab == 1,
-                            onClick = { selectedTab = 1 },
-                            icon = { Text("⚙️") },
-                            label = { Text("Настройки") }
-                        )
-                    }
+                    NavigationBarItem(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+                        label = { Text("Чат") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        label = { Text("Настройки") }
+                    )
                 }
             }
         },
@@ -148,6 +98,132 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
 }
 
 @Composable
+internal fun ChatContent(
+    state: LLMStateModel,
+    input: String,
+    onInputChange: (String) -> Unit,
+    onSendMessage: (String) -> Unit,
+    onClearChat: () -> Unit,
+    onToggleStreaming: (Boolean) -> Unit,
+    onToggleHistory: (Boolean) -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.isNotEmpty()) {
+            listState.animateScrollToItem(state.messages.size - 1)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+        // Header
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.White,
+            shadowElevation = 2.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "AI Помощник",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (state.isLoading) "Печатает..." else "В сети",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (state.isLoading) Color(0xFF1976D2) else Color.Gray
+                    )
+                }
+                
+                Row {
+                    IconButton(onClick = onClearChat) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color.Gray)
+                    }
+                    var showMenu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.Gray)
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (state.isStreamingEnabled) "Выключить стриминг" else "Включить стриминг") },
+                                onClick = { onToggleStreaming(!state.isStreamingEnabled); showMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (state.sendFullHistory) "Отправлять только последнее" else "Отправлять историю") },
+                                onClick = { onToggleHistory(!state.sendFullHistory); showMenu = false }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(state.messages) { message ->
+                MessageBubble(message)
+            }
+        }
+
+        // Input
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.White,
+            shadowElevation = 8.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = onInputChange,
+                    placeholder = { Text("Введите сообщение...") },
+                    modifier = Modifier.weight(1f),
+                    maxLines = 4,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = Color(0xFFF5F5F5),
+                        unfocusedContainerColor = Color(0xFFF5F5F5)
+                    )
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                FloatingActionButton(
+                    onClick = { if (input.isNotBlank()) onSendMessage(input) },
+                    containerColor = if (input.isBlank()) Color.LightGray else Color(0xFF1976D2),
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier.size(48.dp),
+                    elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Send,
+                        contentDescription = "Send",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun SettingsContent(
     state: LLMStateModel,
     onUpdatePrompt: (String) -> Unit,
@@ -157,11 +233,14 @@ internal fun SettingsContent(
     onUpdateJsonMode: (Boolean) -> Unit,
     onUpdateProvider: (LLMProvider) -> Unit
 ) {
+    val maxTemp = if (state.selectedProvider is LLMProvider.DeepSeek) 2.0f else 1.0f
+    
     val temperatureDescription = when {
         state.temperature <= 0.3 -> "максимально точные, детерминированные ответы\n→ идеально для: задач, кода, логики"
         state.temperature <= 0.8 -> "(самый популярный диапазон)\n→ баланс точности и вариативности\n→ обычный чат"
-        state.temperature <= 1.5 -> "больше креатива\n→ возможны ошибки"
-        else -> "хаотичные, иногда странные ответы\n→ используется редко (тесты, генерация идей)"
+        state.temperature <= 1.5 && maxTemp > 1.0f -> "больше креатива\n→ возможны ошибки"
+        state.temperature > 1.5 && maxTemp > 1.0f -> "хаотичные, иногда странные ответы\n→ используется редко (тесты, генерация идей)"
+        else -> "больше креатива (для данной модели 1.0 - максимум)"
     }
 
     Column(
@@ -239,10 +318,10 @@ internal fun SettingsContent(
             }
 
             Slider(
-                value = state.temperature.toFloat(),
+                value = state.temperature.toFloat().coerceIn(0f, maxTemp),
                 onValueChange = { onUpdateTemperature(it.toDouble()) },
-                valueRange = 0f..2f,
-                steps = 19, // Чтобы был шаг 0.1
+                valueRange = 0f..maxTemp,
+                steps = if (maxTemp > 1.0f) 19 else 9, 
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -284,12 +363,45 @@ internal fun SettingsContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 120.dp),
-            placeholder = { Text("Например: Ты — профессиональный переводчик...") },
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = Color.White,
                 unfocusedContainerColor = Color.White
             )
+        )
+    }
+}
+
+@Composable
+internal fun MessageBubble(message: ChatMessage) {
+    val isUser = message.source == SourceType.USER
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+    ) {
+        Surface(
+            color = if (isUser) Color(0xFF1976D2) else Color.White,
+            contentColor = if (isUser) Color.White else Color.Black,
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = if (isUser) 16.dp else 0.dp,
+                bottomEnd = if (isUser) 0.dp else 16.dp
+            ),
+            tonalElevation = 1.dp,
+            shadowElevation = 1.dp
+        ) {
+            Text(
+                text = message.message,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+        Text(
+            text = if (isUser) "Вы" else "Помощник",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
         )
     }
 }
@@ -305,71 +417,49 @@ private fun LLMSelector(
 
     val providers = listOf("Yandex", "DeepSeek", "OpenRouter")
     val deepSeekModels = listOf("deepseek-chat", "deepseek-coder")
-    val openRouterModels = listOf(
-        "google/gemini-2.0-flash-001",
-        "anthropic/claude-3.5-sonnet",
-        "openai/gpt-4o",
-        "deepseek/deepseek-r1:free",
-        "meta-llama/llama-3.3-70b-instruct"
-    )
-    val yandexModels = listOf(
-        "yandexgpt-5.1/latest",
-        "yandexgpt-lite/latest",
-        "yandexgpt/latest",
-        "qwen3-0.6b/latest",
-        "qwq-32b/latest",
-        "qwen3-235b-a22b-fp8/latest",
-        "gemma-3-27b-it/latest"
-    )
+    val openRouterModels = listOf("google/gemini-2.0-flash-001", "anthropic/claude-3.5-sonnet", "openai/gpt-4o")
+    val yandexModels = listOf("yandexgpt/latest", "yandexgpt-lite/latest")
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            "Выбор LLM",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-
-        // Provider Dropdown
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ExposedDropdownMenuBox(
             expanded = providerExpanded,
             onExpandedChange = { providerExpanded = it }
         ) {
-            val providerName = when(currentProvider) {
-                is LLMProvider.DeepSeek -> "DeepSeek"
-                is LLMProvider.Yandex -> "Yandex"
-                is LLMProvider.OpenRouter -> "OpenRouter"
-            }
             OutlinedTextField(
-                value = providerName,
+                value = when(currentProvider) {
+                    is LLMProvider.Yandex -> "Yandex"
+                    is LLMProvider.DeepSeek -> "DeepSeek"
+                    is LLMProvider.OpenRouter -> "OpenRouter"
+                },
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Провайдер") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
-                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White
+                )
             )
             ExposedDropdownMenu(
                 expanded = providerExpanded,
                 onDismissRequest = { providerExpanded = false }
             ) {
-                providers.forEach { provider ->
+                providers.forEach { p ->
                     DropdownMenuItem(
-                        text = { Text(provider) },
+                        text = { Text(p) },
                         onClick = {
-                            when (provider) {
-                                "DeepSeek" -> onProviderChange(LLMProvider.DeepSeek(deepSeekModels.first()))
-                                "OpenRouter" -> onProviderChange(LLMProvider.OpenRouter(openRouterModels.first()))
-                                else -> onProviderChange(LLMProvider.Yandex(yandexModels.first()))
+                            val firstModel = when(p) {
+                                "DeepSeek" -> deepSeekModels.first()
+                                "OpenRouter" -> openRouterModels.first()
+                                else -> yandexModels.first()
                             }
+                            onProviderChange(when(p) {
+                                "DeepSeek" -> LLMProvider.DeepSeek(firstModel)
+                                "OpenRouter" -> LLMProvider.OpenRouter(firstModel)
+                                else -> LLMProvider.Yandex(firstModel)
+                            })
                             providerExpanded = false
                         }
                     )
@@ -377,7 +467,6 @@ private fun LLMSelector(
             }
         }
 
-        // Model Dropdown
         ExposedDropdownMenuBox(
             expanded = modelExpanded,
             onExpandedChange = { modelExpanded = it }
@@ -388,11 +477,12 @@ private fun LLMSelector(
                 readOnly = true,
                 label = { Text("Модель") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded) },
-                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White
+                )
             )
             ExposedDropdownMenu(
                 expanded = modelExpanded,
@@ -403,15 +493,15 @@ private fun LLMSelector(
                     is LLMProvider.OpenRouter -> openRouterModels
                     is LLMProvider.Yandex -> yandexModels
                 }
-                models.forEach { model ->
+                models.forEach { m ->
                     DropdownMenuItem(
-                        text = { Text(model) },
+                        text = { Text(m) },
                         onClick = {
-                            when (currentProvider) {
-                                is LLMProvider.DeepSeek -> onProviderChange(LLMProvider.DeepSeek(model))
-                                is LLMProvider.OpenRouter -> onProviderChange(LLMProvider.OpenRouter(model))
-                                is LLMProvider.Yandex -> onProviderChange(LLMProvider.Yandex(model))
-                            }
+                            onProviderChange(when(currentProvider) {
+                                is LLMProvider.DeepSeek -> LLMProvider.DeepSeek(m)
+                                is LLMProvider.OpenRouter -> LLMProvider.OpenRouter(m)
+                                is LLMProvider.Yandex -> LLMProvider.Yandex(m)
+                            })
                             modelExpanded = false
                         }
                     )
@@ -419,218 +509,4 @@ private fun LLMSelector(
             }
         }
     }
-}
-
-@Composable
-internal fun ChatContent(
-    state: LLMStateModel,
-    input: String,
-    onInputChange: (String) -> Unit,
-    onSendMessage: (String) -> Unit,
-    onClearChat: () -> Unit,
-    onToggleStreaming: (Boolean) -> Unit,
-    onToggleHistory: (Boolean) -> Unit
-) {
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(state.messages.size, state.isLoading) {
-        if (state.messages.isNotEmpty() || state.isLoading) {
-            val lastIndex = if (state.isLoading) state.messages.size else state.messages.size - 1
-            if (lastIndex >= 0) {
-                listState.animateScrollToItem(lastIndex)
-            }
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFFE3F2FD))
-            .padding(12.dp)
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(
-                items = state.messages,
-                key = { it.id }
-            ) { message ->
-                MessageBubble(
-                    message = message,
-                    modifier = Modifier.animateItem(
-                        fadeInSpec = tween(600),
-                        placementSpec = tween(600),
-                        fadeOutSpec = tween(600)
-                    )
-                )
-            }
-
-            item(key = "loading_indicator") {
-                AnimatedVisibility(
-                    visible = state.isLoading,
-                    enter = fadeIn(tween(300)) + expandVertically(tween(300)),
-                    exit = fadeOut(tween(300)) + shrinkVertically(tween(300))
-                ) {
-                    val loadingText = when (state.selectedProvider) {
-                        is LLMProvider.DeepSeek -> "DeepSeek думает..."
-                        is LLMProvider.Yandex -> "Yandex GPT думает..."
-                        is LLMProvider.OpenRouter -> "OpenRouter думает..."
-                    }
-                    MessageBubble(
-                        message = ChatMessage(message = loadingText, source = SourceType.ASSISTANT),
-                        backgroundColor = Color(0xFFFFF59D)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Control Panel
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End
-        ) {
-            // Streaming toggle
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (state.isStreamingEnabled) "Поток: ВКЛ" else "Поток: ВЫКЛ",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.DarkGray
-                )
-                IconButton(
-                    onClick = { onToggleStreaming(!state.isStreamingEnabled) },
-                    modifier = Modifier.height(32.dp).width(32.dp)
-                ) {
-                    Text(text = if (state.isStreamingEnabled) "🌊" else "📄", fontSize = 16.sp)
-                }
-            }
-            
-            Spacer(modifier = Modifier.width(16.dp))
-            
-            // History toggle
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (state.sendFullHistory) "История: ВСЯ" else "История: ПОСЛ.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.DarkGray
-                )
-                IconButton(
-                    onClick = { onToggleHistory(!state.sendFullHistory) },
-                    modifier = Modifier.height(32.dp).width(32.dp)
-                ) {
-                    Text(text = if (state.sendFullHistory) "📚" else "🎯", fontSize = 16.sp)
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val inputBgColor = Color(0xFFF1F3F4)
-            val buttonBgColor = Color(0xFFDADCE0)
-
-            OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Введите сообщение...") },
-                shape = RoundedCornerShape(24.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = inputBgColor,
-                    unfocusedContainerColor = inputBgColor,
-                    focusedBorderColor = Color.DarkGray,
-                    unfocusedBorderColor = Color.Gray,
-                ),
-                trailingIcon = {
-                    IconButton(onClick = onClearChat) {
-                        Text("➕", fontSize = 20.sp)
-                    }
-                }
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Button(
-                onClick = {
-                    if (input.isNotBlank()) {
-                        onSendMessage(input)
-                    }
-                },
-                shape = RoundedCornerShape(24.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = buttonBgColor,
-                    contentColor = Color.Black
-                ),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text("🚀 Ок", fontSize = 16.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun MessageBubble(
-    message: ChatMessage,
-    modifier: Modifier = Modifier,
-    backgroundColor: Color? = null
-) {
-    val isUser = message.source == SourceType.USER
-    val bubbleColor = backgroundColor ?: if (isUser) Color.White else Color(0xFFF5F5DC)
-
-    Box(
-        modifier = modifier.fillMaxWidth(),
-        contentAlignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
-    ) {
-        Surface(
-            color = bubbleColor,
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
-            ),
-            tonalElevation = 2.dp,
-            shadowElevation = 1.dp
-        ) {
-            SelectionContainer {
-                Text(
-                    text = message.message,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    color = Color.Black,
-                    style = if (backgroundColor != null) {
-                        MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic)
-                    } else {
-                        MaterialTheme.typography.bodyLarge
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ChatScreenPreview() {
-    val mockState = LLMStateModel(
-        messages = listOf(
-            ChatMessage(message = "Привет!", source = SourceType.USER),
-            ChatMessage(message = "Я DeepSeek.", source = SourceType.ASSISTANT)
-        )
-    )
-    ChatContent(
-        state = mockState,
-        input = "",
-        onInputChange = {},
-        onSendMessage = {},
-        onClearChat = {},
-        onToggleStreaming = {},
-        onToggleHistory = {})
 }

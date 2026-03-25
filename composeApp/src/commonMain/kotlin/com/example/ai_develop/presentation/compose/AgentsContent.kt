@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,148 +34,151 @@ internal fun AgentsContent(
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
 ) {
-    val selectedAgent = state.agents.find { it.id == state.selectedAgentId }
+    val selectedAgentId = state.selectedAgentId
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFFF5F5F5))
-    ) {
-        // ЛЕВАЯ ПАНЕЛЬ: Список агентов
+    Row(modifier = Modifier.fillMaxSize()) {
+        // Список агентов (слева)
         Column(
             modifier = Modifier
-                .weight(1.2f)
+                .width(300.dp)
                 .fillMaxHeight()
-                .padding(8.dp)
-                .background(Color.White, RoundedCornerShape(16.dp))
-                .padding(8.dp)
+                .background(Color(0xFFF5F5F5))
+                .padding(16.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Агенты",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                IconButton(onClick = onCreateAgent) {
-                    Icon(Icons.Default.Add, contentDescription = "Создать", tint = Color(0xFF4A148C))
-                }
-            }
+            Text(
+                "Ваши Агенты",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
 
-            LazyColumn(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
                 items(state.agents) { agent ->
-                    AgentListTile(
-                        name = agent.name,
-                        isSelected = state.selectedAgentId == agent.id,
-                        isGeneral = agent.id == GENERAL_CHAT_ID,
-                        onClick = { onSelectAgent(agent.id) }
+                    AgentItem(
+                        agent = agent,
+                        isSelected = selectedAgentId == agent.id,
+                        onClick = { onSelectAgent(agent.id) },
+                        onDelete = { onDeleteAgent(agent.id) },
+                        onDuplicate = { onDuplicateAgent(agent.id) }
                     )
                 }
             }
 
-            if (state.selectedAgentId != null && state.selectedAgentId != GENERAL_CHAT_ID) {
-                Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    TextButton(
-                        onClick = { state.selectedAgentId.let { onDuplicateAgent(it) } },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Копия", fontSize = 12.sp)
-                    }
-                    TextButton(
-                        onClick = { state.selectedAgentId.let { onDeleteAgent(it) } },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Red.copy(alpha = 0.7f))
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Удалить", fontSize = 12.sp)
-                    }
-                }
+            Button(
+                onClick = onCreateAgent,
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A148C))
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Новый агент")
             }
         }
 
-        // ПРАВАЯ ПАНЕЛЬ: Настройки
-        Box(
-            modifier = Modifier
-                .weight(2.5f)
-                .fillMaxHeight()
-                .padding(8.dp)
-        ) {
+        // Детали/Редактирование (справа)
+        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            val selectedAgent = state.agents.find { it.id == selectedAgentId }
             if (selectedAgent != null) {
                 AgentDetailSettings(
                     agent = selectedAgent,
-                    onUpdate = { n, p, t, pr, s, m -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m) },
+                    onUpdate = { name, prompt, temp, provider, stop, tokens ->
+                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens)
+                    },
                     templates = templates
                 )
             } else {
-                EmptyAgentPlaceholder()
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = Color.Gray.copy(alpha = 0.3f)
+                    )
+                    Text(
+                        "Выберите агента для настройки",
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun EmptyAgentPlaceholder() {
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color.White, RoundedCornerShape(16.dp)),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(
-            imageVector = Icons.Default.Face,
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = Color.LightGray
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Выберите агента из списка слева\nили создайте нового",
-            textAlign = TextAlign.Center,
-            color = Color.Gray,
-            style = MaterialTheme.typography.bodyLarge
-        )
-    }
-}
-
-@Composable
-fun AgentListTile(name: String, isSelected: Boolean, isGeneral: Boolean, onClick: () -> Unit) {
-    Surface(
+fun AgentItem(
+    agent: Agent,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    onDuplicate: () -> Unit
+) {
+    val isGeneral = agent.id == GENERAL_CHAT_ID
+    
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp)
-            .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() },
-        color = if (isSelected) Color(0xFFF3E5F5) else Color.Transparent,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) Color(0xFFEDE7F6) else Color.White
+        ),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF4A148C)) else null
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = if (isGeneral) Icons.Default.Star else Icons.Default.Person,
-                contentDescription = null,
-                tint = if (isSelected) Color(0xFF4A148C) else Color.Gray,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isSelected) Color(0xFF4A148C) else Color.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isGeneral) Color(0xFF4A148C) else Color(0xFF9575CD)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (isGeneral) Icons.Default.Email else Icons.Default.Person,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(
+                    text = agent.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = when(agent.provider) {
+                        is LLMProvider.DeepSeek -> "DeepSeek"
+                        is LLMProvider.Yandex -> "YandexGPT"
+                        is LLMProvider.OpenRouter -> "OpenRouter"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+            }
+
+            if (!isGeneral) {
+                IconButton(onClick = onDuplicate) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Duplicate", tint = Color.LightGray, modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.LightGray, modifier = Modifier.size(20.dp))
+                }
+            }
         }
     }
 }
@@ -195,6 +197,14 @@ fun AgentDetailSettings(
     var provider by remember(agent.id) { mutableStateOf(agent.provider) }
 
     val isGeneral = agent.id == GENERAL_CHAT_ID
+
+    // Clamping temperature when provider changes
+    LaunchedEffect(provider) {
+        val maxAllowed = if (provider is LLMProvider.DeepSeek) 2.0 else 1.0
+        if (temp > maxAllowed) {
+            temp = maxAllowed
+        }
+    }
 
     LaunchedEffect(name, prompt, temp, provider, stopWord, maxTokens) {
         onUpdate(name, prompt, temp, provider, stopWord, maxTokens)
@@ -257,7 +267,7 @@ fun AgentDetailSettings(
         Text("Модель и параметры", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         LLMSelector(currentProvider = provider, onProviderChange = { provider = it })
 
-        TemperatureSlider(temp = temp, onTempChange = { temp = it })
+        TemperatureSlider(temp = temp, provider = provider, onTempChange = { temp = it })
 
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             OutlinedTextField(
@@ -290,7 +300,8 @@ fun AgentDetailSettings(
 }
 
 @Composable
-fun TemperatureSlider(temp: Double, onTempChange: (Double) -> Unit) {
+fun TemperatureSlider(temp: Double, provider: LLMProvider, onTempChange: (Double) -> Unit) {
+    val maxTemp = if (provider is LLMProvider.DeepSeek) 2f else 1f
     Column {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val tempFormatted = ((temp * 10).toInt() / 10.0).toString()
@@ -307,9 +318,9 @@ fun TemperatureSlider(temp: Double, onTempChange: (Double) -> Unit) {
             )
         }
         Slider(
-            value = temp.toFloat(),
+            value = temp.toFloat().coerceIn(0f, maxTemp),
             onValueChange = { onTempChange(it.toDouble()) },
-            valueRange = 0f..2f,
+            valueRange = 0f..maxTemp,
             colors = SliderDefaults.colors(
                 thumbColor = Color(0xFF4A148C),
                 activeTrackColor = Color(0xFF4A148C)
