@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface AgentDao {
-    @Query("SELECT * FROM agents")
+    @Query("SELECT * FROM agents ORDER BY (id = 'general_chat_id') DESC, name ASC")
     fun getAllAgents(): Flow<List<AgentEntity>>
 
     @Query("SELECT * FROM agents WHERE id = :id")

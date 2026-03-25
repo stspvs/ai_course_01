@@ -56,7 +56,7 @@ internal fun AgentsContent(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.weight(1f)
             ) {
-                items(state.agents) { agent ->
+                items(state.agents, key = { it.id }) { agent ->
                     AgentItem(
                         agent = agent,
                         isSelected = selectedAgentId == agent.id,
@@ -207,7 +207,16 @@ fun AgentDetailSettings(
     }
 
     LaunchedEffect(name, prompt, temp, provider, stopWord, maxTokens) {
-        onUpdate(name, prompt, temp, provider, stopWord, maxTokens)
+        // Проверяем, действительно ли что-то изменилось, чтобы не спамить обновлениями в БД
+        if (name != agent.name || 
+            prompt != agent.systemPrompt || 
+            temp != agent.temperature || 
+            provider != agent.provider || 
+            stopWord != agent.stopWord || 
+            maxTokens != agent.maxTokens
+        ) {
+            onUpdate(name, prompt, temp, provider, stopWord, maxTokens)
+        }
     }
 
     Column(

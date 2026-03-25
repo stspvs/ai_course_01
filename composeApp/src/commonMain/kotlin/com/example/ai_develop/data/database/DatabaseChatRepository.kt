@@ -38,6 +38,15 @@ class DatabaseChatRepository(private val db: AppDatabase) {
 
     suspend fun saveMessage(agentId: String, message: ChatMessage) {
         dao.insertMessage(message.toEntity(agentId))
+        // Обновляем общее количество токенов в агенте
+        val agent = dao.getAgentById(agentId)
+        if (agent != null) {
+            dao.updateTokens(agentId, agent.totalTokensUsed + message.tokenCount)
+        }
+    }
+
+    suspend fun clearChatTokens(agentId: String) {
+        dao.updateTokens(agentId, 0)
     }
 
     suspend fun deleteAgent(agentId: String) {
