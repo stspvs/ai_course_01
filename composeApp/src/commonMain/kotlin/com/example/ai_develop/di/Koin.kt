@@ -2,6 +2,8 @@ package com.example.ai_develop.di
 
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
+import com.example.ai_develop.data.database.AppDatabase
+import com.example.ai_develop.data.database.DatabaseChatRepository
 import com.example.ai_develop.domain.ChatRepository
 import com.example.ai_develop.domain.ChatStreamingUseCase
 import com.example.ai_develop.presentation.LLMViewModel
@@ -11,14 +13,17 @@ import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import org.koin.core.context.startKoin
+import org.koin.core.module.Module
 import org.koin.dsl.KoinAppDeclaration
 import org.koin.dsl.module
 import org.koin.compose.viewmodel.dsl.viewModelOf
 
+expect val platformModule: Module
+
 fun initKoin(appDeclaration: KoinAppDeclaration = {}) =
     startKoin {
         appDeclaration()
-        modules(commonModule)
+        modules(commonModule, platformModule)
     }
 
 val commonModule = module {
@@ -49,6 +54,10 @@ val commonModule = module {
     }
 
     single { ChatStreamingUseCase(get()) }
+
+    // Database
+    single { get<AppDatabase>().agentDao() }
+    single { DatabaseChatRepository(get()) }
 
     viewModelOf(::LLMViewModel)
 }

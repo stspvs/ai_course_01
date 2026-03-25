@@ -9,6 +9,8 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.androidxRoom)
     id("com.github.gmazzo.buildconfig") version "5.3.5"
 }
 
@@ -71,6 +73,9 @@ kotlin {
                 implementation(libs.koin.core)
                 implementation(libs.koin.compose)
                 implementation(libs.koin.compose.viewmodel)
+
+                implementation(libs.androidx.room.runtime)
+                implementation(libs.androidx.sqlite.bundled)
             }
         }
         
@@ -98,6 +103,16 @@ kotlin {
             }
         }
     }
+}
+
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+
+dependencies {
+    add("kspAndroid", libs.androidx.room.compiler)
+    add("kspDesktop", libs.androidx.room.compiler)
+    add("kspWasmJs", libs.androidx.room.compiler)
 }
 
 android {

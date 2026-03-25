@@ -64,7 +64,8 @@ data class ChatMessage(
     val id: String = Uuid.random().toString(),
     val message: String,
     val source: SourceType,
-    val tokenCount: Int = 0
+    val tokenCount: Int = 0,
+    val timestamp: Long = 0L
 )
 
 @Serializable
