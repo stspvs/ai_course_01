@@ -7,6 +7,13 @@ import kotlin.uuid.Uuid
 
 const val GENERAL_CHAT_ID = "general_chat_id"
 
+@Serializable
+enum class SummaryDepth(val description: String) {
+    LOW("Краткая (только суть)"),
+    MEDIUM("Средняя (основные детали)"),
+    HIGH("Глубокая (подробный контекст)")
+}
+
 @OptIn(ExperimentalUuidApi::class)
 @Serializable
 data class Agent(
@@ -18,7 +25,11 @@ data class Agent(
     val stopWord: String,
     val maxTokens: Int,
     val messages: List<ChatMessage> = emptyList(),
-    val totalTokensUsed: Int = 0
+    val totalTokensUsed: Int = 0,
+    val summary: String? = null,
+    val keepLastMessagesCount: Int = 10,
+    val summaryPrompt: String = "Кратко суммируй ключевые моменты этого диалога, чтобы сохранить контекст для продолжения беседы. Пиши только саму суть.",
+    val summaryDepth: SummaryDepth = SummaryDepth.LOW
 )
 
 data class AgentTemplate(
@@ -26,7 +37,10 @@ data class AgentTemplate(
     val description: String,
     val systemPrompt: String,
     val temperature: Double = 0.7,
-    val maxTokens: Int = 2000
+    val maxTokens: Int = 2000,
+    val keepLastMessagesCount: Int = 10,
+    val summaryPrompt: String = "Кратко суммируй ключевые моменты этого диалога, чтобы сохранить контекст для продолжения беседы. Пиши только саму суть.",
+    val summaryDepth: SummaryDepth = SummaryDepth.LOW
 )
 
 @Serializable
@@ -39,7 +53,8 @@ data class LLMStateModel(
             temperature = 1.0,
             provider = LLMProvider.Yandex(),
             stopWord = "",
-            maxTokens = 3000
+            maxTokens = 3000,
+            keepLastMessagesCount = 10
         )
     ),
     val selectedAgentId: String? = GENERAL_CHAT_ID,
@@ -65,7 +80,8 @@ data class ChatMessage(
     val message: String,
     val source: SourceType,
     val tokenCount: Int = 0,
-    val timestamp: Long = 0L
+    val timestamp: Long = 0L,
+    val isSystemNotification: Boolean = false
 )
 
 @Serializable

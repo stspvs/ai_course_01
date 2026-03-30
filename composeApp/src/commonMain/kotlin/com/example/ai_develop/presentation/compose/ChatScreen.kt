@@ -62,7 +62,9 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                         state = state,
                         templates = viewModel.agentTemplates,
                         onCreateAgent = { viewModel.createAgent() },
-                        onUpdateAgent = { id, n, p, t, pr, s, m -> viewModel.updateAgent(id, n, p, t, pr, s, m) },
+                        onUpdateAgent = { id, n, p, t, pr, s, m, k, sp, sd -> 
+                            viewModel.updateAgent(id, n, p, t, pr, s, m, k, sp, sd) 
+                        },
                         onDeleteAgent = { viewModel.deleteAgent(it) },
                         onDuplicateAgent = { viewModel.duplicateAgent(it) },
                         onSelectAgent = { viewModel.selectAgent(it) }

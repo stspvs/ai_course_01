@@ -39,7 +39,6 @@ class LLMViewModel(
                         viewModelScope.launch { repository.saveAgent(defaultAgent) }
                         currentState
                     } else {
-                        // Обновляем только метаданные агентов, не трогая сообщения в памяти
                         val updatedAgents = dbAgents.map { dbAgent ->
                             val existingAgent = currentState.agents.find { it.id == dbAgent.id }
                             if (existingAgent != null) {
@@ -54,7 +53,6 @@ class LLMViewModel(
             }
         }
         
-        // Отдельно следим за сообщениями выбранного агента
         viewModelScope.launch {
             _state.map { it.selectedAgentId }.distinctUntilChanged().collectLatest { id ->
                 if (id != null) {
@@ -76,8 +74,14 @@ class LLMViewModel(
     fun createAgent() {
         val currentProvider = _state.value.selectedAgent?.provider ?: LLMProvider.Yandex()
         val newAgent = agentManager.createDefaultAgent(currentProvider)
+        
+        // Сначала обновляем локальный стейт, чтобы UI сразу увидел нового агента
+        _state.update { it.copy(
+            agents = it.agents + newAgent,
+            selectedAgentId = newAgent.id 
+        ) }
+        
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
-        _state.update { it.copy(selectedAgentId = newAgent.id) }
     }
 
     fun updateAgent(
@@ -87,10 +91,22 @@ class LLMViewModel(
         temperature: Double,
         provider: LLMProvider,
         stopWord: String,
-        maxTokens: Int
+        maxTokens: Int,
+        keepLastMessagesCount: Int,
+        summaryPrompt: String,
+        summaryDepth: SummaryDepth
     ) {
         val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val updatedAgent = agentManager.updateAgent(agent, name, systemPrompt, temperature, provider, stopWord, maxTokens)
+        val updatedAgent = agentManager.updateAgent(
+            agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth
+        )
+        
+        // Локальное обновление для отзывчивости
+        _state.update { currentState ->
+            val newAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
+            currentState.copy(agents = newAgents)
+        }
+        
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
 
@@ -103,10 +119,16 @@ class LLMViewModel(
                 id = Uuid.random().toString(),
                 name = "${agentToDuplicate.name} (копия)",
                 messages = emptyList(), 
-                totalTokensUsed = 0
+                totalTokensUsed = 0,
+                summary = null
             )
+            
+            _state.update { it.copy(
+                agents = it.agents + duplicatedAgent,
+                selectedAgentId = duplicatedAgent.id
+            ) }
+            
             viewModelScope.launch { repository.saveAgent(duplicatedAgent) }
-            _state.update { it.copy(selectedAgentId = duplicatedAgent.id) }
         }
     }
 
@@ -117,7 +139,10 @@ class LLMViewModel(
             repository.deleteAgent(agentId)
             _state.update { currentState ->
                 val newSelectedId = if (currentState.selectedAgentId == agentId) GENERAL_CHAT_ID else currentState.selectedAgentId
-                currentState.copy(selectedAgentId = newSelectedId)
+                currentState.copy(
+                    agents = currentState.agents.filter { it.id != agentId },
+                    selectedAgentId = newSelectedId
+                )
             }
         }
     }
@@ -140,7 +165,7 @@ class LLMViewModel(
         currentJob?.cancel()
         val agent = _state.value.selectedAgent ?: return
         viewModelScope.launch {
-            repository.saveAgent(agent.copy(messages = emptyList(), totalTokensUsed = 0))
+            repository.saveAgent(agent.copy(messages = emptyList(), totalTokensUsed = 0, summary = null))
         }
     }
 
@@ -162,7 +187,6 @@ class LLMViewModel(
         val currentAgent = _state.value.selectedAgent ?: return
         val agentId = currentAgent.id
 
-        // 1. Локальное обновление для мгновенного отклика
         _state.update { state ->
             val updatedAgents = state.agents.map { agent ->
                 if (agent.id == agentId) agent.copy(
@@ -173,9 +197,9 @@ class LLMViewModel(
             state.copy(agents = updatedAgents, isLoading = true)
         }
 
-        // 2. Сохранение в БД
         viewModelScope.launch {
             repository.saveMessage(agentId, userMessage)
+            checkAndSummarize(agentId)
         }
 
         currentJob?.cancel()
@@ -183,17 +207,17 @@ class LLMViewModel(
             val botMessageId = Uuid.random().toString()
             var currentContent = ""
 
-            // Получаем актуальный список сообщений из состояния (включая только что добавленное)
-            val history = _state.value.selectedAgent?.messages ?: listOf(userMessage)
+            val agentAfterSummary = _state.value.agents.find { it.id == agentId } ?: currentAgent
+            val history = prepareHistoryWithSummary(agentAfterSummary, userMessage)
 
             val flow = chatStreamingUseCase(
-                messages = if (_state.value.sendFullHistory) history else listOf(userMessage),
-                systemPrompt = currentAgent.systemPrompt,
-                maxTokens = currentAgent.maxTokens,
-                temperature = currentAgent.temperature,
-                stopWord = currentAgent.stopWord,
+                messages = history,
+                systemPrompt = agentAfterSummary.systemPrompt,
+                maxTokens = agentAfterSummary.maxTokens,
+                temperature = agentAfterSummary.temperature,
+                stopWord = agentAfterSummary.stopWord,
                 isJsonMode = _state.value.isJsonMode,
-                provider = currentAgent.provider
+                provider = agentAfterSummary.provider
             )
 
             if (_state.value.isStreamingEnabled) {
@@ -208,7 +232,6 @@ class LLMViewModel(
                     addBotMessageLocally(agentId, initialBotMessage)
                 }
                 .onCompletion {
-                    _state.update { it.copy(isLoading = false) }
                     val finalTokens = estimateTokens(currentContent)
                     val finalBotMessage = ChatMessage(
                         id = botMessageId,
@@ -217,6 +240,20 @@ class LLMViewModel(
                         tokenCount = finalTokens,
                         timestamp = currentTimeMillis()
                     )
+                    _state.update { state ->
+                        val updatedAgents = state.agents.map { agent ->
+                            if (agent.id == agentId) {
+                                val updatedMessages = agent.messages.map { msg ->
+                                    if (msg.id == botMessageId) finalBotMessage else msg
+                                }
+                                agent.copy(
+                                    messages = updatedMessages,
+                                    totalTokensUsed = agent.totalTokensUsed + finalTokens
+                                )
+                            } else agent
+                        }
+                        state.copy(agents = updatedAgents, isLoading = false)
+                    }
                     repository.saveMessage(agentId, finalBotMessage)
                 }
                 .collect { result ->
@@ -236,7 +273,6 @@ class LLMViewModel(
                     result.onSuccess { chunk -> fullResponse += chunk }.onFailure { error -> errorOccurred = error }
                 }
                 
-                _state.update { it.copy(isLoading = false) }
                 val finalMessageText = if (errorOccurred != null) fullResponse + "\n[Ошибка: ${errorOccurred.message}]" else fullResponse
                 val finalTokens = estimateTokens(finalMessageText)
                 val botMessage = ChatMessage(
@@ -247,7 +283,90 @@ class LLMViewModel(
                     timestamp = currentTimeMillis()
                 )
                 
+                _state.update { state ->
+                    val updatedAgents = state.agents.map { agent ->
+                        if (agent.id == agentId) agent.copy(
+                            messages = agent.messages + botMessage,
+                            totalTokensUsed = agent.totalTokensUsed + finalTokens
+                        ) else agent
+                    }
+                    state.copy(agents = updatedAgents, isLoading = false)
+                }
                 repository.saveMessage(agentId, botMessage)
+            }
+        }
+    }
+
+    private fun prepareHistoryWithSummary(agent: Agent, lastUserMessage: ChatMessage): List<ChatMessage> {
+        if (!_state.value.sendFullHistory) return listOf(lastUserMessage)
+
+        val messages = agent.messages.filter { !it.isSystemNotification }
+        val keepCount = agent.keepLastMessagesCount
+        
+        if (messages.size <= keepCount) return messages
+
+        val lastMessages = messages.takeLast(keepCount)
+        val summary = agent.summary ?: return messages
+
+        val summaryMessage = ChatMessage(
+            message = "Контекст предыдущей части беседы: $summary",
+            source = SourceType.SYSTEM,
+            timestamp = 0L
+        )
+
+        return listOf(summaryMessage) + lastMessages
+    }
+
+    private suspend fun checkAndSummarize(agentId: String) {
+        val agent = _state.value.agents.find { it.id == agentId } ?: return
+        val messages = agent.messages.filter { !it.isSystemNotification }
+        val keepCount = agent.keepLastMessagesCount
+
+        if (messages.size > keepCount + 3) {
+            val toSummarize = messages.dropLast(keepCount)
+            val chatText = toSummarize.joinToString("\n") { "${it.source.role}: ${it.message}" }
+            
+            val depthInstruction = when(agent.summaryDepth) {
+                SummaryDepth.LOW -> "Будь максимально кратким, выдели только самую суть в 1-2 предложениях."
+                SummaryDepth.MEDIUM -> "Сделай краткий обзор основных тем и решений."
+                SummaryDepth.HIGH -> "Подробно опиши ход обсуждения, все важные детали и контекст."
+            }
+            
+            val fullSummaryPrompt = "${agent.summaryPrompt}\n\nИнструкция по глубине: $depthInstruction\n\nДиалог для суммаризации:\n$chatText"
+            
+            val summaryFlow = chatStreamingUseCase(
+                messages = listOf(ChatMessage(message = fullSummaryPrompt, source = SourceType.USER)),
+                systemPrompt = "You are a helpful assistant specializing in conversation summarization.",
+                maxTokens = 1000,
+                temperature = 0.3,
+                stopWord = "",
+                isJsonMode = false,
+                provider = agent.provider
+            )
+
+            var summaryResult = ""
+            summaryFlow.collect { result ->
+                result.onSuccess { chunk -> summaryResult += chunk }
+            }
+
+            if (summaryResult.isNotBlank()) {
+                val updatedAgent = agent.copy(summary = summaryResult)
+                
+                // Сначала в стейт
+                _state.update { currentState ->
+                    val newAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
+                    currentState.copy(agents = newAgents)
+                }
+                
+                repository.saveAgentMetadata(updatedAgent)
+                
+                val notification = ChatMessage(
+                    message = "Контекст диалога был сжат для оптимизации (глубина: ${agent.summaryDepth.description})",
+                    source = SourceType.SYSTEM,
+                    timestamp = currentTimeMillis(),
+                    isSystemNotification = true
+                )
+                repository.saveMessage(agentId, notification)
             }
         }
     }
@@ -266,7 +385,10 @@ class LLMViewModel(
             val updatedAgents = state.agents.map { agent ->
                 if (agent.id == agentId) {
                     val updatedMessages = agent.messages.map { msg ->
-                        if (msg.id == messageId) msg.copy(message = newMessage) else msg
+                        if (msg.id == messageId) msg.copy(
+                            message = newMessage,
+                            tokenCount = estimateTokens(newMessage)
+                        ) else msg
                     }
                     agent.copy(messages = updatedMessages)
                 } else agent

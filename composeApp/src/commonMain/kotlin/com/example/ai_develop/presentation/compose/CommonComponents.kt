@@ -4,11 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.LLMProvider
 import com.example.ai_develop.presentation.ChatMessage
@@ -78,6 +82,11 @@ internal fun LLMSelector(
 
 @Composable
 internal fun MessageBubble(message: ChatMessage) {
+    if (message.isSystemNotification) {
+        SystemNotificationBubble(message.message)
+        return
+    }
+
     val isUser = message.source == SourceType.USER
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -105,7 +114,7 @@ internal fun MessageBubble(message: ChatMessage) {
                 }
                 if (message.tokenCount > 0) {
                     Text(
-                        text = "${message.tokenCount} tokens",
+                        text = "${message.tokenCount} токенов",
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.align(Alignment.End).padding(end = 8.dp, bottom = 4.dp),
                         color = if (isUser) Color.White.copy(alpha = 0.7f) else Color.Gray
@@ -119,5 +128,42 @@ internal fun MessageBubble(message: ChatMessage) {
             color = Color.Gray,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
         )
+    }
+}
+
+@Composable
+fun SystemNotificationBubble(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp, horizontal = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = Color(0xFFF3E5F5),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.widthIn(max = 400.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = Color(0xFF4A148C)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF4A148C),
+                    fontStyle = FontStyle.Italic,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
     }
 }

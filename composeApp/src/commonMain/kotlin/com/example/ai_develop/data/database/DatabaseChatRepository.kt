@@ -66,7 +66,11 @@ class DatabaseChatRepository(private val db: AppDatabase) {
         stopWord = stopWord,
         maxTokens = maxTokens,
         messages = messages,
-        totalTokensUsed = totalTokensUsed
+        totalTokensUsed = totalTokensUsed,
+        summary = summary,
+        keepLastMessagesCount = keepLastMessagesCount,
+        summaryPrompt = summaryPrompt,
+        summaryDepth = summaryDepth
     )
 
     private fun Agent.toEntity() = AgentEntity(
@@ -77,7 +81,11 @@ class DatabaseChatRepository(private val db: AppDatabase) {
         provider = provider,
         stopWord = stopWord,
         maxTokens = maxTokens,
-        totalTokensUsed = totalTokensUsed
+        totalTokensUsed = totalTokensUsed,
+        summary = summary,
+        keepLastMessagesCount = keepLastMessagesCount,
+        summaryPrompt = summaryPrompt,
+        summaryDepth = summaryDepth
     )
 
     private fun MessageEntity.toDomain() = ChatMessage(
@@ -85,7 +93,8 @@ class DatabaseChatRepository(private val db: AppDatabase) {
         message = message,
         source = source,
         tokenCount = tokenCount,
-        timestamp = timestamp
+        timestamp = timestamp,
+        isSystemNotification = isSystemNotification
     )
 
     private fun ChatMessage.toEntity(agentId: String) = MessageEntity(
@@ -94,6 +103,7 @@ class DatabaseChatRepository(private val db: AppDatabase) {
         message = message,
         source = source,
         tokenCount = tokenCount,
-        timestamp = timestamp
+        timestamp = timestamp,
+        isSystemNotification = isSystemNotification
     )
 }

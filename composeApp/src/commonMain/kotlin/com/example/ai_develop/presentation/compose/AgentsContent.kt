@@ -29,7 +29,7 @@ internal fun AgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -37,7 +37,6 @@ internal fun AgentsContent(
     val selectedAgentId = state.selectedAgentId
 
     Row(modifier = Modifier.fillMaxSize()) {
-        // Список агентов (слева)
         Column(
             modifier = Modifier
                 .width(300.dp)
@@ -79,14 +78,13 @@ internal fun AgentsContent(
             }
         }
 
-        // Детали/Редактирование (справа)
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             val selectedAgent = state.agents.find { it.id == selectedAgentId }
             if (selectedAgent != null) {
                 AgentDetailSettings(
                     agent = selectedAgent,
-                    onUpdate = { name, prompt, temp, provider, stop, tokens ->
-                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens)
+                    onUpdate = { name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth ->
+                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth)
                     },
                     templates = templates
                 )
@@ -186,8 +184,56 @@ fun AgentItem(
 @Composable
 fun AgentDetailSettings(
     agent: Agent,
-    onUpdate: (String, String, Double, LLMProvider, String, Int) -> Unit,
+    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit,
     templates: List<AgentTemplate>
+) {
+    var selectedTabIndex by remember { mutableIntStateOf(0) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White, RoundedCornerShape(16.dp))
+            .padding(20.dp)
+    ) {
+        Text(
+            text = if (agent.id == GENERAL_CHAT_ID) "Общий чат: ${agent.name}" else "Агент: ${agent.name}",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF4A148C),
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        TabRow(
+            selectedTabIndex = selectedTabIndex,
+            containerColor = Color.Transparent,
+            contentColor = Color(0xFF4A148C),
+            divider = {}
+        ) {
+            Tab(selected = selectedTabIndex == 0, onClick = { selectedTabIndex = 0 }) {
+                Box(Modifier.padding(12.dp)) { Text("Основные") }
+            }
+            Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }) {
+                Box(Modifier.padding(12.dp)) { Text("Суммаризация") }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Box(modifier = Modifier.weight(1f)) {
+            if (selectedTabIndex == 0) {
+                MainSettingsTab(agent, templates, onUpdate)
+            } else {
+                SummarySettingsTab(agent, onUpdate)
+            }
+        }
+    }
+}
+
+@Composable
+fun MainSettingsTab(
+    agent: Agent,
+    templates: List<AgentTemplate>,
+    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit
 ) {
     var name by remember(agent.id) { mutableStateOf(agent.name) }
     var prompt by remember(agent.id) { mutableStateOf(agent.systemPrompt) }
@@ -198,43 +244,17 @@ fun AgentDetailSettings(
 
     val isGeneral = agent.id == GENERAL_CHAT_ID
 
-    // Clamping temperature when provider changes
-    LaunchedEffect(provider) {
-        val maxAllowed = if (provider is LLMProvider.DeepSeek) 2.0 else 1.0
-        if (temp > maxAllowed) {
-            temp = maxAllowed
-        }
-    }
-
     LaunchedEffect(name, prompt, temp, provider, stopWord, maxTokens) {
-        // Проверяем, действительно ли что-то изменилось, чтобы не спамить обновлениями в БД
-        if (name != agent.name || 
-            prompt != agent.systemPrompt || 
-            temp != agent.temperature || 
-            provider != agent.provider || 
-            stopWord != agent.stopWord || 
-            maxTokens != agent.maxTokens
-        ) {
-            onUpdate(name, prompt, temp, provider, stopWord, maxTokens)
+        if (name != agent.name || prompt != agent.systemPrompt || temp != agent.temperature || 
+            provider != agent.provider || stopWord != agent.stopWord || maxTokens != agent.maxTokens) {
+            onUpdate(name, prompt, temp, provider, stopWord, maxTokens, agent.keepLastMessagesCount, agent.summaryPrompt, agent.summaryDepth)
         }
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.White, RoundedCornerShape(16.dp))
-            .padding(20.dp)
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text(
-            text = if (isGeneral) "Настройки общего чата" else "Настройки агента",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF4A148C)
-        )
-
-        // Шаблоны для быстрого заполнения (скрываем для общего чата, если хотим "дефолтные настройки")
         if (!isGeneral) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Применить шаблон:", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
@@ -262,7 +282,7 @@ fun AgentDetailSettings(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
             singleLine = true,
-            enabled = !isGeneral // Запрещаем менять имя общего чата
+            enabled = !isGeneral
         )
 
         OutlinedTextField(
@@ -294,16 +314,78 @@ fun AgentDetailSettings(
                 shape = RoundedCornerShape(12.dp)
             )
         }
+    }
+}
+
+@Composable
+fun SummarySettingsTab(
+    agent: Agent,
+    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit
+) {
+    var keepLastMessagesCount by remember(agent.id) { mutableIntStateOf(agent.keepLastMessagesCount) }
+    var summaryPrompt by remember(agent.id) { mutableStateOf(agent.summaryPrompt) }
+    var summaryDepth by remember(agent.id) { mutableStateOf(agent.summaryDepth) }
+
+    LaunchedEffect(keepLastMessagesCount, summaryPrompt, summaryDepth) {
+        if (keepLastMessagesCount != agent.keepLastMessagesCount || 
+            summaryPrompt != agent.summaryPrompt || 
+            summaryDepth != agent.summaryDepth) {
+            onUpdate(agent.name, agent.systemPrompt, agent.temperature, agent.provider, agent.stopWord, agent.maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        Text("Настройки сжатия контекста", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+
+        OutlinedTextField(
+            value = keepLastMessagesCount.toString(),
+            onValueChange = { it.toIntOrNull()?.let { v -> keepLastMessagesCount = v } },
+            label = { Text("Окно живых сообщений") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            helperText = { Text("Кол-во последних сообщений, которые НЕ будут сжаты") }
+        )
+
+        OutlinedTextField(
+            value = summaryPrompt,
+            onValueChange = { summaryPrompt = it },
+            label = { Text("Промпт для суммаризации") },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+            shape = RoundedCornerShape(12.dp),
+            helperText = { Text("Инструкция для модели, как именно сжимать диалог") }
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Глубина суммаризации:", style = MaterialTheme.typography.labelLarge)
+            SummaryDepth.entries.forEach { depth ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { summaryDepth = depth }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = summaryDepth == depth, onClick = { summaryDepth = depth })
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(depth.name, fontWeight = FontWeight.Bold)
+                        Text(depth.description, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+                }
+            }
+        }
         
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "Изменения применяются мгновенно",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray.copy(alpha = 0.6f)
-            )
+        if (agent.summary != null) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("Текущий сжатый контекст:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(agent.summary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
 }
@@ -335,5 +417,38 @@ fun TemperatureSlider(temp: Double, provider: LLMProvider, onTempChange: (Double
                 activeTrackColor = Color(0xFF4A148C)
             )
         )
+    }
+}
+
+@Composable
+fun OutlinedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: @Composable (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    shape: androidx.compose.ui.graphics.Shape = OutlinedTextFieldDefaults.shape,
+    singleLine: Boolean = false,
+    enabled: Boolean = true,
+    helperText: @Composable (() -> Unit)? = null
+) {
+    Column(modifier = modifier) {
+        androidx.compose.material3.OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = label,
+            modifier = Modifier.fillMaxWidth(),
+            shape = shape,
+            singleLine = singleLine,
+            enabled = enabled
+        )
+        if (helperText != null) {
+            Box(modifier = Modifier.padding(start = 12.dp, top = 4.dp)) {
+                CompositionLocalProvider(LocalContentColor provides Color.Gray) {
+                    ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+                        helperText()
+                    }
+                }
+            }
+        }
     }
 }
