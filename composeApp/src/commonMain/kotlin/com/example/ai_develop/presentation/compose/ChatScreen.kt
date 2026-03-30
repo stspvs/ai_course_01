@@ -55,7 +55,7 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                         onClearChat = { viewModel.clearChat() },
                         onToggleStreaming = { viewModel.updateStreamingEnabled(it) },
                         onToggleHistory = { viewModel.updateSendFullHistory(it) },
-                        onSelectAgent = { viewModel.selectAgent(it ?: LLMViewModel.GENERAL_CHAT_ID) },
+                        onSelectAgent = { viewModel.selectAgent(it ?: GENERAL_CHAT_ID) },
                         onUpdateStrategy = { viewModel.updateMemoryStrategy(it) },
                         onCreateBranch = { fromId, name -> viewModel.createBranch(fromId, name) },
                         onSwitchBranch = { viewModel.switchBranch(it) }
@@ -70,7 +70,7 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                         },
                         onDeleteAgent = { viewModel.deleteAgent(it) },
                         onDuplicateAgent = { viewModel.duplicateAgent(it) },
-                        onSelectAgent = { viewModel.selectAgent(it ?: LLMViewModel.GENERAL_CHAT_ID) }
+                        onSelectAgent = { viewModel.selectAgent(it ?: GENERAL_CHAT_ID) }
                     )
                 }
             }

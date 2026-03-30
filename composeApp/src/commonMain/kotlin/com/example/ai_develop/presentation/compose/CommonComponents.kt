@@ -12,9 +12,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.*
+import kotlin.math.round
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,6 +74,95 @@ internal fun LLMSelector(
                         onProviderChange(when(currentProvider){ is LLMProvider.DeepSeek -> LLMProvider.DeepSeek(m); is LLMProvider.OpenRouter -> LLMProvider.OpenRouter(m); is LLMProvider.Yandex -> LLMProvider.Yandex(m) })
                         modelExpanded = false
                     })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun TemperatureSlider(
+    temp: Double,
+    provider: LLMProvider,
+    onTempChange: (Double) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val displayTemp = (round(temp * 10) / 10).toString()
+            Text("Температура: $displayTemp", style = MaterialTheme.typography.labelMedium)
+            val description = when {
+                temp < 0.3 -> "Точные ответы"
+                temp < 0.7 -> "Сбалансированно"
+                else -> "Креативность"
+            }
+            Text(description, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        }
+        Slider(
+            value = temp.toFloat(),
+            onValueChange = { onTempChange(it.toDouble()) },
+            valueRange = 0f..2f,
+            steps = 19,
+            colors = SliderDefaults.colors(
+                thumbColor = Color(0xFF4A148C),
+                activeTrackColor = Color(0xFF4A148C)
+            )
+        )
+    }
+}
+
+@Composable
+internal fun MemoryStrategySelector(
+    currentStrategy: ChatMemoryStrategy,
+    onStrategyChange: (ChatMemoryStrategy) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Стратегия памяти", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        
+        val strategies = listOf(
+            "Sliding Window" to "Хранит последние N сообщений",
+            "Summarization" to "Сжимает старые сообщения в краткую суть",
+            "Sticky Facts" to "Извлекает и хранит ключевые факты",
+            "Branching" to "Позволяет создавать ветки диалога"
+        )
+
+        strategies.forEach { (name, desc) ->
+            val isSelected = when(name) {
+                "Sliding Window" -> currentStrategy is ChatMemoryStrategy.SlidingWindow
+                "Summarization" -> currentStrategy is ChatMemoryStrategy.Summarization
+                "Sticky Facts" -> currentStrategy is ChatMemoryStrategy.StickyFacts
+                "Branching" -> currentStrategy is ChatMemoryStrategy.Branching
+                else -> false
+            }
+
+            Surface(
+                onClick = {
+                    onStrategyChange(when(name) {
+                        "Sliding Window" -> ChatMemoryStrategy.SlidingWindow(10)
+                        "Summarization" -> ChatMemoryStrategy.Summarization(10)
+                        "Sticky Facts" -> ChatMemoryStrategy.StickyFacts(10)
+                        "Branching" -> ChatMemoryStrategy.Branching(100)
+                        else -> currentStrategy
+                    })
+                },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) Color(0xFFEDE7F6) else Color.Transparent,
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFF4A148C) else Color.LightGray.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = isSelected, onClick = null)
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text(desc, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
                 }
             }
         }

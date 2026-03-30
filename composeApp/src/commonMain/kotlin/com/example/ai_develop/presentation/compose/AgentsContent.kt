@@ -119,7 +119,7 @@ fun AgentItem(
     onDelete: () -> Unit,
     onDuplicate: () -> Unit
 ) {
-    val isGeneral = agent.id == LLMViewModel.GENERAL_CHAT_ID
+    val isGeneral = agent.id == GENERAL_CHAT_ID
     
     Card(
         modifier = Modifier
@@ -196,7 +196,7 @@ fun AgentDetailSettings(
             .padding(20.dp)
     ) {
         Text(
-            text = if (agent.id == LLMViewModel.GENERAL_CHAT_ID) "Общий чат: ${agent.name}" else "Агент: ${agent.name}",
+            text = if (agent.id == GENERAL_CHAT_ID) "Общий чат: ${agent.name}" else "Агент: ${agent.name}",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF4A148C),
@@ -242,7 +242,7 @@ fun MainSettingsTab(
     var maxTokens by remember(agent.id) { mutableIntStateOf(agent.maxTokens) }
     var provider by remember(agent.id) { mutableStateOf(agent.provider) }
 
-    val isGeneral = agent.id == LLMViewModel.GENERAL_CHAT_ID
+    val isGeneral = agent.id == GENERAL_CHAT_ID
 
     LaunchedEffect(name, prompt, temp, provider, stopWord, maxTokens) {
         if (name != agent.name || prompt != agent.systemPrompt || temp != agent.temperature || 
@@ -340,149 +340,37 @@ fun SummarySettingsTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text("Метод управления контекстом", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-        
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val strategies = listOf(
-                "Скользящее окно (Sliding Window)" to ChatMemoryStrategy.SlidingWindow(keepLastMessagesCount),
-                "Извлечение фактов (Sticky Facts)" to ChatMemoryStrategy.StickyFacts(keepLastMessagesCount),
-                "Суммаризация (Summarization)" to ChatMemoryStrategy.Summarization(keepLastMessagesCount, agent.summary),
-                "Ветвление диалога (Branching)" to ChatMemoryStrategy.Branching(keepLastMessagesCount)
-            )
-            
-            strategies.forEach { (label, strategy) ->
-                val isSelected = when {
-                    memoryStrategy is ChatMemoryStrategy.SlidingWindow && strategy is ChatMemoryStrategy.SlidingWindow -> true
-                    memoryStrategy is ChatMemoryStrategy.StickyFacts && strategy is ChatMemoryStrategy.StickyFacts -> true
-                    memoryStrategy is ChatMemoryStrategy.Summarization && strategy is ChatMemoryStrategy.Summarization -> true
-                    memoryStrategy is ChatMemoryStrategy.Branching && strategy is ChatMemoryStrategy.Branching -> true
-                    else -> false
-                }
-                
-                Row(
-                    Modifier.fillMaxWidth().clickable { 
-                        memoryStrategy = strategy 
-                    }.padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = isSelected, onClick = { memoryStrategy = strategy })
-                    Spacer(Modifier.width(8.dp))
-                    Text(label)
-                }
-            }
-        }
-
-        HorizontalDivider()
-
-        Text("Настройки сжатия и памяти", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        MemoryStrategySelector(currentStrategy = memoryStrategy, onStrategyChange = { memoryStrategy = it })
 
         OutlinedTextField(
             value = keepLastMessagesCount.toString(),
             onValueChange = { it.toIntOrNull()?.let { v -> keepLastMessagesCount = v } },
-            label = { Text("Окно живых сообщений") },
+            label = { Text("Кол-во последних сообщений в контексте") },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            helperText = { Text("Кол-во последних сообщений, которые НЕ будут сжаты") }
+            shape = RoundedCornerShape(12.dp)
         )
+
+        HorizontalDivider()
+
+        Text("Параметры суммаризации", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
 
         OutlinedTextField(
             value = summaryPrompt,
             onValueChange = { summaryPrompt = it },
-            label = { Text("Промпт для суммаризации") },
+            label = { Text("Инструкция для суммаризации") },
             modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-            shape = RoundedCornerShape(12.dp),
-            helperText = { Text("Инструкция для модели, как именно сжимать диалог") }
+            shape = RoundedCornerShape(12.dp)
         )
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Глубина суммаризации:", style = MaterialTheme.typography.labelLarge)
-            SummaryDepth.entries.forEach { depth ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { summaryDepth = depth }.padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = summaryDepth == depth, onClick = { summaryDepth = depth })
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(depth.name, fontWeight = FontWeight.Bold)
-                        Text(depth.description, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    }
-                }
-            }
-        }
-        
-        if (agent.summary != null) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("Текущий сжатый контекст:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Text(agent.summary, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun TemperatureSlider(temp: Double, provider: LLMProvider, onTempChange: (Double) -> Unit) {
-    val maxTemp = if (provider is LLMProvider.DeepSeek) 2f else 1f
-    Column {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            val tempFormatted = ((temp * 10).toInt() / 10.0).toString()
-            Text("Температура: $tempFormatted", style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = when {
-                    temp <= 0.3 -> "Точный"
-                    temp <= 0.8 -> "Баланс"
-                    else -> "Креативный"
-                },
-                color = Color(0xFF4A148C),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Slider(
-            value = temp.toFloat().coerceIn(0f, maxTemp),
-            onValueChange = { onTempChange(it.toDouble()) },
-            valueRange = 0f..maxTemp,
-            colors = SliderDefaults.colors(
-                thumbColor = Color(0xFF4A148C),
-                activeTrackColor = Color(0xFF4A148C)
-            )
-        )
-    }
-}
-
-@Composable
-fun OutlinedTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: @Composable (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-    shape: androidx.compose.ui.graphics.Shape = OutlinedTextFieldDefaults.shape,
-    singleLine: Boolean = false,
-    enabled: Boolean = true,
-    helperText: @Composable (() -> Unit)? = null
-) {
-    Column(modifier = modifier) {
-        androidx.compose.material3.OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = label,
-            modifier = Modifier.fillMaxWidth(),
-            shape = shape,
-            singleLine = singleLine,
-            enabled = enabled
-        )
-        if (helperText != null) {
-            Box(modifier = Modifier.padding(start = 12.dp, top = 4.dp)) {
-                CompositionLocalProvider(LocalContentColor provides Color.Gray) {
-                    ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                        helperText()
-                    }
+            Text("Глубина суммаризации", style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SummaryDepth.entries.forEach { depth ->
+                    FilterChip(
+                        selected = summaryDepth == depth,
+                        onClick = { summaryDepth = depth },
+                        label = { Text(depth.description) }
+                    )
                 }
             }
         }
