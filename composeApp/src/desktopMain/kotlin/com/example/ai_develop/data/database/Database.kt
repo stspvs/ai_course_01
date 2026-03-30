@@ -6,7 +6,12 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import java.io.File
 
 fun getDatabaseBuilder(): RoomDatabase.Builder<AppDatabase> {
-    val dbFile = File(System.getProperty("java.io.tmpdir"), DATABASE_NAME)
+    val userHome = System.getProperty("user.home")
+    val appDir = File(userHome, ".ai_develop")
+    if (!appDir.exists()) {
+        appDir.mkdirs()
+    }
+    val dbFile = File(appDir, DATABASE_NAME)
     return Room.databaseBuilder<AppDatabase>(
         name = dbFile.absolutePath,
     ).setDriver(BundledSQLiteDriver())

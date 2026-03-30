@@ -33,7 +33,7 @@ class DatabaseChatRepository(private val db: AppDatabase) {
     }
 
     suspend fun saveAgentMetadata(agent: Agent) {
-        dao.insertAgent(agent.toEntity())
+        dao.upsertAgent(agent.toEntity())
     }
 
     suspend fun saveMessage(agentId: String, message: ChatMessage) {

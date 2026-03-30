@@ -14,8 +14,18 @@ interface AgentDao {
     @Query("SELECT * FROM agents WHERE id = :id")
     fun getAgentByIdFlow(id: String): Flow<AgentEntity?>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAgent(agent: AgentEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAgentRaw(agent: AgentEntity): Long
+
+    @Update
+    suspend fun updateAgent(agent: AgentEntity)
+
+    @Transaction
+    suspend fun upsertAgent(agent: AgentEntity) {
+        if (insertAgentRaw(agent) == -1L) {
+            updateAgent(agent)
+        }
+    }
 
     @Delete
     suspend fun deleteAgent(agentEntity: AgentEntity)
@@ -31,7 +41,7 @@ interface AgentDao {
 
     @Transaction
     suspend fun updateAgentWithMessages(agent: AgentEntity, messages: List<MessageEntity>) {
-        insertAgent(agent)
+        upsertAgent(agent)
         deleteMessagesForAgent(agent.id)
         messages.forEach { insertMessage(it) }
     }

@@ -74,13 +74,10 @@ class LLMViewModel(
     fun createAgent() {
         val currentProvider = _state.value.selectedAgent?.provider ?: LLMProvider.Yandex()
         val newAgent = agentManager.createDefaultAgent(currentProvider)
-        
-        // Сначала обновляем локальный стейт, чтобы UI сразу увидел нового агента
         _state.update { it.copy(
             agents = it.agents + newAgent,
             selectedAgentId = newAgent.id 
         ) }
-        
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
     }
 
@@ -100,19 +97,15 @@ class LLMViewModel(
         val updatedAgent = agentManager.updateAgent(
             agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth
         )
-        
-        // Локальное обновление для отзывчивости
         _state.update { currentState ->
             val newAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
             currentState.copy(agents = newAgents)
         }
-        
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
 
     fun duplicateAgent(agentId: String) {
         if (agentId == GENERAL_CHAT_ID) return
-        
         val agentToDuplicate = _state.value.agents.find { it.id == agentId }
         if (agentToDuplicate != null) {
             val duplicatedAgent = agentToDuplicate.copy(
@@ -122,19 +115,16 @@ class LLMViewModel(
                 totalTokensUsed = 0,
                 summary = null
             )
-            
             _state.update { it.copy(
                 agents = it.agents + duplicatedAgent,
                 selectedAgentId = duplicatedAgent.id
             ) }
-            
             viewModelScope.launch { repository.saveAgent(duplicatedAgent) }
         }
     }
 
     fun deleteAgent(agentId: String) {
         if (agentId == GENERAL_CHAT_ID) return
-        
         viewModelScope.launch {
             repository.deleteAgent(agentId)
             _state.update { currentState ->
@@ -268,11 +258,9 @@ class LLMViewModel(
             } else {
                 var fullResponse = ""
                 var errorOccurred: Throwable? = null
-                
                 flow.collect { result ->
                     result.onSuccess { chunk -> fullResponse += chunk }.onFailure { error -> errorOccurred = error }
                 }
-                
                 val finalMessageText = if (errorOccurred != null) fullResponse + "\n[Ошибка: ${errorOccurred.message}]" else fullResponse
                 val finalTokens = estimateTokens(finalMessageText)
                 val botMessage = ChatMessage(
@@ -282,7 +270,6 @@ class LLMViewModel(
                     tokenCount = finalTokens,
                     timestamp = currentTimeMillis()
                 )
-                
                 _state.update { state ->
                     val updatedAgents = state.agents.map { agent ->
                         if (agent.id == agentId) agent.copy(
@@ -299,14 +286,25 @@ class LLMViewModel(
 
     private fun prepareHistoryWithSummary(agent: Agent, lastUserMessage: ChatMessage): List<ChatMessage> {
         if (!_state.value.sendFullHistory) return listOf(lastUserMessage)
-
-        val messages = agent.messages.filter { !it.isSystemNotification }
-        val keepCount = agent.keepLastMessagesCount
         
-        if (messages.size <= keepCount) return messages
+        val allMessages = agent.messages
+        val summary = agent.summary
+        
+        if (summary == null) {
+            return allMessages.filter { !it.isSystemNotification }
+        }
 
-        val lastMessages = messages.takeLast(keepCount)
-        val summary = agent.summary ?: return messages
+        // Ищем индекс последнего уведомления о суммаризации
+        val lastSummaryIndex = allMessages.indexOfLast { 
+            it.isSystemNotification && it.message.contains("Контекст диалога сжат") 
+        }
+        
+        // Берем сообщения после уведомления, чтобы не терять контекст между "старым summary" и "текущим окном keepCount"
+        val messagesAfterSummary = if (lastSummaryIndex != -1) {
+            allMessages.subList(lastSummaryIndex + 1, allMessages.size).filter { !it.isSystemNotification }
+        } else {
+            allMessages.filter { !it.isSystemNotification }.takeLast(agent.keepLastMessagesCount)
+        }
 
         val summaryMessage = ChatMessage(
             message = "Контекст предыдущей части беседы: $summary",
@@ -314,16 +312,29 @@ class LLMViewModel(
             timestamp = 0L
         )
 
-        return listOf(summaryMessage) + lastMessages
+        return listOf(summaryMessage) + messagesAfterSummary
     }
 
     private suspend fun checkAndSummarize(agentId: String) {
         val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val messages = agent.messages.filter { !it.isSystemNotification }
+        val allMessages = agent.messages
+        val nonSystemMessages = allMessages.filter { !it.isSystemNotification }
         val keepCount = agent.keepLastMessagesCount
 
-        if (messages.size > keepCount + 3) {
-            val toSummarize = messages.dropLast(keepCount)
+        val lastSummaryIndex = allMessages.indexOfLast { 
+            it.isSystemNotification && it.message.contains("Контекст диалога сжат") 
+        }
+        
+        // Считаем сколько сообщений накопилось ПОСЛЕ последней суммаризации
+        val messagesSinceLastSummary = if (lastSummaryIndex != -1) {
+            allMessages.subList(lastSummaryIndex + 1, allMessages.size).filter { !it.isSystemNotification }
+        } else {
+            nonSystemMessages
+        }
+
+        // Выполняем суммаризацию только если накопился пакет новых сообщений (например, 5 штук) сверх лимита
+        if (messagesSinceLastSummary.size > keepCount + 5) {
+            val toSummarize = nonSystemMessages.dropLast(keepCount)
             val chatText = toSummarize.joinToString("\n") { "${it.source.role}: ${it.message}" }
             
             val depthInstruction = when(agent.summaryDepth) {
@@ -350,23 +361,28 @@ class LLMViewModel(
             }
 
             if (summaryResult.isNotBlank()) {
-                val updatedAgent = agent.copy(summary = summaryResult)
-                
-                // Сначала в стейт
-                _state.update { currentState ->
-                    val newAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
-                    currentState.copy(agents = newAgents)
-                }
-                
-                repository.saveAgentMetadata(updatedAgent)
-                
                 val notification = ChatMessage(
-                    message = "Контекст диалога был сжат для оптимизации (глубина: ${agent.summaryDepth.description})",
+                    message = "Контекст диалога сжат. Краткое содержание:\n$summaryResult",
                     source = SourceType.SYSTEM,
                     timestamp = currentTimeMillis(),
                     isSystemNotification = true
                 )
-                repository.saveMessage(agentId, notification)
+
+                _state.update { currentState ->
+                    val newAgents = currentState.agents.map { a ->
+                        if (a.id == agentId) a.copy(
+                            summary = summaryResult,
+                            messages = a.messages + notification
+                        ) else a
+                    }
+                    currentState.copy(agents = newAgents)
+                }
+                
+                val updatedAgent = _state.value.agents.find { it.id == agentId }
+                if (updatedAgent != null) {
+                    repository.saveAgentMetadata(updatedAgent)
+                    repository.saveMessage(agentId, notification)
+                }
             }
         }
     }
