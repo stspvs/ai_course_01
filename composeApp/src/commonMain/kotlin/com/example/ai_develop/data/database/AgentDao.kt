@@ -14,18 +14,8 @@ interface AgentDao {
     @Query("SELECT * FROM agents WHERE id = :id")
     fun getAgentByIdFlow(id: String): Flow<AgentEntity?>
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAgentRaw(agent: AgentEntity): Long
-
-    @Update
-    suspend fun updateAgent(agent: AgentEntity)
-
-    @Transaction
-    suspend fun upsertAgent(agent: AgentEntity) {
-        if (insertAgentRaw(agent) == -1L) {
-            updateAgent(agent)
-        }
-    }
+    @Upsert
+    suspend fun upsertAgent(agent: AgentEntity)
 
     @Delete
     suspend fun deleteAgent(agentEntity: AgentEntity)

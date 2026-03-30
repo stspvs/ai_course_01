@@ -37,34 +37,37 @@ class LLMViewModel(
         viewModelScope.launch {
             repository.getAgents().collect { dbAgents ->
                 _state.update { currentState ->
-                    if (dbAgents.isEmpty()) {
-                        // Если БД пуста, создаем/сохраняем хотя бы Общий чат
-                        val generalAgent = currentState.agents.find { it.id == GENERAL_CHAT_ID }
-                        if (generalAgent != null) {
-                            viewModelScope.launch { repository.saveAgentMetadata(generalAgent) }
+                    val finalAgentsFromDb = if (dbAgents.isEmpty()) {
+                        // Если БД пуста, сохраняем Общий чат
+                        val general = currentState.agents.find { it.id == GENERAL_CHAT_ID }
+                        if (general != null) {
+                            viewModelScope.launch { repository.saveAgentMetadata(general) }
                         }
-                        currentState
+                        currentState.agents
                     } else {
-                        // Мапим агентов из БД, сохраняя сообщения, если они уже есть в памяти (для плавности)
-                        val updatedAgents = dbAgents.map { dbAgent ->
+                        // Мапим агентов из БД, сохраняя сообщения в памяти (getAgents их не грузит)
+                        val updated = dbAgents.map { dbAgent ->
                             val existingAgent = currentState.agents.find { it.id == dbAgent.id }
-                            if (existingAgent != null && dbAgent.messages.isEmpty() && existingAgent.messages.isNotEmpty()) {
+                            if (existingAgent != null && existingAgent.messages.isNotEmpty()) {
                                 dbAgent.copy(messages = existingAgent.messages)
                             } else {
                                 dbAgent
                             }
                         }
                         
-                        // Если в списке из БД нет Общего чата (странно, но вдруг), добавляем его из текущего стейта
-                        val finalAgents = if (updatedAgents.none { it.id == GENERAL_CHAT_ID }) {
+                        // Если в БД нет Общего чата, добавляем его и сохраняем
+                        if (updated.none { it.id == GENERAL_CHAT_ID }) {
                             val general = currentState.agents.find { it.id == GENERAL_CHAT_ID }
-                            if (general != null) listOf(general) + updatedAgents else updatedAgents
+                            if (general != null) {
+                                viewModelScope.launch { repository.saveAgentMetadata(general) }
+                                listOf(general) + updated
+                            } else updated
                         } else {
-                            updatedAgents
+                            updated
                         }
-                        
-                        currentState.copy(agents = finalAgents)
                     }
+                    
+                    currentState.copy(agents = finalAgentsFromDb)
                 }
             }
         }
@@ -78,7 +81,6 @@ class LLMViewModel(
                             _state.update { currentState ->
                                 val updatedAgents = currentState.agents.map {
                                     if (it.id == id) {
-                                        // Обновляем только если данные реально изменились или сообщения подгрузились
                                         it.copy(
                                             messages = fullAgent.messages,
                                             totalTokensUsed = fullAgent.totalTokensUsed,
@@ -101,11 +103,14 @@ class LLMViewModel(
         val currentProvider = _state.value.selectedAgent?.provider ?: LLMProvider.Yandex()
         val newAgent = agentManager.createDefaultAgent(currentProvider)
         
-        // Сначала сохраняем в БД, обсерватор сам обновит список агентов в стейте
+        // Обновляем стейт сразу для мгновенной реакции UI
+        _state.update { it.copy(
+            agents = it.agents + newAgent,
+            selectedAgentId = newAgent.id 
+        ) }
+
         viewModelScope.launch { 
             repository.saveAgentMetadata(newAgent)
-            // И только после запроса на сохранение переключаем ID
-            _state.update { it.copy(selectedAgentId = newAgent.id) }
         }
     }
 
@@ -379,7 +384,8 @@ class LLMViewModel(
             messages = emptyList(),
             totalTokensUsed = 0
         )
-        // Сохраняем в БД, обсерватор обновит список
+        // Обновляем локально и сохраняем
+        _state.update { it.copy(agents = it.agents + newAgent, selectedAgentId = newAgent.id) }
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
     }
 
