@@ -21,7 +21,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.Agent
 import com.example.ai_develop.domain.ChatMemoryStrategy
 import com.example.ai_develop.domain.ChatMessage
@@ -83,15 +82,9 @@ internal fun ChatContent(
 
         ChatInputArea(
             input = input,
-            isStreamingEnabled = state.isStreamingEnabled,
-            sendFullHistory = state.sendFullHistory,
-            currentStrategy = activeAgent?.memoryStrategy ?: ChatMemoryStrategy.SlidingWindow(10),
             onInputChange = onInputChange,
             onSendMessage = onSendMessage,
-            onClearChat = onClearChat,
-            onToggleStreaming = onToggleStreaming,
-            onToggleHistory = onToggleHistory,
-            onUpdateStrategy = onUpdateStrategy
+            onClearChat = onClearChat
         )
     }
 }
@@ -232,15 +225,9 @@ private fun ChatTopBar(
 @Composable
 private fun ChatInputArea(
     input: String,
-    isStreamingEnabled: Boolean,
-    sendFullHistory: Boolean,
-    currentStrategy: ChatMemoryStrategy,
     onInputChange: (String) -> Unit,
     onSendMessage: (String) -> Unit,
-    onClearChat: () -> Unit,
-    onToggleStreaming: (Boolean) -> Unit,
-    onToggleHistory: (Boolean) -> Unit,
-    onUpdateStrategy: (ChatMemoryStrategy) -> Unit
+    onClearChat: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -252,17 +239,6 @@ private fun ChatInputArea(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FilterChip(
-                    selected = currentStrategy is ChatMemoryStrategy.SlidingWindow,
-                    onClick = { onUpdateStrategy(ChatMemoryStrategy.SlidingWindow(10)) },
-                    label = { Text("Sliding Window", fontSize = 10.sp) }
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                FilterChip(
-                    selected = currentStrategy is ChatMemoryStrategy.StickyFacts,
-                    onClick = { onUpdateStrategy(ChatMemoryStrategy.StickyFacts(10)) },
-                    label = { Text("Sticky Facts", fontSize = 10.sp) }
-                )
                 Spacer(modifier = Modifier.weight(1f))
                 IconButton(onClick = onClearChat) { Icon(Icons.Default.Refresh, contentDescription = "Clear") }
             }

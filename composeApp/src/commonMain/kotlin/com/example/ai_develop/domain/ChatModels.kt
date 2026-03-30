@@ -53,9 +53,12 @@ sealed interface ChatMemoryStrategy {
     ) : ChatMemoryStrategy
 
     @Serializable
+    data class Branching(val windowSize: Int = 100) : ChatMemoryStrategy
+
+    @Serializable
     data class Summarization(
         val windowSize: Int,
-        val summary: String? = null
+        val currentSummary: String? = null
     ) : ChatMemoryStrategy
 }
 

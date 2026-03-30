@@ -213,7 +213,7 @@ fun AgentDetailSettings(
                 Box(Modifier.padding(12.dp)) { Text("Основные") }
             }
             Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }) {
-                Box(Modifier.padding(12.dp)) { Text("Суммаризация") }
+                Box(Modifier.padding(12.dp)) { Text("Память и Контекст") }
             }
         }
 
@@ -344,9 +344,10 @@ fun SummarySettingsTab(
         
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val strategies = listOf(
-                "Скользящее окно" to ChatMemoryStrategy.SlidingWindow(keepLastMessagesCount),
+                "Скользящее окно (Sliding Window)" to ChatMemoryStrategy.SlidingWindow(keepLastMessagesCount),
                 "Извлечение фактов (Sticky Facts)" to ChatMemoryStrategy.StickyFacts(keepLastMessagesCount),
-                "Суммаризация (Summarization)" to ChatMemoryStrategy.Summarization(keepLastMessagesCount, agent.summary)
+                "Суммаризация (Summarization)" to ChatMemoryStrategy.Summarization(keepLastMessagesCount, agent.summary),
+                "Ветвление диалога (Branching)" to ChatMemoryStrategy.Branching(keepLastMessagesCount)
             )
             
             strategies.forEach { (label, strategy) ->
@@ -354,6 +355,7 @@ fun SummarySettingsTab(
                     memoryStrategy is ChatMemoryStrategy.SlidingWindow && strategy is ChatMemoryStrategy.SlidingWindow -> true
                     memoryStrategy is ChatMemoryStrategy.StickyFacts && strategy is ChatMemoryStrategy.StickyFacts -> true
                     memoryStrategy is ChatMemoryStrategy.Summarization && strategy is ChatMemoryStrategy.Summarization -> true
+                    memoryStrategy is ChatMemoryStrategy.Branching && strategy is ChatMemoryStrategy.Branching -> true
                     else -> false
                 }
                 
@@ -370,9 +372,9 @@ fun SummarySettingsTab(
             }
         }
 
-        Divider()
+        HorizontalDivider()
 
-        Text("Настройки сжатия", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Text("Настройки сжатия и памяти", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
 
         OutlinedTextField(
             value = keepLastMessagesCount.toString(),
