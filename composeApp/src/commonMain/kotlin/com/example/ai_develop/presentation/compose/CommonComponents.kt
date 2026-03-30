@@ -14,9 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.example.ai_develop.domain.LLMProvider
-import com.example.ai_develop.presentation.ChatMessage
-import com.example.ai_develop.presentation.SourceType
+import com.example.ai_develop.domain.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

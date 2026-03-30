@@ -1,8 +1,6 @@
 package com.example.ai_develop.data.database
 
-import com.example.ai_develop.domain.LLMProvider
-import com.example.ai_develop.presentation.Agent
-import com.example.ai_develop.presentation.ChatMessage
+import com.example.ai_develop.domain.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -38,15 +36,10 @@ class DatabaseChatRepository(private val db: AppDatabase) {
 
     suspend fun saveMessage(agentId: String, message: ChatMessage) {
         dao.insertMessage(message.toEntity(agentId))
-        // Обновляем общее количество токенов в агенте
         val agent = dao.getAgentById(agentId)
         if (agent != null) {
             dao.updateTokens(agentId, agent.totalTokensUsed + message.tokenCount)
         }
-    }
-
-    suspend fun clearChatTokens(agentId: String) {
-        dao.updateTokens(agentId, 0)
     }
 
     suspend fun deleteAgent(agentId: String) {
@@ -68,9 +61,12 @@ class DatabaseChatRepository(private val db: AppDatabase) {
         messages = messages,
         totalTokensUsed = totalTokensUsed,
         summary = summary,
-        keepLastMessagesCount = keepLastMessagesCount,
         summaryPrompt = summaryPrompt,
-        summaryDepth = summaryDepth
+        summaryDepth = summaryDepth,
+        memoryStrategy = memoryStrategy,
+        branches = branches,
+        currentBranchId = currentBranchId,
+        keepLastMessagesCount = keepLastMessagesCount
     )
 
     private fun Agent.toEntity() = AgentEntity(
@@ -83,13 +79,17 @@ class DatabaseChatRepository(private val db: AppDatabase) {
         maxTokens = maxTokens,
         totalTokensUsed = totalTokensUsed,
         summary = summary,
-        keepLastMessagesCount = keepLastMessagesCount,
         summaryPrompt = summaryPrompt,
-        summaryDepth = summaryDepth
+        summaryDepth = summaryDepth,
+        memoryStrategy = memoryStrategy,
+        branches = branches,
+        currentBranchId = currentBranchId,
+        keepLastMessagesCount = keepLastMessagesCount
     )
 
     private fun MessageEntity.toDomain() = ChatMessage(
         id = id,
+        parentId = parentId,
         message = message,
         source = source,
         tokenCount = tokenCount,
@@ -100,6 +100,7 @@ class DatabaseChatRepository(private val db: AppDatabase) {
     private fun ChatMessage.toEntity(agentId: String) = MessageEntity(
         id = id,
         agentId = agentId,
+        parentId = parentId,
         message = message,
         source = source,
         tokenCount = tokenCount,

@@ -1,7 +1,9 @@
 package com.example.ai_develop.presentation.compose
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ai_develop.domain.Agent
+import com.example.ai_develop.domain.ChatMemoryStrategy
+import com.example.ai_develop.domain.ChatMessage
 import com.example.ai_develop.presentation.LLMStateModel
 
 @Composable
@@ -31,7 +36,10 @@ internal fun ChatContent(
     onClearChat: () -> Unit,
     onToggleStreaming: (Boolean) -> Unit,
     onToggleHistory: (Boolean) -> Unit,
-    onSelectAgent: (String?) -> Unit
+    onSelectAgent: (String?) -> Unit,
+    onUpdateStrategy: (ChatMemoryStrategy) -> Unit,
+    onCreateBranch: (String, String) -> Unit,
+    onSwitchBranch: (String?) -> Unit
 ) {
     val activeAgent = state.agents.find { it.id == state.selectedAgentId }
     var menuExpanded by remember { mutableStateOf(false) }
@@ -39,7 +47,6 @@ internal fun ChatContent(
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFFE3F2FD))
     ) {
-        // Top Bar with Agent Selector
         ChatTopBar(
             activeAgentName = activeAgent?.name ?: "Общий чат",
             isAgentSelected = activeAgent != null,
@@ -51,13 +58,12 @@ internal fun ChatContent(
             onMenuToggle = { menuExpanded = it }
         )
 
-        // Messages List
         val messages = state.currentMessages
         val listState = rememberLazyListState()
         
-        LaunchedEffect(messages.size) {
+        LaunchedEffect(messages.size, messages.lastOrNull()?.message?.length) {
             if (messages.isNotEmpty()) {
-                listState.animateScrollToItem(messages.size - 1)
+                listState.scrollToItem(messages.size - 1)
             }
         }
 
@@ -67,21 +73,67 @@ internal fun ChatContent(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            items(messages) { message ->
-                MessageBubble(message = message)
+            items(messages, key = { it.id }) { message ->
+                MessageItem(
+                    message = message,
+                    onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) }
+                )
             }
         }
 
-        // Bottom Input Area
         ChatInputArea(
             input = input,
             isStreamingEnabled = state.isStreamingEnabled,
             sendFullHistory = state.sendFullHistory,
+            currentStrategy = activeAgent?.memoryStrategy ?: ChatMemoryStrategy.SlidingWindow(10),
             onInputChange = onInputChange,
             onSendMessage = onSendMessage,
             onClearChat = onClearChat,
             onToggleStreaming = onToggleStreaming,
-            onToggleHistory = onToggleHistory
+            onToggleHistory = onToggleHistory,
+            onUpdateStrategy = onUpdateStrategy
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MessageItem(
+    message: ChatMessage,
+    onCreateBranch: (String) -> Unit
+) {
+    var showBranchDialog by remember { mutableStateOf(false) }
+    var branchName by remember { mutableStateOf("") }
+
+    Box(
+        modifier = Modifier.combinedClickable(
+            onLongClick = { showBranchDialog = true },
+            onClick = {}
+        )
+    ) {
+        MessageBubble(message = message)
+    }
+
+    if (showBranchDialog) {
+        AlertDialog(
+            onDismissRequest = { showBranchDialog = false },
+            title = { Text("Создать новую ветку?") },
+            text = {
+                OutlinedTextField(
+                    value = branchName,
+                    onValueChange = { branchName = it },
+                    label = { Text("Название ветки") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onCreateBranch(branchName.ifBlank { "Ветка от ${message.id.take(4)}" })
+                    showBranchDialog = false
+                }) { Text("Создать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBranchDialog = false }) { Text("Отмена") }
+            }
         )
     }
 }
@@ -92,7 +144,7 @@ private fun ChatTopBar(
     isAgentSelected: Boolean,
     isLoading: Boolean,
     tokensUsed: Int,
-    agents: List<com.example.ai_develop.presentation.Agent>,
+    agents: List<Agent>,
     onSelectAgent: (String?) -> Unit,
     menuExpanded: Boolean,
     onMenuToggle: (Boolean) -> Unit
@@ -147,11 +199,6 @@ private fun ChatTopBar(
                         )
                     }
                 }
-                if (isAgentSelected) {
-                    IconButton(onClick = { onSelectAgent(null) }) {
-                        Icon(Icons.Default.Close, contentDescription = "Exit", tint = Color.Gray)
-                    }
-                }
             }
 
             DropdownMenu(
@@ -187,11 +234,13 @@ private fun ChatInputArea(
     input: String,
     isStreamingEnabled: Boolean,
     sendFullHistory: Boolean,
+    currentStrategy: ChatMemoryStrategy,
     onInputChange: (String) -> Unit,
     onSendMessage: (String) -> Unit,
     onClearChat: () -> Unit,
     onToggleStreaming: (Boolean) -> Unit,
-    onToggleHistory: (Boolean) -> Unit
+    onToggleHistory: (Boolean) -> Unit,
+    onUpdateStrategy: (ChatMemoryStrategy) -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -201,19 +250,21 @@ private fun ChatInputArea(
         Column {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.End
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 FilterChip(
-                    selected = isStreamingEnabled,
-                    onClick = { onToggleStreaming(!isStreamingEnabled) },
-                    label = { Text("Стриминг", fontSize = 10.sp) }
+                    selected = currentStrategy is ChatMemoryStrategy.SlidingWindow,
+                    onClick = { onUpdateStrategy(ChatMemoryStrategy.SlidingWindow(10)) },
+                    label = { Text("Sliding Window", fontSize = 10.sp) }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 FilterChip(
-                    selected = sendFullHistory,
-                    onClick = { onToggleHistory(!sendFullHistory) },
-                    label = { Text("История", fontSize = 10.sp) }
+                    selected = currentStrategy is ChatMemoryStrategy.StickyFacts,
+                    onClick = { onUpdateStrategy(ChatMemoryStrategy.StickyFacts(10)) },
+                    label = { Text("Sticky Facts", fontSize = 10.sp) }
                 )
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onClearChat) { Icon(Icons.Default.Refresh, contentDescription = "Clear") }
             }
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -224,10 +275,7 @@ private fun ChatInputArea(
                     onValueChange = onInputChange,
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Сообщение...") },
-                    shape = RoundedCornerShape(24.dp),
-                    trailingIcon = {
-                        IconButton(onClick = onClearChat) { Icon(Icons.Default.Refresh, contentDescription = "Clear") }
-                    }
+                    shape = RoundedCornerShape(24.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 FloatingActionButton(

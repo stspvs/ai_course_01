@@ -1,6 +1,5 @@
 package com.example.ai_develop.domain
 
-import com.example.ai_develop.presentation.ChatMessage
 import kotlinx.coroutines.flow.Flow
 
 class ChatStreamingUseCase(

@@ -1,6 +1,5 @@
 package com.example.ai_develop.domain
 
-import com.example.ai_develop.presentation.ChatMessage
 import kotlinx.coroutines.flow.Flow
 
 interface ChatRepository {
@@ -13,4 +12,10 @@ interface ChatRepository {
         isJsonMode: Boolean,
         provider: LLMProvider
     ): Flow<Result<String>>
+
+    suspend fun extractFacts(
+        messages: List<ChatMessage>,
+        currentFacts: ChatFacts,
+        provider: LLMProvider
+    ): Result<ChatFacts>
 }

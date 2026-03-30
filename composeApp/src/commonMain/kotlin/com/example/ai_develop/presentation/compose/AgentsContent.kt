@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ai_develop.domain.LLMProvider
+import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.*
 
 @Composable
@@ -29,7 +29,7 @@ internal fun AgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -83,8 +83,8 @@ internal fun AgentsContent(
             if (selectedAgent != null) {
                 AgentDetailSettings(
                     agent = selectedAgent,
-                    onUpdate = { name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth ->
-                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth)
+                    onUpdate = { name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy ->
+                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy)
                     },
                     templates = templates
                 )
@@ -119,7 +119,7 @@ fun AgentItem(
     onDelete: () -> Unit,
     onDuplicate: () -> Unit
 ) {
-    val isGeneral = agent.id == GENERAL_CHAT_ID
+    val isGeneral = agent.id == LLMViewModel.GENERAL_CHAT_ID
     
     Card(
         modifier = Modifier
@@ -184,7 +184,7 @@ fun AgentItem(
 @Composable
 fun AgentDetailSettings(
     agent: Agent,
-    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit,
+    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
     templates: List<AgentTemplate>
 ) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
@@ -196,7 +196,7 @@ fun AgentDetailSettings(
             .padding(20.dp)
     ) {
         Text(
-            text = if (agent.id == GENERAL_CHAT_ID) "Общий чат: ${agent.name}" else "Агент: ${agent.name}",
+            text = if (agent.id == LLMViewModel.GENERAL_CHAT_ID) "Общий чат: ${agent.name}" else "Агент: ${agent.name}",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF4A148C),
@@ -233,7 +233,7 @@ fun AgentDetailSettings(
 fun MainSettingsTab(
     agent: Agent,
     templates: List<AgentTemplate>,
-    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit
+    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit
 ) {
     var name by remember(agent.id) { mutableStateOf(agent.name) }
     var prompt by remember(agent.id) { mutableStateOf(agent.systemPrompt) }
@@ -242,12 +242,12 @@ fun MainSettingsTab(
     var maxTokens by remember(agent.id) { mutableIntStateOf(agent.maxTokens) }
     var provider by remember(agent.id) { mutableStateOf(agent.provider) }
 
-    val isGeneral = agent.id == GENERAL_CHAT_ID
+    val isGeneral = agent.id == LLMViewModel.GENERAL_CHAT_ID
 
     LaunchedEffect(name, prompt, temp, provider, stopWord, maxTokens) {
         if (name != agent.name || prompt != agent.systemPrompt || temp != agent.temperature || 
             provider != agent.provider || stopWord != agent.stopWord || maxTokens != agent.maxTokens) {
-            onUpdate(name, prompt, temp, provider, stopWord, maxTokens, agent.keepLastMessagesCount, agent.summaryPrompt, agent.summaryDepth)
+            onUpdate(name, prompt, temp, provider, stopWord, maxTokens, agent.keepLastMessagesCount, agent.summaryPrompt, agent.summaryDepth, agent.memoryStrategy)
         }
     }
 
@@ -320,17 +320,19 @@ fun MainSettingsTab(
 @Composable
 fun SummarySettingsTab(
     agent: Agent,
-    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth) -> Unit
+    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit
 ) {
     var keepLastMessagesCount by remember(agent.id) { mutableIntStateOf(agent.keepLastMessagesCount) }
     var summaryPrompt by remember(agent.id) { mutableStateOf(agent.summaryPrompt) }
     var summaryDepth by remember(agent.id) { mutableStateOf(agent.summaryDepth) }
+    var memoryStrategy by remember(agent.id) { mutableStateOf(agent.memoryStrategy) }
 
-    LaunchedEffect(keepLastMessagesCount, summaryPrompt, summaryDepth) {
+    LaunchedEffect(keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy) {
         if (keepLastMessagesCount != agent.keepLastMessagesCount || 
             summaryPrompt != agent.summaryPrompt || 
-            summaryDepth != agent.summaryDepth) {
-            onUpdate(agent.name, agent.systemPrompt, agent.temperature, agent.provider, agent.stopWord, agent.maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth)
+            summaryDepth != agent.summaryDepth ||
+            memoryStrategy != agent.memoryStrategy) {
+            onUpdate(agent.name, agent.systemPrompt, agent.temperature, agent.provider, agent.stopWord, agent.maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy)
         }
     }
 
@@ -338,7 +340,39 @@ fun SummarySettingsTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text("Настройки сжатия контекста", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Text("Метод управления контекстом", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val strategies = listOf(
+                "Скользящее окно" to ChatMemoryStrategy.SlidingWindow(keepLastMessagesCount),
+                "Извлечение фактов (Sticky Facts)" to ChatMemoryStrategy.StickyFacts(keepLastMessagesCount),
+                "Суммаризация (Summarization)" to ChatMemoryStrategy.Summarization(keepLastMessagesCount, agent.summary)
+            )
+            
+            strategies.forEach { (label, strategy) ->
+                val isSelected = when {
+                    memoryStrategy is ChatMemoryStrategy.SlidingWindow && strategy is ChatMemoryStrategy.SlidingWindow -> true
+                    memoryStrategy is ChatMemoryStrategy.StickyFacts && strategy is ChatMemoryStrategy.StickyFacts -> true
+                    memoryStrategy is ChatMemoryStrategy.Summarization && strategy is ChatMemoryStrategy.Summarization -> true
+                    else -> false
+                }
+                
+                Row(
+                    Modifier.fillMaxWidth().clickable { 
+                        memoryStrategy = strategy 
+                    }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = isSelected, onClick = { memoryStrategy = strategy })
+                    Spacer(Modifier.width(8.dp))
+                    Text(label)
+                }
+            }
+        }
+
+        Divider()
+
+        Text("Настройки сжатия", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
 
         OutlinedTextField(
             value = keepLastMessagesCount.toString(),

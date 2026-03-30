@@ -6,6 +6,7 @@ import com.example.ai_develop.data.database.AppDatabase
 import com.example.ai_develop.data.database.DatabaseChatRepository
 import com.example.ai_develop.domain.ChatRepository
 import com.example.ai_develop.domain.ChatStreamingUseCase
+import com.example.ai_develop.domain.ExtractFactsUseCase
 import com.example.ai_develop.presentation.LLMViewModel
 import io.ktor.client.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -38,7 +39,7 @@ val commonModule = module {
                 })
             }
             install(Logging) {
-                level = LogLevel.ALL
+                level = LogLevel.HEADERS
             }
         }
     }
@@ -54,6 +55,7 @@ val commonModule = module {
     }
 
     single { ChatStreamingUseCase(get()) }
+    single { ExtractFactsUseCase(get()) }
 
     // Database
     single { get<AppDatabase>().agentDao() }

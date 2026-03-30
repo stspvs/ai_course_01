@@ -3,10 +3,10 @@ package com.example.ai_develop.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.data.database.DatabaseChatRepository
-import com.example.ai_develop.domain.ChatStreamingUseCase
-import com.example.ai_develop.domain.LLMProvider
+import com.example.ai_develop.domain.*
 import com.example.ai_develop.util.currentTimeMillis
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
@@ -15,6 +15,7 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class LLMViewModel(
     private val chatStreamingUseCase: ChatStreamingUseCase,
+    private val extractFactsUseCase: ExtractFactsUseCase,
     private val repository: DatabaseChatRepository
 ) : ViewModel() {
 
@@ -22,6 +23,7 @@ class LLMViewModel(
     val state: StateFlow<LLMStateModel> = _state.asStateFlow()
 
     private val agentManager = AgentManager()
+    private val memoryManager = ChatMemoryManager()
     private var currentJob: Job? = null
 
     val agentTemplates: List<AgentTemplate> = agentManager.templates
@@ -81,101 +83,71 @@ class LLMViewModel(
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
     }
 
-    fun updateAgent(
-        agentId: String,
-        name: String,
-        systemPrompt: String,
-        temperature: Double,
-        provider: LLMProvider,
-        stopWord: String,
-        maxTokens: Int,
-        keepLastMessagesCount: Int,
-        summaryPrompt: String,
-        summaryDepth: SummaryDepth
-    ) {
-        val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val updatedAgent = agentManager.updateAgent(
-            agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth
-        )
+    fun updateMemoryStrategy(strategy: ChatMemoryStrategy) {
+        val agentId = _state.value.selectedAgentId ?: return
         _state.update { currentState ->
-            val newAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
-            currentState.copy(agents = newAgents)
-        }
-        viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
-    }
-
-    fun duplicateAgent(agentId: String) {
-        if (agentId == GENERAL_CHAT_ID) return
-        val agentToDuplicate = _state.value.agents.find { it.id == agentId }
-        if (agentToDuplicate != null) {
-            val duplicatedAgent = agentToDuplicate.copy(
-                id = Uuid.random().toString(),
-                name = "${agentToDuplicate.name} (копия)",
-                messages = emptyList(), 
-                totalTokensUsed = 0,
-                summary = null
-            )
-            _state.update { it.copy(
-                agents = it.agents + duplicatedAgent,
-                selectedAgentId = duplicatedAgent.id
-            ) }
-            viewModelScope.launch { repository.saveAgent(duplicatedAgent) }
-        }
-    }
-
-    fun deleteAgent(agentId: String) {
-        if (agentId == GENERAL_CHAT_ID) return
-        viewModelScope.launch {
-            repository.deleteAgent(agentId)
-            _state.update { currentState ->
-                val newSelectedId = if (currentState.selectedAgentId == agentId) GENERAL_CHAT_ID else currentState.selectedAgentId
-                currentState.copy(
-                    agents = currentState.agents.filter { it.id != agentId },
-                    selectedAgentId = newSelectedId
-                )
+            val updatedAgents = currentState.agents.map { 
+                if (it.id == agentId) it.copy(memoryStrategy = strategy) else it 
             }
+            currentState.copy(agents = updatedAgents)
+        }
+        val updatedAgent = _state.value.agents.find { it.id == agentId }
+        if (updatedAgent != null) {
+            viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
         }
     }
 
-    fun selectAgent(agentId: String?) {
-        currentJob?.cancel()
-        val newId = agentId ?: GENERAL_CHAT_ID
-        _state.update { it.copy(selectedAgentId = newId, isLoading = false) }
-    }
-
-    fun updateStreamingEnabled(isEnabled: Boolean) {
-        _state.update { it.copy(isStreamingEnabled = isEnabled) }
-    }
-
-    fun updateSendFullHistory(sendFull: Boolean) {
-        _state.update { it.copy(sendFullHistory = sendFull) }
-    }
-
-    fun clearChat() {
-        currentJob?.cancel()
-        val agent = _state.value.selectedAgent ?: return
-        viewModelScope.launch {
-            repository.saveAgent(agent.copy(messages = emptyList(), totalTokensUsed = 0, summary = null))
+    fun createBranch(fromMessageId: String, branchName: String) {
+        val agentId = _state.value.selectedAgentId ?: return
+        val branchId = Uuid.random().toString()
+        val newBranch = ChatBranch(id = branchId, name = branchName, lastMessageId = fromMessageId)
+        
+        _state.update { currentState ->
+            val updatedAgents = currentState.agents.map { agent ->
+                if (agent.id == agentId) {
+                    agent.copy(
+                        branches = agent.branches + newBranch,
+                        currentBranchId = branchId
+                    )
+                } else agent
+            }
+            currentState.copy(agents = updatedAgents)
+        }
+        
+        val updatedAgent = _state.value.agents.find { it.id == agentId }
+        if (updatedAgent != null) {
+            viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
         }
     }
 
-    private fun estimateTokens(text: String): Int {
-        return (text.length / 4).coerceAtLeast(1)
+    fun switchBranch(branchId: String?) {
+        val agentId = _state.value.selectedAgentId ?: return
+        _state.update { currentState ->
+            val updatedAgents = currentState.agents.map { agent ->
+                if (agent.id == agentId) agent.copy(currentBranchId = branchId) else agent
+            }
+            currentState.copy(agents = updatedAgents)
+        }
+        val updatedAgent = _state.value.agents.find { it.id == agentId }
+        if (updatedAgent != null) {
+            viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
+        }
     }
 
     fun sendMessage(message: String) {
         if (message.isBlank()) return
 
-        val tokenCount = estimateTokens(message)
-        val timestamp = currentTimeMillis()
+        val tokenCount = (message.length / 4).coerceAtLeast(1)
+        val currentAgent = _state.value.selectedAgent ?: return
+        val agentId = currentAgent.id
+        
         val userMessage = ChatMessage(
+            parentId = currentAgent.currentBranchId, // Привязываем к текущей ветке
             message = message, 
             source = SourceType.USER, 
             tokenCount = tokenCount,
-            timestamp = timestamp
+            timestamp = currentTimeMillis()
         )
-        val currentAgent = _state.value.selectedAgent ?: return
-        val agentId = currentAgent.id
 
         _state.update { state ->
             val updatedAgents = state.agents.map { agent ->
@@ -189,7 +161,11 @@ class LLMViewModel(
 
         viewModelScope.launch {
             repository.saveMessage(agentId, userMessage)
-            checkAndSummarize(agentId)
+            
+            // Если включена стратегия StickyFacts, обновляем факты
+            if (currentAgent.memoryStrategy is ChatMemoryStrategy.StickyFacts) {
+                updateFacts(agentId)
+            }
         }
 
         currentJob?.cancel()
@@ -197,192 +173,108 @@ class LLMViewModel(
             val botMessageId = Uuid.random().toString()
             var currentContent = ""
 
-            val agentAfterSummary = _state.value.agents.find { it.id == agentId } ?: currentAgent
-            val history = prepareHistoryWithSummary(agentAfterSummary, userMessage)
+            val agentSnapshot = _state.value.agents.find { it.id == agentId } ?: currentAgent
+            
+            // Используем MemoryManager для подготовки истории
+            val history = memoryManager.processMessages(
+                messages = agentSnapshot.messages,
+                strategy = agentSnapshot.memoryStrategy,
+                currentBranchId = agentSnapshot.currentBranchId
+            )
+            
+            val systemPrompt = memoryManager.wrapSystemPrompt(
+                agentSnapshot.systemPrompt,
+                agentSnapshot.memoryStrategy
+            )
 
             val flow = chatStreamingUseCase(
                 messages = history,
-                systemPrompt = agentAfterSummary.systemPrompt,
-                maxTokens = agentAfterSummary.maxTokens,
-                temperature = agentAfterSummary.temperature,
-                stopWord = agentAfterSummary.stopWord,
+                systemPrompt = systemPrompt,
+                maxTokens = agentSnapshot.maxTokens,
+                temperature = agentSnapshot.temperature,
+                stopWord = agentSnapshot.stopWord,
                 isJsonMode = _state.value.isJsonMode,
-                provider = agentAfterSummary.provider
+                provider = agentSnapshot.provider
             )
 
-            if (_state.value.isStreamingEnabled) {
-                flow.onStart {
-                    _state.update { it.copy(isLoading = false) }
-                    val initialBotMessage = ChatMessage(
-                        id = botMessageId, 
-                        message = "", 
-                        source = SourceType.ASSISTANT,
-                        timestamp = currentTimeMillis()
-                    )
-                    addBotMessageLocally(agentId, initialBotMessage)
-                }
-                .onCompletion {
-                    val finalTokens = estimateTokens(currentContent)
-                    val finalBotMessage = ChatMessage(
-                        id = botMessageId,
-                        message = currentContent,
-                        source = SourceType.ASSISTANT,
-                        tokenCount = finalTokens,
-                        timestamp = currentTimeMillis()
-                    )
-                    _state.update { state ->
-                        val updatedAgents = state.agents.map { agent ->
-                            if (agent.id == agentId) {
-                                val updatedMessages = agent.messages.map { msg ->
-                                    if (msg.id == botMessageId) finalBotMessage else msg
-                                }
-                                agent.copy(
-                                    messages = updatedMessages,
-                                    totalTokensUsed = agent.totalTokensUsed + finalTokens
-                                )
-                            } else agent
-                        }
-                        state.copy(agents = updatedAgents, isLoading = false)
-                    }
-                    repository.saveMessage(agentId, finalBotMessage)
-                }
-                .collect { result ->
-                    result.onSuccess { chunk ->
-                        currentContent += chunk
-                        updateBotMessageLocally(agentId, botMessageId, currentContent)
-                    }.onFailure { error ->
-                        val errorMessage = "Ошибка: ${error.message}"
-                        updateBotMessageLocally(agentId, botMessageId, currentContent + "\n[$errorMessage]")
-                    }
-                }
-            } else {
-                var fullResponse = ""
-                var errorOccurred: Throwable? = null
-                flow.collect { result ->
-                    result.onSuccess { chunk -> fullResponse += chunk }.onFailure { error -> errorOccurred = error }
-                }
-                val finalMessageText = if (errorOccurred != null) fullResponse + "\n[Ошибка: ${errorOccurred.message}]" else fullResponse
-                val finalTokens = estimateTokens(finalMessageText)
-                val botMessage = ChatMessage(
-                    id = botMessageId, 
-                    message = finalMessageText, 
-                    source = SourceType.ASSISTANT, 
-                    tokenCount = finalTokens,
-                    timestamp = currentTimeMillis()
-                )
-                _state.update { state ->
-                    val updatedAgents = state.agents.map { agent ->
-                        if (agent.id == agentId) agent.copy(
-                            messages = agent.messages + botMessage,
-                            totalTokensUsed = agent.totalTokensUsed + finalTokens
-                        ) else agent
-                    }
-                    state.copy(agents = updatedAgents, isLoading = false)
-                }
-                repository.saveMessage(agentId, botMessage)
-            }
+            // Логика стриминга (аналогично предыдущей, но с поддержкой parentId)
+            handleStreamingResponse(agentId, botMessageId, flow, userMessage.id)
         }
     }
 
-    private fun prepareHistoryWithSummary(agent: Agent, lastUserMessage: ChatMessage): List<ChatMessage> {
-        if (!_state.value.sendFullHistory) return listOf(lastUserMessage)
-        
-        val allMessages = agent.messages
-        val summary = agent.summary
-        
-        if (summary == null) {
-            return allMessages.filter { !it.isSystemNotification }
-        }
-
-        // Ищем индекс последнего уведомления о суммаризации
-        val lastSummaryIndex = allMessages.indexOfLast { 
-            it.isSystemNotification && it.message.contains("Контекст диалога сжат") 
-        }
-        
-        // Берем сообщения после уведомления, чтобы не терять контекст между "старым summary" и "текущим окном keepCount"
-        val messagesAfterSummary = if (lastSummaryIndex != -1) {
-            allMessages.subList(lastSummaryIndex + 1, allMessages.size).filter { !it.isSystemNotification }
-        } else {
-            allMessages.filter { !it.isSystemNotification }.takeLast(agent.keepLastMessagesCount)
-        }
-
-        val summaryMessage = ChatMessage(
-            message = "Контекст предыдущей части беседы: $summary",
-            source = SourceType.SYSTEM,
-            timestamp = 0L
-        )
-
-        return listOf(summaryMessage) + messagesAfterSummary
-    }
-
-    private suspend fun checkAndSummarize(agentId: String) {
+    private suspend fun updateFacts(agentId: String) {
         val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val allMessages = agent.messages
-        val nonSystemMessages = allMessages.filter { !it.isSystemNotification }
-        val keepCount = agent.keepLastMessagesCount
-
-        val lastSummaryIndex = allMessages.indexOfLast { 
-            it.isSystemNotification && it.message.contains("Контекст диалога сжат") 
-        }
+        val strategy = agent.memoryStrategy as? ChatMemoryStrategy.StickyFacts ?: return
         
-        // Считаем сколько сообщений накопилось ПОСЛЕ последней суммаризации
-        val messagesSinceLastSummary = if (lastSummaryIndex != -1) {
-            allMessages.subList(lastSummaryIndex + 1, allMessages.size).filter { !it.isSystemNotification }
-        } else {
-            nonSystemMessages
+        val result = extractFactsUseCase(agent.messages, strategy.facts, agent.provider)
+        result.onSuccess { newFacts ->
+            _state.update { currentState ->
+                val updatedAgents = currentState.agents.map { a ->
+                    if (a.id == agentId) a.copy(memoryStrategy = strategy.copy(facts = newFacts)) else a
+                }
+                currentState.copy(agents = updatedAgents)
+            }
+            val finalAgent = _state.value.agents.find { it.id == agentId }
+            if (finalAgent != null) repository.saveAgentMetadata(finalAgent)
         }
+    }
 
-        // Выполняем суммаризацию только если накопился пакет новых сообщений (например, 5 штук) сверх лимита
-        if (messagesSinceLastSummary.size > keepCount + 5) {
-            val toSummarize = nonSystemMessages.dropLast(keepCount)
-            val chatText = toSummarize.joinToString("\n") { "${it.source.role}: ${it.message}" }
-            
-            val depthInstruction = when(agent.summaryDepth) {
-                SummaryDepth.LOW -> "Будь максимально кратким, выдели только самую суть в 1-2 предложениях."
-                SummaryDepth.MEDIUM -> "Сделай краткий обзор основных тем и решений."
-                SummaryDepth.HIGH -> "Подробно опиши ход обсуждения, все важные детали и контекст."
-            }
-            
-            val fullSummaryPrompt = "${agent.summaryPrompt}\n\nИнструкция по глубине: $depthInstruction\n\nДиалог для суммаризации:\n$chatText"
-            
-            val summaryFlow = chatStreamingUseCase(
-                messages = listOf(ChatMessage(message = fullSummaryPrompt, source = SourceType.USER)),
-                systemPrompt = "You are a helpful assistant specializing in conversation summarization.",
-                maxTokens = 1000,
-                temperature = 0.3,
-                stopWord = "",
-                isJsonMode = false,
-                provider = agent.provider
+    private suspend fun handleStreamingResponse(
+        agentId: String, 
+        botMessageId: String, 
+        flow: Flow<Result<String>>,
+        parentId: String
+    ) {
+        var currentContent = ""
+        var lastUpdateMillis = 0L
+
+        flow.onStart {
+            _state.update { it.copy(isLoading = false) }
+            val initialBotMessage = ChatMessage(
+                id = botMessageId,
+                parentId = parentId,
+                message = "",
+                source = SourceType.ASSISTANT,
+                timestamp = currentTimeMillis()
             )
-
-            var summaryResult = ""
-            summaryFlow.collect { result ->
-                result.onSuccess { chunk -> summaryResult += chunk }
+            addBotMessageLocally(agentId, initialBotMessage)
+        }
+        .onCompletion {
+            val finalTokens = (currentContent.length / 4).coerceAtLeast(1)
+            val finalBotMessage = ChatMessage(
+                id = botMessageId,
+                parentId = parentId,
+                message = currentContent,
+                source = SourceType.ASSISTANT,
+                tokenCount = finalTokens,
+                timestamp = currentTimeMillis()
+            )
+            _state.update { state ->
+                val updatedAgents = state.agents.map { agent ->
+                    if (agent.id == agentId) {
+                        val updatedMessages = agent.messages.map { msg ->
+                            if (msg.id == botMessageId) finalBotMessage else msg
+                        }
+                        agent.copy(
+                            messages = updatedMessages,
+                            totalTokensUsed = agent.totalTokensUsed + finalTokens
+                        )
+                    } else agent
+                }
+                state.copy(agents = updatedAgents, isLoading = false)
             }
-
-            if (summaryResult.isNotBlank()) {
-                val notification = ChatMessage(
-                    message = "Контекст диалога сжат. Краткое содержание:\n$summaryResult",
-                    source = SourceType.SYSTEM,
-                    timestamp = currentTimeMillis(),
-                    isSystemNotification = true
-                )
-
-                _state.update { currentState ->
-                    val newAgents = currentState.agents.map { a ->
-                        if (a.id == agentId) a.copy(
-                            summary = summaryResult,
-                            messages = a.messages + notification
-                        ) else a
-                    }
-                    currentState.copy(agents = newAgents)
+            repository.saveMessage(agentId, finalBotMessage)
+        }
+        .collect { result ->
+            result.onSuccess { chunk ->
+                currentContent += chunk
+                val now = currentTimeMillis()
+                if (now - lastUpdateMillis > 48) {
+                    updateBotMessageLocally(agentId, botMessageId, currentContent)
+                    lastUpdateMillis = now
                 }
-                
-                val updatedAgent = _state.value.agents.find { it.id == agentId }
-                if (updatedAgent != null) {
-                    repository.saveAgentMetadata(updatedAgent)
-                    repository.saveMessage(agentId, notification)
-                }
+            }.onFailure { error ->
+                updateBotMessageLocally(agentId, botMessageId, currentContent + "\n[Ошибка: ${error.message}]")
             }
         }
     }
@@ -403,7 +295,7 @@ class LLMViewModel(
                     val updatedMessages = agent.messages.map { msg ->
                         if (msg.id == messageId) msg.copy(
                             message = newMessage,
-                            tokenCount = estimateTokens(newMessage)
+                            tokenCount = (newMessage.length / 4).coerceAtLeast(1)
                         ) else msg
                     }
                     agent.copy(messages = updatedMessages)
@@ -411,5 +303,88 @@ class LLMViewModel(
             }
             state.copy(agents = updatedAgents)
         }
+    }
+
+    fun selectAgent(agentId: String?) {
+        _state.update { it.copy(selectedAgentId = agentId) }
+    }
+
+    fun updateStreamingEnabled(enabled: Boolean) {
+        _state.update { it.copy(isStreamingEnabled = enabled) }
+    }
+
+    fun updateSendFullHistory(enabled: Boolean) {
+        _state.update { it.copy(sendFullHistory = enabled) }
+    }
+
+    fun updateAgent(
+        id: String,
+        name: String,
+        systemPrompt: String,
+        temperature: Double,
+        provider: LLMProvider,
+        stopWord: String,
+        maxTokens: Int,
+        keepLastMessagesCount: Int,
+        summaryPrompt: String,
+        summaryDepth: SummaryDepth,
+        memoryStrategy: ChatMemoryStrategy
+    ) {
+        val agent = _state.value.agents.find { it.id == id } ?: return
+        val updatedAgent = agentManager.updateAgent(
+            agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy
+        )
+        
+        _state.update { currentState ->
+            val updatedAgents = currentState.agents.map { if (it.id == id) updatedAgent else it }
+            currentState.copy(agents = updatedAgents)
+        }
+        
+        viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
+    }
+
+    fun deleteAgent(agentId: String) {
+        viewModelScope.launch {
+            repository.deleteAgent(agentId)
+            _state.update { currentState ->
+                val updatedAgents = currentState.agents.filter { it.id != agentId }
+                val nextSelectedId = if (currentState.selectedAgentId == agentId) {
+                    updatedAgents.firstOrNull()?.id ?: GENERAL_CHAT_ID
+                } else {
+                    currentState.selectedAgentId
+                }
+                currentState.copy(agents = updatedAgents, selectedAgentId = nextSelectedId)
+            }
+        }
+    }
+
+    fun duplicateAgent(agentId: String) {
+        val agent = _state.value.agents.find { it.id == agentId } ?: return
+        val newAgent = agent.copy(
+            id = Uuid.random().toString(), 
+            name = "${agent.name} (Copy)", 
+            messages = emptyList(),
+            totalTokensUsed = 0
+        )
+        _state.update { it.copy(agents = it.agents + newAgent) }
+        viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
+    }
+
+    fun clearChat() {
+        currentJob?.cancel()
+        val agent = _state.value.selectedAgent ?: return
+        viewModelScope.launch {
+            repository.saveAgent(agent.copy(
+                messages = emptyList(), 
+                branches = emptyList(),
+                currentBranchId = null,
+                totalTokensUsed = 0, 
+                summary = null
+            ))
+        }
+    }
+
+    companion object {
+        const val GENERAL_CHAT_ID = "general_chat"
     }
 }

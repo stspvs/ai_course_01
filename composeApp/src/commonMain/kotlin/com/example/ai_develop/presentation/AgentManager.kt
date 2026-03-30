@@ -1,6 +1,6 @@
 package com.example.ai_develop.presentation
 
-import com.example.ai_develop.domain.LLMProvider
+import com.example.ai_develop.domain.*
 
 class AgentManager {
     val templates = listOf(
@@ -50,7 +50,8 @@ class AgentManager {
             stopWord = "",
             maxTokens = 2000,
             messages = emptyList(),
-            keepLastMessagesCount = 10
+            keepLastMessagesCount = 10,
+            memoryStrategy = ChatMemoryStrategy.SlidingWindow(10)
         )
     }
 
@@ -64,7 +65,8 @@ class AgentManager {
         maxTokens: Int,
         keepLastMessagesCount: Int,
         summaryPrompt: String,
-        summaryDepth: SummaryDepth
+        summaryDepth: SummaryDepth,
+        memoryStrategy: ChatMemoryStrategy
     ): Agent {
         return agent.copy(
             name = name,
@@ -75,7 +77,8 @@ class AgentManager {
             maxTokens = maxTokens,
             keepLastMessagesCount = keepLastMessagesCount,
             summaryPrompt = summaryPrompt,
-            summaryDepth = summaryDepth
+            summaryDepth = summaryDepth,
+            memoryStrategy = memoryStrategy
         )
     }
 }

@@ -4,9 +4,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import com.example.ai_develop.domain.LLMProvider
-import com.example.ai_develop.presentation.SourceType
-import com.example.ai_develop.presentation.SummaryDepth
+import com.example.ai_develop.domain.*
 
 @Entity(tableName = "agents")
 data class AgentEntity(
@@ -19,9 +17,12 @@ data class AgentEntity(
     val maxTokens: Int,
     val totalTokensUsed: Int,
     val summary: String? = null,
-    val keepLastMessagesCount: Int = 10,
     val summaryPrompt: String = "Кратко суммируй ключевые моменты этого диалога, чтобы сохранить контекст для продолжения беседы. Пиши только саму суть.",
-    val summaryDepth: SummaryDepth = SummaryDepth.LOW
+    val summaryDepth: SummaryDepth = SummaryDepth.LOW,
+    val memoryStrategy: ChatMemoryStrategy,
+    val branches: List<ChatBranch> = emptyList(),
+    val currentBranchId: String? = null,
+    val keepLastMessagesCount: Int = 10
 )
 
 @Entity(
@@ -39,6 +40,7 @@ data class AgentEntity(
 data class MessageEntity(
     @PrimaryKey val id: String,
     val agentId: String,
+    val parentId: String? = null,
     val message: String,
     val source: SourceType,
     val tokenCount: Int,

@@ -55,19 +55,22 @@ internal fun ChatScreen(viewModel: LLMViewModel) {
                         onClearChat = { viewModel.clearChat() },
                         onToggleStreaming = { viewModel.updateStreamingEnabled(it) },
                         onToggleHistory = { viewModel.updateSendFullHistory(it) },
-                        onSelectAgent = { viewModel.selectAgent(it) }
+                        onSelectAgent = { viewModel.selectAgent(it ?: LLMViewModel.GENERAL_CHAT_ID) },
+                        onUpdateStrategy = { viewModel.updateMemoryStrategy(it) },
+                        onCreateBranch = { fromId, name -> viewModel.createBranch(fromId, name) },
+                        onSwitchBranch = { viewModel.switchBranch(it) }
                     )
 
                     1 -> AgentsContent(
                         state = state,
                         templates = viewModel.agentTemplates,
                         onCreateAgent = { viewModel.createAgent() },
-                        onUpdateAgent = { id, n, p, t, pr, s, m, k, sp, sd -> 
-                            viewModel.updateAgent(id, n, p, t, pr, s, m, k, sp, sd) 
+                        onUpdateAgent = { id, n, p, t, pr, s, m, k, sp, sd, st -> 
+                            viewModel.updateAgent(id, n, p, t, pr, s, m, k, sp, sd, st) 
                         },
                         onDeleteAgent = { viewModel.deleteAgent(it) },
                         onDuplicateAgent = { viewModel.duplicateAgent(it) },
-                        onSelectAgent = { viewModel.selectAgent(it) }
+                        onSelectAgent = { viewModel.selectAgent(it ?: LLMViewModel.GENERAL_CHAT_ID) }
                     )
                 }
             }

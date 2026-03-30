@@ -1,9 +1,8 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.ChatRepository
-import com.example.ai_develop.domain.LLMProvider
-import com.example.ai_develop.presentation.ChatMessage
+import com.example.ai_develop.domain.*
 import io.ktor.client.*
+import io.ktor.client.call.*
 import io.ktor.client.plugins.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -13,7 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.*
 
 class KtorChatRepository(
     private val httpClient: HttpClient,
@@ -137,37 +137,23 @@ class KtorChatRepository(
                                     }
                                 }
                             } else {
-                                val jsonData = when {
-                                    trimmedLine.startsWith("data:") -> {
-                                        val content = trimmedLine.substringAfter("data:").trim()
-                                        if (content == "[DONE]") null else content
-                                    }
-                                    trimmedLine.startsWith("{") -> trimmedLine 
-                                    else -> null
-                                }
-
-                                if (jsonData != null) {
-                                    val chunk = json.decodeFromString<ChatStreamResponse>(jsonData)
+                                if (trimmedLine.startsWith("data:")) {
+                                    val data = trimmedLine.substringAfter("data:").trim()
+                                    if (data == "[DONE]") break
                                     
-                                    if (chunk.error != null) {
-                                        emit(Result.failure(Exception(chunk.error.message)))
-                                        break
-                                    }
-
-                                    val choice = chunk.choices?.firstOrNull()
-                                    val delta = choice?.delta ?: choice?.message
+                                    val chunk = json.decodeFromString<ChatStreamResponse>(data)
+                                    val delta = chunk.choices?.firstOrNull()?.delta
                                     
-                                    val text = delta?.content 
+                                    val content = delta?.content 
                                         ?: delta?.reasoningContent 
                                         ?: delta?.reasoning
-                                    
-                                    if (text != null) {
-                                        emit(Result.success(text))
+                                        
+                                    if (content != null) {
+                                        emit(Result.success(content))
                                     }
                                 }
                             }
                         } catch (e: Exception) {
-                            // Ignore partial JSONs
                         }
                     }
                 } else {
@@ -179,4 +165,70 @@ class KtorChatRepository(
             emit(Result.failure(e))
         }
     }.flowOn(Dispatchers.Default)
+
+    override suspend fun extractFacts(
+        messages: List<ChatMessage>,
+        currentFacts: ChatFacts,
+        provider: LLMProvider
+    ): Result<ChatFacts> {
+        return try {
+            val prompt = """
+                Analyze the dialogue and update the key-value facts. 
+                Keep track of: goals, constraints, preferences, decisions.
+                Current facts: ${json.encodeToString(currentFacts.facts)}
+                New messages: ${messages.joinToString("\n") { "${it.source.role}: ${it.message}" }}
+                Return ONLY a JSON object with all current and new facts.
+            """.trimIndent()
+
+            val apiMessages = listOf(
+                Message(role = "system", content = "You are a factual memory assistant. Output ONLY JSON."),
+                Message(role = "user", content = prompt)
+            )
+
+            val response: HttpResponse = when (provider) {
+                is LLMProvider.Yandex -> {
+                    val baseUrl = if (getPlatform().isWeb) "/yandex-api" else "https://llm.api.cloud.yandex.net"
+                    httpClient.post("$baseUrl/foundationModels/v1/completion") {
+                        header("Authorization", "Api-Key $yandexKey")
+                        header("x-folder-id", yandexFolderId)
+                        setBody(YandexChatRequest(
+                            modelUri = "gpt://$yandexFolderId/${provider.model}",
+                            completionOptions = YandexCompletionOptions(stream = false),
+                            messages = apiMessages.map { YandexMessage(role = it.role, text = it.content) }
+                        ))
+                    }
+                }
+                else -> {
+                    val targetUrl = if (provider is LLMProvider.DeepSeek) "https://api.deepseek.com/v1/chat/completions" else "https://openrouter.ai/api/v1/chat/completions"
+                    val key = if (provider is LLMProvider.DeepSeek) deepSeekKey else openRouterKey
+                    httpClient.post(targetUrl) {
+                        header("Authorization", "Bearer $key")
+                        setBody(ChatRequest(
+                            model = provider.model,
+                            messages = apiMessages,
+                            responseFormat = ResponseFormat("json_object")
+                        ))
+                    }
+                }
+            }
+
+            if (response.status.isSuccess()) {
+                val text = if (provider is LLMProvider.Yandex) {
+                    val resp = response.body<YandexResponse>()
+                    resp.result?.alternatives?.firstOrNull()?.message?.text ?: ""
+                } else {
+                    val resp = response.body<ChatResponse>()
+                    resp.choices.firstOrNull()?.message?.content ?: ""
+                }
+                
+                val jsonString = text.substringAfter("{").substringBeforeLast("}") + "}"
+                val newFactsMap = json.decodeFromString<Map<String, String>>(jsonString)
+                Result.success(ChatFacts(newFactsMap))
+            } else {
+                Result.failure(Exception("Facts extraction failed: ${response.status}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
