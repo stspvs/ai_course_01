@@ -10,5 +10,7 @@ fun getDatabaseBuilder(context: Context): RoomDatabase.Builder<AppDatabase> {
     return Room.databaseBuilder<AppDatabase>(
         context = context.applicationContext,
         name = dbFile.absolutePath
-    ).setDriver(BundledSQLiteDriver())
+    )
+    .setDriver(BundledSQLiteDriver())
+    .fallbackToDestructiveMigration(true)
 }

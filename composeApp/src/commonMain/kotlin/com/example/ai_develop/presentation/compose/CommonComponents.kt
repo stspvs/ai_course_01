@@ -114,56 +114,68 @@ internal fun TemperatureSlider(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MemoryStrategySelector(
     currentStrategy: ChatMemoryStrategy,
     windowSize: Int,
     onStrategyChange: (ChatMemoryStrategy) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    val strategies = listOf(
+        "Sliding Window" to "Хранит последние N сообщений",
+        "Summarization" to "Сжимает старые сообщения в краткую суть",
+        "Sticky Facts" to "Извлекает и хранит ключевые факты",
+        "Branching" to "Позволяет создавать ветки диалога"
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Стратегия памяти", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         
-        val strategies = listOf(
-            "Sliding Window" to "Хранит последние N сообщений",
-            "Summarization" to "Сжимает старые сообщения в краткую суть",
-            "Sticky Facts" to "Извлекает и хранит ключевые факты",
-            "Branching" to "Позволяет создавать ветки диалога"
-        )
-
-        strategies.forEach { (name, desc) ->
-            val isSelected = when(name) {
-                "Sliding Window" -> currentStrategy is ChatMemoryStrategy.SlidingWindow
-                "Summarization" -> currentStrategy is ChatMemoryStrategy.Summarization
-                "Sticky Facts" -> currentStrategy is ChatMemoryStrategy.StickyFacts
-                "Branching" -> currentStrategy is ChatMemoryStrategy.Branching
-                else -> false
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it }
+        ) {
+            val currentName = when(currentStrategy) {
+                is ChatMemoryStrategy.SlidingWindow -> "Sliding Window"
+                is ChatMemoryStrategy.Summarization -> "Summarization"
+                is ChatMemoryStrategy.StickyFacts -> "Sticky Facts"
+                is ChatMemoryStrategy.Branching -> "Branching"
             }
-
-            Surface(
-                onClick = {
-                    onStrategyChange(when(name) {
-                        "Sliding Window" -> ChatMemoryStrategy.SlidingWindow(windowSize)
-                        "Summarization" -> ChatMemoryStrategy.Summarization(windowSize)
-                        "Sticky Facts" -> ChatMemoryStrategy.StickyFacts(windowSize)
-                        "Branching" -> ChatMemoryStrategy.Branching(windowSize)
-                        else -> currentStrategy
-                    })
-                },
-                shape = RoundedCornerShape(12.dp),
-                color = if (isSelected) Color(0xFFEDE7F6) else Color.Transparent,
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFF4A148C) else Color.LightGray.copy(alpha = 0.5f)),
-                modifier = Modifier.fillMaxWidth()
+            
+            OutlinedTextField(
+                value = currentName,
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            )
+            
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = isSelected, onClick = null)
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        Text(desc, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    }
+                strategies.forEach { (name, desc) ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                Text(desc, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            }
+                        },
+                        onClick = {
+                            onStrategyChange(when(name) {
+                                "Sliding Window" -> ChatMemoryStrategy.SlidingWindow(windowSize)
+                                "Summarization" -> ChatMemoryStrategy.Summarization(windowSize)
+                                "Sticky Facts" -> ChatMemoryStrategy.StickyFacts(windowSize)
+                                "Branching" -> ChatMemoryStrategy.Branching(windowSize)
+                                else -> currentStrategy
+                            })
+                            expanded = false
+                        }
+                    )
                 }
             }
         }

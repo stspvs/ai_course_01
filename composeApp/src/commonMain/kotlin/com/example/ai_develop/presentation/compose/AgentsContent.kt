@@ -35,6 +35,43 @@ internal fun AgentsContent(
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
 ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isMobile = maxWidth < 600.dp
+        
+        if (isMobile) {
+            MobileAgentsContent(
+                state = state,
+                templates = templates,
+                onCreateAgent = onCreateAgent,
+                onUpdateAgent = onUpdateAgent,
+                onDeleteAgent = onDeleteAgent,
+                onDuplicateAgent = onDuplicateAgent,
+                onSelectAgent = onSelectAgent
+            )
+        } else {
+            DesktopAgentsContent(
+                state = state,
+                templates = templates,
+                onCreateAgent = onCreateAgent,
+                onUpdateAgent = onUpdateAgent,
+                onDeleteAgent = onDeleteAgent,
+                onDuplicateAgent = onDuplicateAgent,
+                onSelectAgent = onSelectAgent
+            )
+        }
+    }
+}
+
+@Composable
+private fun DesktopAgentsContent(
+    state: LLMStateModel,
+    templates: List<AgentTemplate>,
+    onCreateAgent: () -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
+    onDeleteAgent: (String) -> Unit,
+    onDuplicateAgent: (String) -> Unit,
+    onSelectAgent: (String?) -> Unit
+) {
     val selectedAgentId = state.selectedAgentId
 
     Row(modifier = Modifier.fillMaxSize()) {
@@ -90,25 +127,126 @@ internal fun AgentsContent(
                     templates = templates
                 )
             } else {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        Icons.Default.Person,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = Color.Gray.copy(alpha = 0.3f)
-                    )
-                    Text(
-                        "Выберите агента для настройки",
-                        color = Color.Gray,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
+                EmptySettingsPlaceholder()
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MobileAgentsContent(
+    state: LLMStateModel,
+    templates: List<AgentTemplate>,
+    onCreateAgent: () -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
+    onDeleteAgent: (String) -> Unit,
+    onDuplicateAgent: (String) -> Unit,
+    onSelectAgent: (String?) -> Unit
+) {
+    val selectedAgentId = state.selectedAgentId
+    val selectedAgent = state.agents.find { it.id == selectedAgentId }
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = it },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    value = selectedAgent?.name ?: "Выберите агента",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Настройка агента") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    state.agents.forEach { agent ->
+                        DropdownMenuItem(
+                            text = { Text(agent.name) },
+                            onClick = {
+                                onSelectAgent(agent.id)
+                                expanded = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    if (agent.id == GENERAL_CHAT_ID) Icons.Default.Email else Icons.Default.Person,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = onCreateAgent,
+                colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFF4A148C), contentColor = Color.White)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Добавить")
+            }
+        }
+
+        if (selectedAgent != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                if (selectedAgent.id != GENERAL_CHAT_ID) {
+                    IconButton(onClick = { onDuplicateAgent(selectedAgent.id) }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Копировать", tint = Color.Gray)
+                    }
+                    IconButton(onClick = { onDeleteAgent(selectedAgent.id) }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Удалить", tint = Color.Gray)
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                AgentDetailSettings(
+                    agent = selectedAgent,
+                    onUpdate = { name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy ->
+                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy)
+                    },
+                    templates = templates
+                )
+            }
+        } else {
+            EmptySettingsPlaceholder()
+        }
+    }
+}
+
+@Composable
+private fun EmptySettingsPlaceholder() {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            Icons.Default.Person,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = Color.Gray.copy(alpha = 0.3f)
+        )
+        Text(
+            "Выберите агента для настройки",
+            color = Color.Gray,
+            style = MaterialTheme.typography.bodyLarge
+        )
     }
 }
 
@@ -194,14 +332,14 @@ fun AgentDetailSettings(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White, RoundedCornerShape(16.dp))
-            .padding(20.dp)
+            .padding(vertical = 12.dp, horizontal = 16.dp)
     ) {
         Text(
             text = if (agent.id == GENERAL_CHAT_ID) "Общий чат: ${agent.name}" else "Агент: ${agent.name}",
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF4A148C),
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
 
         TabRow(
@@ -211,14 +349,14 @@ fun AgentDetailSettings(
             divider = {}
         ) {
             Tab(selected = selectedTabIndex == 0, onClick = { selectedTabIndex = 0 }) {
-                Box(Modifier.padding(12.dp)) { Text("Основные") }
+                Box(Modifier.padding(12.dp)) { Text("Основные", style = MaterialTheme.typography.bodyMedium) }
             }
             Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }) {
-                Box(Modifier.padding(12.dp)) { Text("Память и Контекст") }
+                Box(Modifier.padding(12.dp)) { Text("Память", style = MaterialTheme.typography.bodyMedium) }
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
 
         Box(modifier = Modifier.weight(1f)) {
             if (selectedTabIndex == 0) {
@@ -254,7 +392,7 @@ fun MainSettingsTab(
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         if (!isGeneral) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -318,6 +456,7 @@ fun MainSettingsTab(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SummarySettingsTab(
     agent: Agent,
@@ -339,7 +478,7 @@ fun SummarySettingsTab(
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         MemoryStrategySelector(
             currentStrategy = memoryStrategy, 
@@ -360,7 +499,7 @@ fun SummarySettingsTab(
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 HorizontalDivider()
 
                 Text("Параметры суммаризации", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -375,13 +514,33 @@ fun SummarySettingsTab(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Глубина суммаризации", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SummaryDepth.entries.forEach { depth ->
-                            FilterChip(
-                                selected = summaryDepth == depth,
-                                onClick = { summaryDepth = depth },
-                                label = { Text(depth.description) }
-                            )
+                    
+                    var depthExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = depthExpanded,
+                        onExpandedChange = { depthExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = summaryDepth.description,
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = depthExpanded) },
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = depthExpanded,
+                            onDismissRequest = { depthExpanded = false }
+                        ) {
+                            SummaryDepth.entries.forEach { depth ->
+                                DropdownMenuItem(
+                                    text = { Text(depth.description) },
+                                    onClick = {
+                                        summaryDepth = depth
+                                        depthExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
