@@ -14,5 +14,7 @@ fun getDatabaseBuilder(): RoomDatabase.Builder<AppDatabase> {
     val dbFile = File(appDir, DATABASE_NAME)
     return Room.databaseBuilder<AppDatabase>(
         name = dbFile.absolutePath,
-    ).setDriver(BundledSQLiteDriver())
+    )
+    .setDriver(BundledSQLiteDriver())
+    .fallbackToDestructiveMigration(true)
 }

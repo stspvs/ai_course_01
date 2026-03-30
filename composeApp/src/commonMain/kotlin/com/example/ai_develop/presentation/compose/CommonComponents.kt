@@ -117,6 +117,7 @@ internal fun TemperatureSlider(
 @Composable
 internal fun MemoryStrategySelector(
     currentStrategy: ChatMemoryStrategy,
+    windowSize: Int,
     onStrategyChange: (ChatMemoryStrategy) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -141,10 +142,10 @@ internal fun MemoryStrategySelector(
             Surface(
                 onClick = {
                     onStrategyChange(when(name) {
-                        "Sliding Window" -> ChatMemoryStrategy.SlidingWindow(10)
-                        "Summarization" -> ChatMemoryStrategy.Summarization(10)
-                        "Sticky Facts" -> ChatMemoryStrategy.StickyFacts(10)
-                        "Branching" -> ChatMemoryStrategy.Branching(100)
+                        "Sliding Window" -> ChatMemoryStrategy.SlidingWindow(windowSize)
+                        "Summarization" -> ChatMemoryStrategy.Summarization(windowSize)
+                        "Sticky Facts" -> ChatMemoryStrategy.StickyFacts(windowSize)
+                        "Branching" -> ChatMemoryStrategy.Branching(windowSize)
                         else -> currentStrategy
                     })
                 },

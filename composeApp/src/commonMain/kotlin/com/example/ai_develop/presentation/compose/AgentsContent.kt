@@ -1,5 +1,6 @@
 package com.example.ai_develop.presentation.compose
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -340,7 +341,11 @@ fun SummarySettingsTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        MemoryStrategySelector(currentStrategy = memoryStrategy, onStrategyChange = { memoryStrategy = it })
+        MemoryStrategySelector(
+            currentStrategy = memoryStrategy, 
+            windowSize = keepLastMessagesCount,
+            onStrategyChange = { memoryStrategy = it }
+        )
 
         OutlinedTextField(
             value = keepLastMessagesCount.toString(),
@@ -350,27 +355,35 @@ fun SummarySettingsTab(
             shape = RoundedCornerShape(12.dp)
         )
 
-        HorizontalDivider()
+        AnimatedVisibility(
+            visible = memoryStrategy is ChatMemoryStrategy.Summarization,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                HorizontalDivider()
 
-        Text("Параметры суммаризации", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text("Параметры суммаризации", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
 
-        OutlinedTextField(
-            value = summaryPrompt,
-            onValueChange = { summaryPrompt = it },
-            label = { Text("Инструкция для суммаризации") },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-            shape = RoundedCornerShape(12.dp)
-        )
+                OutlinedTextField(
+                    value = summaryPrompt,
+                    onValueChange = { summaryPrompt = it },
+                    label = { Text("Инструкция для суммаризации") },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+                    shape = RoundedCornerShape(12.dp)
+                )
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Глубина суммаризации", style = MaterialTheme.typography.labelMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SummaryDepth.entries.forEach { depth ->
-                    FilterChip(
-                        selected = summaryDepth == depth,
-                        onClick = { summaryDepth = depth },
-                        label = { Text(depth.description) }
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Глубина суммаризации", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SummaryDepth.entries.forEach { depth ->
+                            FilterChip(
+                                selected = summaryDepth == depth,
+                                onClick = { summaryDepth = depth },
+                                label = { Text(depth.description) }
+                            )
+                        }
+                    }
                 }
             }
         }

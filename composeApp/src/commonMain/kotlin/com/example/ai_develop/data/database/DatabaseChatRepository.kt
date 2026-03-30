@@ -4,6 +4,7 @@ import com.example.ai_develop.domain.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 
 class DatabaseChatRepository(private val db: AppDatabase) {
     private val dao = db.agentDao()

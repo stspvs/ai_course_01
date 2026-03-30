@@ -66,7 +66,7 @@ class LLMViewModel(
                             updated
                         }
                     }
-                    
+
                     currentState.copy(agents = finalAgentsFromDb)
                 }
             }
