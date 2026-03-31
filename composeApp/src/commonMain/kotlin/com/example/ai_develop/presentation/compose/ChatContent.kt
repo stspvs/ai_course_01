@@ -213,7 +213,7 @@ private fun BranchesPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
-                    selected = currentBranchId == null,
+                    selected = currentBranchId == null || currentBranchId == "main_branch",
                     onClick = { onSwitchBranch(null) },
                     label = { Text("Основная") },
                     colors = FilterChipDefaults.filterChipColors(
@@ -222,7 +222,7 @@ private fun BranchesPanel(
                     )
                 )
                 
-                branches.forEach { branch ->
+                branches.filter { it.id != "main_branch" }.forEach { branch ->
                     FilterChip(
                         selected = branch.id == currentBranchId,
                         onClick = { onSwitchBranch(branch.id) },

@@ -14,7 +14,6 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class LLMViewModel(
     private val chatStreamingUseCase: ChatStreamingUseCase,
-    private val extractFactsUseCase: ExtractFactsUseCase,
     private val repository: DatabaseChatRepository
 ) : ViewModel() {
 
@@ -302,10 +301,11 @@ class LLMViewModel(
     }
 
     fun switchBranch(branchId: String?) {
+        val normalizedId = if (branchId == "main_branch") null else branchId
         val agentId = _state.value.selectedAgentId ?: return
         _state.update { currentState ->
             val updatedAgents = currentState.agents.map { a ->
-                if (a.id == agentId) a.copy(currentBranchId = branchId) else a
+                if (a.id == agentId) a.copy(currentBranchId = normalizedId) else a
             }
             currentState.copy(agents = updatedAgents)
         }
@@ -317,30 +317,35 @@ class LLMViewModel(
     fun selectAgent(agentId: String?) { _state.update { it.copy(selectedAgentId = agentId) } }
     fun updateStreamingEnabled(enabled: Boolean) { _state.update { it.copy(isStreamingEnabled = enabled) } }
     fun updateSendFullHistory(enabled: Boolean) { _state.update { it.copy(sendFullHistory = enabled) } }
+    
     fun createAgent() {
         val currentProvider = _state.value.selectedAgent?.provider ?: LLMProvider.Yandex()
         val newAgent = agentManager.createDefaultAgent(currentProvider)
         _state.update { it.copy(agents = it.agents + newAgent, selectedAgentId = newAgent.id) }
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
     }
+
     fun updateAgent(id: String, name: String, systemPrompt: String, temperature: Double, provider: LLMProvider, stopWord: String, maxTokens: Int, keepLastMessagesCount: Int, summaryPrompt: String, summaryDepth: SummaryDepth, memoryStrategy: ChatMemoryStrategy) {
         val agent = _state.value.agents.find { it.id == id } ?: return
         val updatedAgent = agentManager.updateAgent(agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy)
         _state.update { currentState -> currentState.copy(agents = currentState.agents.map { if (it.id == id) updatedAgent else it }) }
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
+
     fun deleteAgent(agentId: String) {
         viewModelScope.launch {
             repository.deleteAgent(agentId)
             _state.update { it.copy(agents = it.agents.filter { it.id != agentId }) }
         }
     }
+
     fun duplicateAgent(agentId: String) {
         val agent = _state.value.agents.find { it.id == agentId } ?: return
         val newAgent = agent.copy(id = Uuid.random().toString(), name = "${agent.name} (Copy)", messages = emptyList(), totalTokensUsed = 0)
         _state.update { it.copy(agents = it.agents + newAgent, selectedAgentId = newAgent.id) }
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
     }
+
     fun clearChat() {
         currentJob?.cancel()
         val agent = _state.value.selectedAgent ?: return
@@ -350,4 +355,6 @@ class LLMViewModel(
             _state.update { state -> state.copy(agents = state.agents.map { if (it.id == agent.id) clearedAgent else it }) }
         }
     }
+    
+    private fun currentTimeMillis(): Long = System.currentTimeMillis()
 }
