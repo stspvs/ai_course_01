@@ -26,6 +26,7 @@ class KtorChatRepository(
     private val json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
+        encodeDefaults = true
     }
 
     override fun chatStreaming(
@@ -40,7 +41,7 @@ class KtorChatRepository(
         try {
             val url: String
             val headers = mutableMapOf<String, String>()
-            val body: Any
+            val bodyString: String
             val platform = getPlatform()
 
             when (provider) {
@@ -50,7 +51,7 @@ class KtorChatRepository(
                     val apiMessages = mutableListOf<Message>()
                     if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
                     messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
-                    body = ChatRequest(
+                    bodyString = json.encodeToString(ChatRequest(
                         model = provider.model,
                         messages = apiMessages,
                         maxTokens = maxTokens,
@@ -58,7 +59,7 @@ class KtorChatRepository(
                         stream = true,
                         responseFormat = if (isJsonMode) ResponseFormat("json_object") else null,
                         stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
-                    )
+                    ))
                 }
                 is LLMProvider.Yandex -> {
                     val baseUrl = if (platform.isWeb) "/yandex-api" else "https://llm.api.cloud.yandex.net"
@@ -69,7 +70,7 @@ class KtorChatRepository(
                     val yandexMessages = mutableListOf<YandexMessage>()
                     if (systemPrompt.isNotBlank()) yandexMessages.add(YandexMessage(role = "system", text = systemPrompt))
                     messages.forEach { msg -> yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message)) }
-                    body = YandexChatRequest(
+                    bodyString = json.encodeToString(YandexChatRequest(
                         modelUri = "gpt://$yandexFolderId/${provider.model}",
                         completionOptions = YandexCompletionOptions(
                             stream = true,
@@ -77,7 +78,7 @@ class KtorChatRepository(
                             maxTokens = maxTokens
                         ),
                         messages = yandexMessages
-                    )
+                    ))
                 }
                 is LLMProvider.OpenRouter -> {
                     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -87,7 +88,7 @@ class KtorChatRepository(
                     val apiMessages = mutableListOf<Message>()
                     if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
                     messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
-                    body = ChatRequest(
+                    bodyString = json.encodeToString(ChatRequest(
                         model = provider.model,
                         messages = apiMessages,
                         maxTokens = maxTokens,
@@ -95,14 +96,14 @@ class KtorChatRepository(
                         stream = true,
                         responseFormat = if (isJsonMode) ResponseFormat("json_object") else null,
                         stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
-                    )
+                    ))
                 }
             }
 
             httpClient.preparePost(url) {
                 headers.forEach { (k, v) -> header(k, v) }
                 contentType(ContentType.Application.Json)
-                setBody(body)
+                setBody(bodyString)
             }.execute { response ->
                 if (response.status.isSuccess()) {
                     val channel: ByteReadChannel = response.bodyAsChannel()
@@ -174,14 +175,27 @@ class KtorChatRepository(
         return try {
             val prompt = """
                 Analyze the dialogue and update the key-value facts. 
-                Keep track of: goals, constraints, preferences, decisions.
-                Current facts: ${json.encodeToString(currentFacts.facts)}
-                New messages: ${messages.joinToString("\n") { "${it.source.role}: ${it.message}" }}
-                Return ONLY a JSON object with all current and new facts.
+                Keep track of: goals, constraints, preferences, decisions, user names/info.
+                
+                Current facts: 
+                ${if (currentFacts.facts.isEmpty()) "No facts yet." else json.encodeToString(currentFacts.facts)}
+                
+                New messages for analysis:
+                ${messages.joinToString("\n") { "${it.source.role}: ${it.message}" }}
+                
+                Instructions:
+                1. Review current facts and new messages.
+                2. If a new fact is discovered, add it.
+                3. If a current fact is updated or corrected, modify it.
+                4. Do NOT delete any current facts unless they are explicitly contradicted or became obsolete.
+                5. Return the FINAL COMPLETE set of all facts (old and new).
+                6. Output MUST be a valid JSON object where keys and values are strings.
+                
+                Example output: {"user_name": "Ivan", "goal": "learn kotlin", "language": "Russian"}
             """.trimIndent()
 
             val apiMessages = listOf(
-                Message(role = "system", content = "You are a factual memory assistant. Output ONLY JSON."),
+                Message(role = "system", content = "You are a factual memory assistant. Output ONLY valid JSON."),
                 Message(role = "user", content = prompt)
             )
 
@@ -191,11 +205,13 @@ class KtorChatRepository(
                     httpClient.post("$baseUrl/foundationModels/v1/completion") {
                         header("Authorization", "Api-Key $yandexKey")
                         header("x-folder-id", yandexFolderId)
-                        setBody(YandexChatRequest(
+                        contentType(ContentType.Application.Json)
+                        val request = YandexChatRequest(
                             modelUri = "gpt://$yandexFolderId/${provider.model}",
                             completionOptions = YandexCompletionOptions(stream = false),
                             messages = apiMessages.map { YandexMessage(role = it.role, text = it.content) }
-                        ))
+                        )
+                        setBody(json.encodeToString(request))
                     }
                 }
                 else -> {
@@ -203,29 +219,62 @@ class KtorChatRepository(
                     val key = if (provider is LLMProvider.DeepSeek) deepSeekKey else openRouterKey
                     httpClient.post(targetUrl) {
                         header("Authorization", "Bearer $key")
-                        setBody(ChatRequest(
+                        contentType(ContentType.Application.Json)
+                        val request = ChatRequest(
                             model = provider.model,
                             messages = apiMessages,
+                            stream = false,
                             responseFormat = ResponseFormat("json_object")
-                        ))
+                        )
+                        setBody(json.encodeToString(request))
                     }
                 }
             }
 
             if (response.status.isSuccess()) {
+                val responseText = response.bodyAsText()
                 val text = if (provider is LLMProvider.Yandex) {
-                    val resp = response.body<YandexResponse>()
+                    val resp = json.decodeFromString<YandexResponse>(responseText)
                     resp.result?.alternatives?.firstOrNull()?.message?.text ?: ""
                 } else {
-                    val resp = response.body<ChatResponse>()
-                    resp.choices.firstOrNull()?.message?.content ?: ""
+                    // Check if it's a stream despite stream=false
+                    if (responseText.trim().startsWith("data:")) {
+                        val contentBuilder = StringBuilder()
+                        responseText.split("\n").forEach { line ->
+                            val trimmed = line.trim()
+                            if (trimmed.startsWith("data:")) {
+                                val data = trimmed.substringAfter("data:").trim()
+                                if (data != "[DONE]" && data.isNotEmpty()) {
+                                    try {
+                                        val chunk = json.decodeFromString<ChatStreamResponse>(data)
+                                        val content = chunk.choices?.firstOrNull()?.delta?.content 
+                                            ?: chunk.choices?.firstOrNull()?.message?.content
+                                        content?.let { contentBuilder.append(it) }
+                                    } catch (e: Exception) {}
+                                }
+                            }
+                        }
+                        contentBuilder.toString()
+                    } else {
+                        val resp = json.decodeFromString<ChatResponse>(responseText)
+                        resp.choices.firstOrNull()?.message?.content ?: ""
+                    }
                 }
                 
-                val jsonString = text.substringAfter("{").substringBeforeLast("}") + "}"
-                val newFactsMap = json.decodeFromString<Map<String, String>>(jsonString)
-                Result.success(ChatFacts(newFactsMap))
+                // More robust JSON extraction
+                val startIndex = text.indexOf("{")
+                val endIndex = text.lastIndexOf("}")
+                
+                if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
+                    val jsonString = text.substring(startIndex, endIndex + 1)
+                    val newFactsMap = json.decodeFromString<Map<String, String>>(jsonString)
+                    Result.success(ChatFacts(newFactsMap))
+                } else {
+                    Result.failure(Exception("No JSON object found in response: $text"))
+                }
             } else {
-                Result.failure(Exception("Facts extraction failed: ${response.status}"))
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Facts extraction failed: ${response.status}. Body: $errorBody"))
             }
         } catch (e: Exception) {
             Result.failure(e)

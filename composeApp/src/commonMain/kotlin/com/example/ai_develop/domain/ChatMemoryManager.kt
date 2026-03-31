@@ -8,12 +8,14 @@ class ChatMemoryManager {
         currentBranchId: String? = null
     ): List<ChatMessage> {
         // 1. Сначала восстанавливаем цепочку сообщений для текущей ветки
-        // Если branchId не задан, берем просто плоский список (или сообщения без родителей)
+        // Если branchId не задан, считаем историю линейной и берем все сообщения.
         val branchMessages = if (currentBranchId != null) {
             getMessagesForBranch(messages, currentBranchId)
         } else {
-            // Для совместимости с обычным чатом без веток
-            messages.filter { it.parentId == null }
+            // Если ветка не выбрана, берем все сообщения как есть.
+            // Старая логика messages.filter { it.parentId == null } была ошибочной,
+            // так как она отфильтровывала все сообщения ассистента (у которых есть parentId).
+            messages
         }
 
         // 2. Применяем ограничения выбранной стратегии

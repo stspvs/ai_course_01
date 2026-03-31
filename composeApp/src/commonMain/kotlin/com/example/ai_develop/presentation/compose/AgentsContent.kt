@@ -326,7 +326,7 @@ fun AgentDetailSettings(
     onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
     templates: List<AgentTemplate>
 ) {
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
+    var selectedTabIndex by remember { mutableStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -493,6 +493,32 @@ fun SummarySettingsTab(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp)
         )
+
+        AnimatedVisibility(
+            visible = memoryStrategy is ChatMemoryStrategy.StickyFacts,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            val strategy = memoryStrategy as? ChatMemoryStrategy.StickyFacts
+            if (strategy != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    HorizontalDivider()
+                    Text("Параметры Sticky Facts", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    
+                    OutlinedTextField(
+                        value = strategy.updateInterval.toString(),
+                        onValueChange = { 
+                            it.toIntOrNull()?.let { v -> 
+                                memoryStrategy = strategy.copy(updateInterval = v)
+                            }
+                        },
+                        label = { Text("Обновлять факты каждые N сообщений") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+        }
 
         AnimatedVisibility(
             visible = memoryStrategy is ChatMemoryStrategy.Summarization,

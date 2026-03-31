@@ -6,11 +6,11 @@ class ExtractFactsUseCase(
     suspend operator fun invoke(
         messages: List<ChatMessage>,
         currentFacts: ChatFacts,
-        provider: LLMProvider
+        provider: LLMProvider,
+        windowSize: Int
     ): Result<ChatFacts> {
-        // Мы берем только последние сообщения для анализа, чтобы не перегружать контекст
-        // и отправляем их в репозиторий для извлечения новых фактов или обновления старых
-        val recentMessages = messages.takeLast(10)
+        // Берем количество сообщений согласно настройкам стратегии или агента
+        val recentMessages = messages.takeLast(windowSize)
         return repository.extractFacts(recentMessages, currentFacts, provider)
     }
 }

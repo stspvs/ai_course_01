@@ -49,6 +49,7 @@ sealed interface ChatMemoryStrategy {
     @Serializable
     data class StickyFacts(
         val windowSize: Int,
+        val updateInterval: Int = 5,
         val facts: ChatFacts = ChatFacts()
     ) : ChatMemoryStrategy
 

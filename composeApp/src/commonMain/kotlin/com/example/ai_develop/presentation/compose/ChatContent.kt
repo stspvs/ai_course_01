@@ -1,5 +1,6 @@
 package com.example.ai_develop.presentation.compose
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.Agent
 import com.example.ai_develop.domain.ChatMemoryStrategy
 import com.example.ai_develop.domain.ChatMessage
@@ -42,6 +44,7 @@ internal fun ChatContent(
 ) {
     val activeAgent = state.agents.find { it.id == state.selectedAgentId }
     var menuExpanded by remember { mutableStateOf(false) }
+    var showFacts by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFFE3F2FD))
@@ -54,8 +57,19 @@ internal fun ChatContent(
             agents = state.agents,
             onSelectAgent = onSelectAgent,
             menuExpanded = menuExpanded,
-            onMenuToggle = { menuExpanded = it }
+            onMenuToggle = { menuExpanded = it },
+            onShowFacts = { showFacts = !showFacts },
+            hasFacts = (activeAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.isNotEmpty() == true
         )
+
+        AnimatedVisibility(
+            visible = showFacts,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            val facts = (activeAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyMap()
+            FactsPanel(facts = facts)
+        }
 
         val messages = state.currentMessages
         val listState = rememberLazyListState()
@@ -86,6 +100,38 @@ internal fun ChatContent(
             onSendMessage = onSendMessage,
             onClearChat = onClearChat
         )
+    }
+}
+
+@Composable
+private fun FactsPanel(facts: Map<String, String>) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        color = Color(0xFFFFF9C4),
+        shape = RoundedCornerShape(12.dp),
+        tonalElevation = 2.dp,
+        shadowElevation = 2.dp
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFF57F17), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Sticky Facts (Извлечено из контекста):", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(0xFFF57F17))
+            }
+            Spacer(Modifier.height(8.dp))
+            if (facts.isEmpty()) {
+                Text("Факты еще не извлечены. Пообщайтесь с агентом!", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            } else {
+                facts.forEach { (key, value) ->
+                    Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                        Text("• ", fontWeight = FontWeight.Bold)
+                        Text(key, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                        Text(": ", style = MaterialTheme.typography.bodySmall)
+                        Text(value, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -140,7 +186,9 @@ private fun ChatTopBar(
     agents: List<Agent>,
     onSelectAgent: (String?) -> Unit,
     menuExpanded: Boolean,
-    onMenuToggle: (Boolean) -> Unit
+    onMenuToggle: (Boolean) -> Unit,
+    onShowFacts: () -> Unit,
+    hasFacts: Boolean
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -151,46 +199,79 @@ private fun ChatTopBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onMenuToggle(true) }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (isAgentSelected) Color(0xFF673AB7) else Color(0xFF1976D2)),
-                    contentAlignment = Alignment.Center
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onMenuToggle(true) }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        if (isAgentSelected) Icons.Default.Person else Icons.Default.Star,
-                        contentDescription = null,
-                        tint = Color.White
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = activeAgentName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (isAgentSelected) Color(0xFF673AB7) else Color(0xFF1976D2)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (isAgentSelected) Icons.Default.Person else Icons.Default.Star,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
                         )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.Gray)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = activeAgentName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.Gray)
+                        }
                         Text(
                             text = if (isLoading) "Печатает..." else "В сети",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (isLoading) Color(0xFF673AB7) else Color.Gray
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "• $tokensUsed токенов",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF4A148C)
-                        )
                     }
+                }
+                
+                if (isAgentSelected) {
+                    IconButton(onClick = onShowFacts) {
+                        BadgedBox(
+                            badge = { 
+                                if (hasFacts) {
+                                    Badge(containerColor = Color(0xFFF57F17)) {
+                                        Text("!", color = Color.White)
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = "Facts", tint = if (hasFacts) Color(0xFFF57F17) else Color.Gray)
+                        }
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 8.dp)) {
+                    Text(
+                        text = "$tokensUsed",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF4A148C)
+                    )
+                    Text(
+                        text = "токенов",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
                 }
             }
 
@@ -207,7 +288,7 @@ private fun ChatTopBar(
                     },
                     leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFF1976D2)) }
                 )
-                agents.forEach { agent ->
+                agents.filter { it.id != "general_chat_id" }.forEach { agent ->
                     DropdownMenuItem(
                         text = { Text(agent.name) },
                         onClick = {
@@ -234,35 +315,35 @@ private fun ChatInputArea(
         tonalElevation = 8.dp,
         color = Color.White
     ) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = onClearChat) { Icon(Icons.Default.Refresh, contentDescription = "Clear") }
-            }
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = onInputChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Сообщение...") },
-                    shape = RoundedCornerShape(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                FloatingActionButton(
-                    onClick = { if (input.isNotBlank()) onSendMessage(input) },
-                    containerColor = Color(0xFF1976D2),
-                    contentColor = Color.White,
-                    shape = CircleShape,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = onInputChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Сообщение...") },
+                shape = RoundedCornerShape(24.dp),
+                trailingIcon = {
+                    IconButton(onClick = onClearChat) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Clear Chat",
+                            tint = Color.Gray
+                        )
+                    }
                 }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            FloatingActionButton(
+                onClick = { if (input.isNotBlank()) onSendMessage(input) },
+                containerColor = Color(0xFF1976D2),
+                contentColor = Color.White,
+                shape = CircleShape,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }
         }
     }

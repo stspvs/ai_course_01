@@ -185,8 +185,15 @@ class LLMViewModel(
 
         viewModelScope.launch {
             repository.saveMessage(agentId, userMessage)
-            if (currentAgent.memoryStrategy is ChatMemoryStrategy.StickyFacts) {
-                updateFacts(agentId)
+            
+            // Проверяем необходимость обновления фактов
+            val agentAfterMessage = _state.value.agents.find { it.id == agentId }
+            val strategy = agentAfterMessage?.memoryStrategy as? ChatMemoryStrategy.StickyFacts
+            if (strategy != null) {
+                val messageCount = agentAfterMessage.messages.count { !it.isSystemNotification }
+                if (messageCount > 0 && messageCount % strategy.updateInterval == 0) {
+                    updateFacts(agentId)
+                }
             }
         }
 
@@ -224,7 +231,14 @@ class LLMViewModel(
         val agent = _state.value.agents.find { it.id == agentId } ?: return
         val strategy = agent.memoryStrategy as? ChatMemoryStrategy.StickyFacts ?: return
         
-        val result = extractFactsUseCase(agent.messages, strategy.facts, agent.provider)
+        // Передаем windowSize из настроек стратегии агента
+        val result = extractFactsUseCase(
+            messages = agent.messages,
+            currentFacts = strategy.facts,
+            provider = agent.provider,
+            windowSize = strategy.windowSize
+        )
+
         result.onSuccess { newFacts ->
             val updatedAgent = agent.copy(memoryStrategy = strategy.copy(facts = newFacts))
             _state.update { currentState ->
@@ -393,12 +407,19 @@ class LLMViewModel(
         currentJob?.cancel()
         val agent = _state.value.selectedAgent ?: return
         viewModelScope.launch {
+            val updatedStrategy = when (val strategy = agent.memoryStrategy) {
+                is ChatMemoryStrategy.StickyFacts -> strategy.copy(facts = ChatFacts())
+                is ChatMemoryStrategy.Summarization -> strategy.copy(currentSummary = null)
+                else -> strategy
+            }
+
             val clearedAgent = agent.copy(
                 messages = emptyList(), 
                 branches = emptyList(),
                 currentBranchId = null,
                 totalTokensUsed = 0, 
-                summary = null
+                summary = null,
+                memoryStrategy = updatedStrategy
             )
             repository.saveAgent(clearedAgent)
             _state.update { currentState ->
