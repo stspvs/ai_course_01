@@ -23,6 +23,7 @@ enum class SummaryDepth(val description: String) {
 data class ChatMessage(
     val id: String = Uuid.random().toString(),
     val parentId: String? = null,
+    val branchId: String? = null, // Идентификатор ветки, в которой было создано сообщение
     val message: String,
     val source: SourceType,
     val tokenCount: Int = 0,

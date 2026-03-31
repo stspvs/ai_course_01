@@ -41,6 +41,7 @@ data class MessageEntity(
     @PrimaryKey val id: String,
     val agentId: String,
     val parentId: String? = null,
+    val branchId: String? = null, // Добавлено поле для идентификатора ветки
     val message: String,
     val source: SourceType,
     val tokenCount: Int,

@@ -91,6 +91,7 @@ class DatabaseChatRepository(private val db: AppDatabase) {
     private fun MessageEntity.toDomain() = ChatMessage(
         id = id,
         parentId = parentId,
+        branchId = branchId, // Маппинг нового поля
         message = message,
         source = source,
         tokenCount = tokenCount,
@@ -102,6 +103,7 @@ class DatabaseChatRepository(private val db: AppDatabase) {
         id = id,
         agentId = agentId,
         parentId = parentId,
+        branchId = branchId, // Маппинг нового поля
         message = message,
         source = source,
         tokenCount = tokenCount,

@@ -6,7 +6,6 @@ import com.example.ai_develop.data.database.DatabaseChatRepository
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.util.currentTimeMillis
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
@@ -33,62 +32,40 @@ class LLMViewModel(
     }
 
     private fun observeAgents() {
-        // Наблюдаем за списком агентов из БД
         viewModelScope.launch {
             repository.getAgents().collect { dbAgents ->
                 _state.update { currentState ->
                     val finalAgentsFromDb = if (dbAgents.isEmpty()) {
-                        // Если БД пуста, сохраняем Общий чат
                         val general = currentState.agents.find { it.id == GENERAL_CHAT_ID }
                         if (general != null) {
                             viewModelScope.launch { repository.saveAgentMetadata(general) }
                         }
                         currentState.agents
                     } else {
-                        // Мапим агентов из БД, сохраняя сообщения в памяти (getAgents их не грузит)
-                        val updated = dbAgents.map { dbAgent ->
+                        dbAgents.map { dbAgent ->
                             val existingAgent = currentState.agents.find { it.id == dbAgent.id }
-                            if (existingAgent != null && existingAgent.messages.isNotEmpty()) {
-                                dbAgent.copy(messages = existingAgent.messages)
+                            if (existingAgent != null) {
+                                mergeAgentData(existingAgent, dbAgent)
                             } else {
                                 dbAgent
                             }
                         }
-                        
-                        // Если в БД нет Общего чата, добавляем его и сохраняем
-                        if (updated.none { it.id == GENERAL_CHAT_ID }) {
-                            val general = currentState.agents.find { it.id == GENERAL_CHAT_ID }
-                            if (general != null) {
-                                viewModelScope.launch { repository.saveAgentMetadata(general) }
-                                listOf(general) + updated
-                            } else updated
-                        } else {
-                            updated
-                        }
                     }
-
                     currentState.copy(agents = finalAgentsFromDb)
                 }
             }
         }
         
-        // Наблюдаем за сообщениями выбранного агента
         viewModelScope.launch {
             _state.map { it.selectedAgentId }.distinctUntilChanged().collectLatest { id ->
                 if (id != null) {
                     repository.getAgentWithMessages(id).collect { fullAgent ->
                         if (fullAgent != null) {
                             _state.update { currentState ->
-                                val updatedAgents = currentState.agents.map {
-                                    if (it.id == id) {
-                                        it.copy(
-                                            messages = fullAgent.messages,
-                                            totalTokensUsed = fullAgent.totalTokensUsed,
-                                            summary = fullAgent.summary,
-                                            branches = fullAgent.branches,
-                                            currentBranchId = fullAgent.currentBranchId
-                                        )
-                                    } else it
+                                val updatedAgents = currentState.agents.map { existing ->
+                                    if (existing.id == id) {
+                                        mergeAgentData(existing, fullAgent)
+                                    } else existing
                                 }
                                 currentState.copy(agents = updatedAgents)
                             }
@@ -99,63 +76,30 @@ class LLMViewModel(
         }
     }
 
-    fun createAgent() {
-        val currentProvider = _state.value.selectedAgent?.provider ?: LLMProvider.Yandex()
-        val newAgent = agentManager.createDefaultAgent(currentProvider)
-        
-        // Обновляем стейт сразу для мгновенной реакции UI
-        _state.update { it.copy(
-            agents = it.agents + newAgent,
-            selectedAgentId = newAgent.id 
-        ) }
+    private fun mergeAgentData(local: Agent, db: Agent): Agent {
+        // 1. Слияние сообщений: БД + локальные, которых еще нет в БД
+        val dbIds = db.messages.map { it.id }.toSet()
+        val pendingMessages = local.messages.filter { it.id !in dbIds }
+        val allMessages = (db.messages + pendingMessages).distinctBy { it.id }.sortedBy { it.timestamp }
 
-        viewModelScope.launch { 
-            repository.saveAgentMetadata(newAgent)
-        }
-    }
-
-    fun updateMemoryStrategy(strategy: ChatMemoryStrategy) {
-        val agentId = _state.value.selectedAgentId ?: return
-        val currentAgent = _state.value.agents.find { it.id == agentId } ?: return
-        val updatedAgent = currentAgent.copy(memoryStrategy = strategy)
-        
-        _state.update { currentState ->
-            val updatedAgents = currentState.agents.map { 
-                if (it.id == agentId) updatedAgent else it 
+        // 2. Слияние веток: верим локальному указателю, если сообщение уже есть в нашем общем списке
+        val mergedBranches = db.branches.map { dbBranch ->
+            val localBranch = local.branches.find { it.id == dbBranch.id }
+            if (localBranch != null && localBranch.lastMessageId != dbBranch.lastMessageId) {
+                val hasLocalMsg = allMessages.any { it.id == localBranch.lastMessageId }
+                if (hasLocalMsg) localBranch else dbBranch
+            } else {
+                dbBranch
             }
-            currentState.copy(agents = updatedAgents)
         }
-        viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
-    }
-
-    fun createBranch(fromMessageId: String, branchName: String) {
-        val agentId = _state.value.selectedAgentId ?: return
-        val branchId = Uuid.random().toString()
-        val newBranch = ChatBranch(id = branchId, name = branchName, lastMessageId = fromMessageId)
         
-        val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val updatedAgent = agent.copy(
-            branches = agent.branches + newBranch,
-            currentBranchId = branchId
+        val finalBranches = mergedBranches + local.branches.filter { l -> db.branches.none { it.id == l.id } }
+
+        return db.copy(
+            messages = allMessages,
+            branches = finalBranches,
+            currentBranchId = local.currentBranchId ?: db.currentBranchId
         )
-
-        _state.update { currentState ->
-            val updatedAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
-            currentState.copy(agents = updatedAgents)
-        }
-        viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
-    }
-
-    fun switchBranch(branchId: String?) {
-        val agentId = _state.value.selectedAgentId ?: return
-        val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val updatedAgent = agent.copy(currentBranchId = branchId)
-
-        _state.update { currentState ->
-            val updatedAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
-            currentState.copy(agents = updatedAgents)
-        }
-        viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
 
     fun sendMessage(message: String) {
@@ -164,9 +108,19 @@ class LLMViewModel(
         val tokenCount = (message.length / 4).coerceAtLeast(1)
         val currentAgent = _state.value.selectedAgent ?: return
         val agentId = currentAgent.id
-        
+        val activeBranchId = currentAgent.currentBranchId
+        val branchKey = activeBranchId ?: "main_branch"
+
+        val lastMessageId = if (activeBranchId != null) {
+            currentAgent.branches.find { it.id == activeBranchId }?.lastMessageId
+        } else {
+            currentAgent.branches.find { it.id == "main_branch" }?.lastMessageId
+                ?: currentAgent.messages.lastOrNull()?.id
+        }
+
         val userMessage = ChatMessage(
-            parentId = currentAgent.currentBranchId,
+            parentId = lastMessageId,
+            branchId = branchKey,
             message = message, 
             source = SourceType.USER, 
             tokenCount = tokenCount,
@@ -175,26 +129,21 @@ class LLMViewModel(
 
         _state.update { state ->
             val updatedAgents = state.agents.map { agent ->
-                if (agent.id == agentId) agent.copy(
-                    messages = agent.messages + userMessage,
-                    totalTokensUsed = agent.totalTokensUsed + tokenCount
-                ) else agent
+                if (agent.id == agentId) {
+                    val updatedBranches = updateBranchPointer(agent.branches, branchKey, userMessage.id)
+                    agent.copy(
+                        messages = agent.messages + userMessage,
+                        branches = updatedBranches,
+                        totalTokensUsed = agent.totalTokensUsed + tokenCount
+                    )
+                } else agent
             }
             state.copy(agents = updatedAgents, isLoading = true)
         }
 
         viewModelScope.launch {
             repository.saveMessage(agentId, userMessage)
-            
-            // Проверяем необходимость обновления фактов
-            val agentAfterMessage = _state.value.agents.find { it.id == agentId }
-            val strategy = agentAfterMessage?.memoryStrategy as? ChatMemoryStrategy.StickyFacts
-            if (strategy != null) {
-                val messageCount = agentAfterMessage.messages.count { !it.isSystemNotification }
-                if (messageCount > 0 && messageCount % strategy.updateInterval == 0) {
-                    updateFacts(agentId)
-                }
-            }
+            _state.value.agents.find { it.id == agentId }?.let { repository.saveAgentMetadata(it) }
         }
 
         currentJob?.cancel()
@@ -205,17 +154,13 @@ class LLMViewModel(
             val history = memoryManager.processMessages(
                 messages = agentSnapshot.messages,
                 strategy = agentSnapshot.memoryStrategy,
-                currentBranchId = agentSnapshot.currentBranchId
+                currentBranchId = activeBranchId,
+                agentBranches = agentSnapshot.branches
             )
             
-            val systemPrompt = memoryManager.wrapSystemPrompt(
-                agentSnapshot.systemPrompt,
-                agentSnapshot.memoryStrategy
-            )
-
             val flow = chatStreamingUseCase(
                 messages = history,
-                systemPrompt = systemPrompt,
+                systemPrompt = memoryManager.wrapSystemPrompt(agentSnapshot.systemPrompt, agentSnapshot.memoryStrategy),
                 maxTokens = agentSnapshot.maxTokens,
                 temperature = agentSnapshot.temperature,
                 stopWord = agentSnapshot.stopWord,
@@ -223,31 +168,7 @@ class LLMViewModel(
                 provider = agentSnapshot.provider
             )
 
-            handleStreamingResponse(agentId, botMessageId, flow, userMessage.id)
-        }
-    }
-
-    private suspend fun updateFacts(agentId: String) {
-        val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val strategy = agent.memoryStrategy as? ChatMemoryStrategy.StickyFacts ?: return
-        
-        // Передаем windowSize из настроек стратегии агента
-        val result = extractFactsUseCase(
-            messages = agent.messages,
-            currentFacts = strategy.facts,
-            provider = agent.provider,
-            windowSize = strategy.windowSize
-        )
-
-        result.onSuccess { newFacts ->
-            val updatedAgent = agent.copy(memoryStrategy = strategy.copy(facts = newFacts))
-            _state.update { currentState ->
-                val updatedAgents = currentState.agents.map { a ->
-                    if (a.id == agentId) updatedAgent else a
-                }
-                currentState.copy(agents = updatedAgents)
-            }
-            repository.saveAgentMetadata(updatedAgent)
+            handleStreamingResponse(agentId, botMessageId, flow, userMessage.id, branchKey)
         }
     }
 
@@ -255,7 +176,8 @@ class LLMViewModel(
         agentId: String, 
         botMessageId: String, 
         flow: Flow<Result<String>>,
-        parentId: String
+        parentId: String,
+        branchKey: String
     ) {
         var currentContent = ""
         var lastUpdateMillis = 0L
@@ -265,17 +187,19 @@ class LLMViewModel(
             val initialBotMessage = ChatMessage(
                 id = botMessageId,
                 parentId = parentId,
+                branchId = branchKey,
                 message = "",
                 source = SourceType.ASSISTANT,
                 timestamp = currentTimeMillis()
             )
-            addBotMessageLocally(agentId, initialBotMessage)
+            addBotMessageLocally(agentId, initialBotMessage, branchKey)
         }
         .onCompletion {
             val finalTokens = (currentContent.length / 4).coerceAtLeast(1)
             val finalBotMessage = ChatMessage(
                 id = botMessageId,
                 parentId = parentId,
+                branchId = branchKey,
                 message = currentContent,
                 source = SourceType.ASSISTANT,
                 tokenCount = finalTokens,
@@ -287,8 +211,10 @@ class LLMViewModel(
                         val updatedMessages = agent.messages.map { msg ->
                             if (msg.id == botMessageId) finalBotMessage else msg
                         }
+                        val updatedBranches = updateBranchPointer(agent.branches, branchKey, finalBotMessage.id)
                         agent.copy(
                             messages = updatedMessages,
+                            branches = updatedBranches,
                             totalTokensUsed = agent.totalTokensUsed + finalTokens
                         )
                     } else agent
@@ -296,6 +222,7 @@ class LLMViewModel(
                 state.copy(agents = updatedAgents, isLoading = false)
             }
             repository.saveMessage(agentId, finalBotMessage)
+            _state.value.agents.find { it.id == agentId }?.let { repository.saveAgentMetadata(it) }
         }
         .collect { result ->
             result.onSuccess { chunk ->
@@ -311,12 +238,23 @@ class LLMViewModel(
         }
     }
 
-    private fun addBotMessageLocally(agentId: String, message: ChatMessage) {
+    private fun addBotMessageLocally(agentId: String, message: ChatMessage, branchKey: String) {
         _state.update { state ->
             val updatedAgents = state.agents.map { agent ->
-                if (agent.id == agentId) agent.copy(messages = agent.messages + message) else agent
+                if (agent.id == agentId) {
+                    val updatedBranches = updateBranchPointer(agent.branches, branchKey, message.id)
+                    agent.copy(messages = agent.messages + message, branches = updatedBranches)
+                } else agent
             }
             state.copy(agents = updatedAgents)
+        }
+    }
+
+    private fun updateBranchPointer(branches: List<ChatBranch>, branchId: String, lastMsgId: String): List<ChatBranch> {
+        return if (branches.any { it.id == branchId }) {
+            branches.map { if (it.id == branchId) it.copy(lastMessageId = lastMsgId) else it }
+        } else {
+            branches + ChatBranch(id = branchId, name = if (branchId == "main_branch") "Основная" else "Ветка", lastMessageId = lastMsgId)
         }
     }
 
@@ -337,95 +275,79 @@ class LLMViewModel(
         }
     }
 
-    fun selectAgent(agentId: String?) {
-        _state.update { it.copy(selectedAgentId = agentId) }
-    }
-
-    fun updateStreamingEnabled(enabled: Boolean) {
-        _state.update { it.copy(isStreamingEnabled = enabled) }
-    }
-
-    fun updateSendFullHistory(enabled: Boolean) {
-        _state.update { it.copy(sendFullHistory = enabled) }
-    }
-
-    fun updateAgent(
-        id: String,
-        name: String,
-        systemPrompt: String,
-        temperature: Double,
-        provider: LLMProvider,
-        stopWord: String,
-        maxTokens: Int,
-        keepLastMessagesCount: Int,
-        summaryPrompt: String,
-        summaryDepth: SummaryDepth,
-        memoryStrategy: ChatMemoryStrategy
-    ) {
-        val agent = _state.value.agents.find { it.id == id } ?: return
-        val updatedAgent = agentManager.updateAgent(
-            agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy
-        )
-        
+    fun updateMemoryStrategy(strategy: ChatMemoryStrategy) {
+        val agentId = _state.value.selectedAgentId ?: return
+        val currentAgent = _state.value.agents.find { it.id == agentId } ?: return
+        val updatedAgent = currentAgent.copy(memoryStrategy = strategy)
         _state.update { currentState ->
-            val updatedAgents = currentState.agents.map { if (it.id == id) updatedAgent else it }
+            val updatedAgents = currentState.agents.map { if (it.id == agentId) updatedAgent else it }
             currentState.copy(agents = updatedAgents)
         }
-        
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
 
-    fun deleteAgent(agentId: String) {
-        viewModelScope.launch {
-            repository.deleteAgent(agentId)
-            _state.update { currentState ->
-                val updatedAgents = currentState.agents.filter { it.id != agentId }
-                val nextSelectedId = if (currentState.selectedAgentId == agentId) {
-                    updatedAgents.firstOrNull()?.id ?: GENERAL_CHAT_ID
-                } else {
-                    currentState.selectedAgentId
-                }
-                currentState.copy(agents = updatedAgents, selectedAgentId = nextSelectedId)
+    fun createBranch(fromMessageId: String, branchName: String) {
+        val agentId = _state.value.selectedAgentId ?: return
+        val branchId = Uuid.random().toString()
+        val newBranch = ChatBranch(id = branchId, name = branchName, lastMessageId = fromMessageId)
+        _state.update { currentState ->
+            val updatedAgents = currentState.agents.map { a ->
+                if (a.id == agentId) a.copy(branches = a.branches + newBranch, currentBranchId = branchId) else a
             }
+            currentState.copy(agents = updatedAgents)
+        }
+        viewModelScope.launch {
+            _state.value.agents.find { it.id == agentId }?.let { repository.saveAgentMetadata(it) }
         }
     }
 
-    fun duplicateAgent(agentId: String) {
-        val agent = _state.value.agents.find { it.id == agentId } ?: return
-        val newAgent = agent.copy(
-            id = Uuid.random().toString(), 
-            name = "${agent.name} (Copy)", 
-            messages = emptyList(),
-            totalTokensUsed = 0
-        )
-        // Обновляем локально и сохраняем
+    fun switchBranch(branchId: String?) {
+        val agentId = _state.value.selectedAgentId ?: return
+        _state.update { currentState ->
+            val updatedAgents = currentState.agents.map { a ->
+                if (a.id == agentId) a.copy(currentBranchId = branchId) else a
+            }
+            currentState.copy(agents = updatedAgents)
+        }
+        viewModelScope.launch {
+            _state.value.agents.find { it.id == agentId }?.let { repository.saveAgentMetadata(it) }
+        }
+    }
+
+    fun selectAgent(agentId: String?) { _state.update { it.copy(selectedAgentId = agentId) } }
+    fun updateStreamingEnabled(enabled: Boolean) { _state.update { it.copy(isStreamingEnabled = enabled) } }
+    fun updateSendFullHistory(enabled: Boolean) { _state.update { it.copy(sendFullHistory = enabled) } }
+    fun createAgent() {
+        val currentProvider = _state.value.selectedAgent?.provider ?: LLMProvider.Yandex()
+        val newAgent = agentManager.createDefaultAgent(currentProvider)
         _state.update { it.copy(agents = it.agents + newAgent, selectedAgentId = newAgent.id) }
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
     }
-
+    fun updateAgent(id: String, name: String, systemPrompt: String, temperature: Double, provider: LLMProvider, stopWord: String, maxTokens: Int, keepLastMessagesCount: Int, summaryPrompt: String, summaryDepth: SummaryDepth, memoryStrategy: ChatMemoryStrategy) {
+        val agent = _state.value.agents.find { it.id == id } ?: return
+        val updatedAgent = agentManager.updateAgent(agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy)
+        _state.update { currentState -> currentState.copy(agents = currentState.agents.map { if (it.id == id) updatedAgent else it }) }
+        viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
+    }
+    fun deleteAgent(agentId: String) {
+        viewModelScope.launch {
+            repository.deleteAgent(agentId)
+            _state.update { it.copy(agents = it.agents.filter { it.id != agentId }) }
+        }
+    }
+    fun duplicateAgent(agentId: String) {
+        val agent = _state.value.agents.find { it.id == agentId } ?: return
+        val newAgent = agent.copy(id = Uuid.random().toString(), name = "${agent.name} (Copy)", messages = emptyList(), totalTokensUsed = 0)
+        _state.update { it.copy(agents = it.agents + newAgent, selectedAgentId = newAgent.id) }
+        viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
+    }
     fun clearChat() {
         currentJob?.cancel()
         val agent = _state.value.selectedAgent ?: return
         viewModelScope.launch {
-            val updatedStrategy = when (val strategy = agent.memoryStrategy) {
-                is ChatMemoryStrategy.StickyFacts -> strategy.copy(facts = ChatFacts())
-                is ChatMemoryStrategy.Summarization -> strategy.copy(currentSummary = null)
-                else -> strategy
-            }
-
-            val clearedAgent = agent.copy(
-                messages = emptyList(), 
-                branches = emptyList(),
-                currentBranchId = null,
-                totalTokensUsed = 0, 
-                summary = null,
-                memoryStrategy = updatedStrategy
-            )
+            val clearedAgent = agent.copy(messages = emptyList(), branches = emptyList(), currentBranchId = null, totalTokensUsed = 0, summary = null)
             repository.saveAgent(clearedAgent)
-            _state.update { currentState ->
-                val updatedAgents = currentState.agents.map { if (it.id == agent.id) clearedAgent else it }
-                currentState.copy(agents = updatedAgents)
-            }
+            _state.update { state -> state.copy(agents = state.agents.map { if (it.id == agent.id) clearedAgent else it }) }
         }
     }
 }

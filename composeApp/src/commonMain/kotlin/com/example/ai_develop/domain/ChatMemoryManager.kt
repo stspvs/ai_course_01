@@ -5,40 +5,48 @@ class ChatMemoryManager {
     fun processMessages(
         messages: List<ChatMessage>,
         strategy: ChatMemoryStrategy,
-        currentBranchId: String? = null
+        currentBranchId: String? = null,
+        agentBranches: List<ChatBranch> = emptyList()
     ): List<ChatMessage> {
         // 1. Сначала восстанавливаем цепочку сообщений для текущей ветки
-        // Если branchId не задан, считаем историю линейной и берем все сообщения.
-        val branchMessages = if (currentBranchId != null) {
-            getMessagesForBranch(messages, currentBranchId)
-        } else {
-            // Если ветка не выбрана, берем все сообщения как есть.
-            // Старая логика messages.filter { it.parentId == null } была ошибочной,
-            // так как она отфильтровывала все сообщения ассистента (у которых есть parentId).
-            messages
-        }
+        val branchMessages = getBranchHistory(messages, currentBranchId, agentBranches)
 
         // 2. Применяем ограничения выбранной стратегии
         return when (strategy) {
             is ChatMemoryStrategy.SlidingWindow -> {
-                // Храним только последние N сообщений
                 branchMessages.takeLast(strategy.windowSize)
             }
             is ChatMemoryStrategy.StickyFacts -> {
-                // В Sticky Facts мы тоже ограничиваем окно сообщений, 
-                // так как важные факты пойдут в системный промпт
                 branchMessages.takeLast(strategy.windowSize)
             }
             is ChatMemoryStrategy.Branching -> {
-                // В режиме ветвления обычно отправляется вся ветка целиком до текущего момента
-                // или последние N сообщений этой ветки
                 branchMessages.takeLast(strategy.windowSize)
             }
             is ChatMemoryStrategy.Summarization -> {
-                // При суммаризации мы берем последние N сообщений,
-                // а остальное уже в сжатом виде (в системном промпте или первом сообщении)
                 branchMessages.takeLast(strategy.windowSize)
             }
+        }
+    }
+
+    fun getBranchHistory(
+        messages: List<ChatMessage>,
+        currentBranchId: String?,
+        agentBranches: List<ChatBranch>
+    ): List<ChatMessage> {
+        val lastId = if (currentBranchId != null) {
+            // Если выбрана конкретная ветка, восстанавливаем историю от её последнего сообщения
+            val branch = agentBranches.find { it.id == currentBranchId }
+            branch?.lastMessageId
+        } else {
+            // Если ветка не выбрана (Основная), ищем её метаданные по спец. ID "main_branch"
+            val mainBranch = agentBranches.find { it.id == "main_branch" }
+            mainBranch?.lastMessageId ?: messages.lastOrNull()?.id
+        }
+
+        return if (lastId != null) {
+            getMessagesForBranch(messages, lastId)
+        } else {
+            emptyList()
         }
     }
 
@@ -46,7 +54,7 @@ class ChatMemoryManager {
         val result = mutableListOf<ChatMessage>()
         var currentId: String? = branchLastMessageId
         
-        // Идем от последнего сообщения к началу по цепочке parentId
+        // Идем от указанного сообщения к началу по цепочке parentId
         while (currentId != null) {
             val msg = messages.find { it.id == currentId }
             if (msg != null) {
@@ -63,16 +71,12 @@ class ChatMemoryManager {
         return when (strategy) {
             is ChatMemoryStrategy.SlidingWindow -> basePrompt
             is ChatMemoryStrategy.StickyFacts -> {
-                // Добавляем блок facts в системный запрос
                 basePrompt + strategy.facts.toSystemPrompt()
             }
             is ChatMemoryStrategy.Branching -> {
-                // В режиме ветвления системный промпт обычно не меняется,
-                // либо можно добавить пометку о текущей ветке
                 basePrompt
             }
             is ChatMemoryStrategy.Summarization -> {
-                // Добавляем текущую суммаризацию в системный запрос
                 if (strategy.currentSummary != null) {
                     basePrompt + "\n\nSUMMARY OF PREVIOUS CONVERSATION:\n" + strategy.currentSummary
                 } else {

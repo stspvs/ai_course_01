@@ -5,13 +5,16 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -24,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.Agent
+import com.example.ai_develop.domain.ChatBranch
 import com.example.ai_develop.domain.ChatMemoryStrategy
 import com.example.ai_develop.domain.ChatMessage
 import com.example.ai_develop.presentation.LLMStateModel
@@ -45,6 +49,9 @@ internal fun ChatContent(
     val activeAgent = state.agents.find { it.id == state.selectedAgentId }
     var menuExpanded by remember { mutableStateOf(false) }
     var showFacts by remember { mutableStateOf(false) }
+    var showBranches by remember { mutableStateOf(false) }
+
+    val isBranchingMode = activeAgent?.memoryStrategy is ChatMemoryStrategy.Branching
 
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFFE3F2FD))
@@ -59,16 +66,40 @@ internal fun ChatContent(
             menuExpanded = menuExpanded,
             onMenuToggle = { menuExpanded = it },
             onShowFacts = { showFacts = !showFacts },
-            hasFacts = (activeAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.isNotEmpty() == true
+            hasFacts = (activeAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.isNotEmpty() == true,
+            onShowBranches = { showBranches = !showBranches },
+            isBranchingMode = isBranchingMode,
+            hasBranches = activeAgent?.branches?.isNotEmpty() == true
         )
 
         AnimatedVisibility(
-            visible = showFacts,
+            visible = showFacts && !isBranchingMode,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
             val facts = (activeAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyMap()
             FactsPanel(facts = facts)
+        }
+
+        AnimatedVisibility(
+            visible = showBranches && isBranchingMode,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            BranchesPanel(
+                branches = activeAgent?.branches ?: emptyList(),
+                currentBranchId = activeAgent?.currentBranchId,
+                onSwitchBranch = onSwitchBranch,
+                onCreateBranch = { branchName ->
+                    // Создаем ветку от последнего сообщения, если оно есть
+                    val lastMsgId = activeAgent?.messages?.lastOrNull()?.id
+                    if (lastMsgId != null) {
+                        onCreateBranch(lastMsgId, branchName)
+                    } else {
+                        // Если сообщений нет, ветка по сути от начала (но UI обычно не дает создать без сообщений)
+                    }
+                }
+            )
         }
 
         val messages = state.currentMessages
@@ -135,6 +166,107 @@ private fun FactsPanel(facts: Map<String, String>) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BranchesPanel(
+    branches: List<ChatBranch>,
+    currentBranchId: String?,
+    onSwitchBranch: (String?) -> Unit,
+    onCreateBranch: (String) -> Unit
+) {
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var newBranchName by remember { mutableStateOf("") }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        color = Color(0xFFE8F5E9),
+        shape = RoundedCornerShape(12.dp),
+        tonalElevation = 2.dp,
+        shadowElevation = 2.dp
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                val currentBranchName = branches.find { it.id == currentBranchId }?.name ?: "Основная ветка"
+                Text(
+                    text = "Текущая ветка: $currentBranchName",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF2E7D32),
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = { showCreateDialog = true },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "New Branch", tint = Color(0xFF2E7D32), modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = currentBranchId == null,
+                    onClick = { onSwitchBranch(null) },
+                    label = { Text("Основная") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF2E7D32),
+                        selectedLabelColor = Color.White
+                    )
+                )
+                
+                branches.forEach { branch ->
+                    FilterChip(
+                        selected = branch.id == currentBranchId,
+                        onClick = { onSwitchBranch(branch.id) },
+                        label = { Text(branch.name) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF2E7D32),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    if (showCreateDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateDialog = false },
+            title = { Text("Создать новую ветку") },
+            text = {
+                OutlinedTextField(
+                    value = newBranchName,
+                    onValueChange = { newBranchName = it },
+                    label = { Text("Название ветки") },
+                    placeholder = { Text("Введите название...") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newBranchName.isNotBlank()) {
+                        onCreateBranch(newBranchName)
+                        newBranchName = ""
+                        showCreateDialog = false
+                    }
+                }) { Text("Создать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateDialog = false }) { Text("Отмена") }
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageItem(
@@ -188,7 +320,10 @@ private fun ChatTopBar(
     menuExpanded: Boolean,
     onMenuToggle: (Boolean) -> Unit,
     onShowFacts: () -> Unit,
-    hasFacts: Boolean
+    hasFacts: Boolean,
+    onShowBranches: () -> Unit,
+    isBranchingMode: Boolean,
+    hasBranches: Boolean
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -244,17 +379,33 @@ private fun ChatTopBar(
                 }
                 
                 if (isAgentSelected) {
-                    IconButton(onClick = onShowFacts) {
-                        BadgedBox(
-                            badge = { 
-                                if (hasFacts) {
-                                    Badge(containerColor = Color(0xFFF57F17)) {
-                                        Text("!", color = Color.White)
+                    if (isBranchingMode) {
+                        IconButton(onClick = onShowBranches) {
+                            BadgedBox(
+                                badge = { 
+                                    if (hasBranches) {
+                                        Badge(containerColor = Color(0xFF2E7D32)) {
+                                            Text("!", color = Color.White)
+                                        }
                                     }
                                 }
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Branches", tint = if (hasBranches) Color(0xFF2E7D32) else Color.Gray)
                             }
-                        ) {
-                            Icon(Icons.Default.Info, contentDescription = "Facts", tint = if (hasFacts) Color(0xFFF57F17) else Color.Gray)
+                        }
+                    } else {
+                        IconButton(onClick = onShowFacts) {
+                            BadgedBox(
+                                badge = { 
+                                    if (hasFacts) {
+                                        Badge(containerColor = Color(0xFFF57F17)) {
+                                            Text("!", color = Color.White)
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = "Facts", tint = if (hasFacts) Color(0xFFF57F17) else Color.Gray)
+                            }
                         }
                     }
                 }
