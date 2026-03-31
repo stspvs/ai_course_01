@@ -1,7 +1,10 @@
 package com.example.ai_develop.presentation
 
 import com.example.ai_develop.domain.*
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 class AgentManager {
     val templates = listOf(
         AgentTemplate(
@@ -79,6 +82,28 @@ class AgentManager {
             summaryPrompt = summaryPrompt,
             summaryDepth = summaryDepth,
             memoryStrategy = memoryStrategy
+        )
+    }
+
+    fun duplicateAgent(agent: Agent): Agent {
+        return agent.copy(
+            id = Uuid.random().toString(),
+            name = "${agent.name} (Copy)",
+            messages = emptyList(),
+            totalTokensUsed = 0,
+            branches = emptyList(),
+            currentBranchId = null,
+            summary = null
+        )
+    }
+
+    fun clearChat(agent: Agent): Agent {
+        return agent.copy(
+            messages = emptyList(),
+            branches = emptyList(),
+            currentBranchId = null,
+            totalTokensUsed = 0,
+            summary = null
         )
     }
 }

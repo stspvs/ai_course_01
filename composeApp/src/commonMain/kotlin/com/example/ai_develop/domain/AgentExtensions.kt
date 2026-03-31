@@ -1,0 +1,60 @@
+package com.example.ai_develop.domain
+
+import com.example.ai_develop.util.currentTimeMillis
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
+
+fun Agent.mergeWith(db: Agent): Agent {
+    val dbIds = db.messages.map { it.id }.toSet()
+    val pendingMessages = this.messages.filter { it.id !in dbIds }
+    val allMessages = (db.messages + pendingMessages).distinctBy { it.id }.sortedBy { it.timestamp }
+
+    val mergedBranches = db.branches.map { dbBranch ->
+        val localBranch = this.branches.find { it.id == dbBranch.id }
+        if (localBranch != null && localBranch.lastMessageId != dbBranch.lastMessageId) {
+            val hasLocalMsg = allMessages.any { it.id == localBranch.lastMessageId }
+            if (hasLocalMsg) localBranch else dbBranch
+        } else {
+            dbBranch
+        }
+    }
+    
+    val finalBranches = mergedBranches + this.branches.filter { l -> db.branches.none { it.id == l.id } }
+
+    return db.copy(
+        messages = allMessages,
+        branches = finalBranches,
+        currentBranchId = this.currentBranchId ?: db.currentBranchId
+    )
+}
+
+fun List<ChatBranch>.updatePointer(branchId: String, lastMsgId: String): List<ChatBranch> {
+    return if (this.any { it.id == branchId }) {
+        this.map { if (it.id == branchId) it.copy(lastMessageId = lastMsgId) else it }
+    } else {
+        this + ChatBranch(
+            id = branchId, 
+            name = if (branchId == "main_branch") "Основная" else "Ветка", 
+            lastMessageId = lastMsgId
+        )
+    }
+}
+
+@OptIn(ExperimentalUuidApi::class)
+fun createChatMessage(
+    message: String,
+    source: SourceType,
+    parentId: String?,
+    branchId: String,
+    id: String = Uuid.random().toString()
+) = ChatMessage(
+    id = id,
+    parentId = parentId,
+    branchId = branchId,
+    message = message,
+    source = source,
+    tokenCount = estimateTokens(message),
+    timestamp = currentTimeMillis()
+)
+
+fun estimateTokens(text: String): Int = (text.length / 4).coerceAtLeast(1)

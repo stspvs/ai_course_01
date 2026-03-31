@@ -1,10 +1,11 @@
 package com.example.ai_develop.data.database
 
+import com.example.ai_develop.data.database.mappers.toDomain
+import com.example.ai_develop.data.database.mappers.toEntity
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
 
 class DatabaseChatRepository(private val db: AppDatabase) {
     private val dao = db.agentDao()
@@ -16,10 +17,7 @@ class DatabaseChatRepository(private val db: AppDatabase) {
     }
 
     fun getAgentWithMessages(agentId: String): Flow<Agent?> {
-        val agentFlow = dao.getAgentByIdFlow(agentId)
-        val messagesFlow = dao.getMessagesForAgent(agentId)
-
-        return agentFlow.combine(messagesFlow) { entity, messageEntities ->
+        return dao.getAgentByIdFlow(agentId).combine(dao.getMessagesForAgent(agentId)) { entity, messageEntities ->
             entity?.toDomain(messageEntities.map { it.toDomain() })
         }
     }
@@ -37,77 +35,12 @@ class DatabaseChatRepository(private val db: AppDatabase) {
 
     suspend fun saveMessage(agentId: String, message: ChatMessage) {
         dao.insertMessage(message.toEntity(agentId))
-        val agent = dao.getAgentById(agentId)
-        if (agent != null) {
+        dao.getAgentById(agentId)?.let { agent ->
             dao.updateTokens(agentId, agent.totalTokensUsed + message.tokenCount)
         }
     }
 
     suspend fun deleteAgent(agentId: String) {
-        val agent = dao.getAgentById(agentId)
-        if (agent != null) {
-            dao.deleteAgent(agent)
-        }
+        dao.getAgentById(agentId)?.let { dao.deleteAgent(it) }
     }
-
-    // Mappers
-    private fun AgentEntity.toDomain(messages: List<ChatMessage>) = Agent(
-        id = id,
-        name = name,
-        systemPrompt = systemPrompt,
-        temperature = temperature,
-        provider = provider,
-        stopWord = stopWord,
-        maxTokens = maxTokens,
-        messages = messages,
-        totalTokensUsed = totalTokensUsed,
-        summary = summary,
-        summaryPrompt = summaryPrompt,
-        summaryDepth = summaryDepth,
-        memoryStrategy = memoryStrategy,
-        branches = branches,
-        currentBranchId = currentBranchId,
-        keepLastMessagesCount = keepLastMessagesCount
-    )
-
-    private fun Agent.toEntity() = AgentEntity(
-        id = id,
-        name = name,
-        systemPrompt = systemPrompt,
-        temperature = temperature,
-        provider = provider,
-        stopWord = stopWord,
-        maxTokens = maxTokens,
-        totalTokensUsed = totalTokensUsed,
-        summary = summary,
-        summaryPrompt = summaryPrompt,
-        summaryDepth = summaryDepth,
-        memoryStrategy = memoryStrategy,
-        branches = branches,
-        currentBranchId = currentBranchId,
-        keepLastMessagesCount = keepLastMessagesCount
-    )
-
-    private fun MessageEntity.toDomain() = ChatMessage(
-        id = id,
-        parentId = parentId,
-        branchId = branchId, // Маппинг нового поля
-        message = message,
-        source = source,
-        tokenCount = tokenCount,
-        timestamp = timestamp,
-        isSystemNotification = isSystemNotification
-    )
-
-    private fun ChatMessage.toEntity(agentId: String) = MessageEntity(
-        id = id,
-        agentId = agentId,
-        parentId = parentId,
-        branchId = branchId, // Маппинг нового поля
-        message = message,
-        source = source,
-        tokenCount = tokenCount,
-        timestamp = timestamp,
-        isSystemNotification = isSystemNotification
-    )
 }

@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.data.database.DatabaseChatRepository
 import com.example.ai_develop.domain.*
-import com.example.ai_develop.util.currentTimeMillis
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -44,7 +43,7 @@ class LLMViewModel(
                         dbAgents.map { dbAgent ->
                             val existingAgent = currentState.agents.find { it.id == dbAgent.id }
                             if (existingAgent != null) {
-                                mergeAgentData(existingAgent, dbAgent)
+                                existingAgent.mergeWith(dbAgent)
                             } else {
                                 dbAgent
                             }
@@ -63,7 +62,7 @@ class LLMViewModel(
                             _state.update { currentState ->
                                 val updatedAgents = currentState.agents.map { existing ->
                                     if (existing.id == id) {
-                                        mergeAgentData(existing, fullAgent)
+                                        existing.mergeWith(fullAgent)
                                     } else existing
                                 }
                                 currentState.copy(agents = updatedAgents)
@@ -75,36 +74,9 @@ class LLMViewModel(
         }
     }
 
-    private fun mergeAgentData(local: Agent, db: Agent): Agent {
-        // 1. Слияние сообщений: БД + локальные, которых еще нет в БД
-        val dbIds = db.messages.map { it.id }.toSet()
-        val pendingMessages = local.messages.filter { it.id !in dbIds }
-        val allMessages = (db.messages + pendingMessages).distinctBy { it.id }.sortedBy { it.timestamp }
-
-        // 2. Слияние веток: верим локальному указателю, если сообщение уже есть в нашем общем списке
-        val mergedBranches = db.branches.map { dbBranch ->
-            val localBranch = local.branches.find { it.id == dbBranch.id }
-            if (localBranch != null && localBranch.lastMessageId != dbBranch.lastMessageId) {
-                val hasLocalMsg = allMessages.any { it.id == localBranch.lastMessageId }
-                if (hasLocalMsg) localBranch else dbBranch
-            } else {
-                dbBranch
-            }
-        }
-        
-        val finalBranches = mergedBranches + local.branches.filter { l -> db.branches.none { it.id == l.id } }
-
-        return db.copy(
-            messages = allMessages,
-            branches = finalBranches,
-            currentBranchId = local.currentBranchId ?: db.currentBranchId
-        )
-    }
-
     fun sendMessage(message: String) {
         if (message.isBlank()) return
 
-        val tokenCount = (message.length / 4).coerceAtLeast(1)
         val currentAgent = _state.value.selectedAgent ?: return
         val agentId = currentAgent.id
         val activeBranchId = currentAgent.currentBranchId
@@ -117,23 +89,20 @@ class LLMViewModel(
                 ?: currentAgent.messages.lastOrNull()?.id
         }
 
-        val userMessage = ChatMessage(
+        val userMessage = createChatMessage(
+            message = message,
+            source = SourceType.USER,
             parentId = lastMessageId,
-            branchId = branchKey,
-            message = message, 
-            source = SourceType.USER, 
-            tokenCount = tokenCount,
-            timestamp = currentTimeMillis()
+            branchId = branchKey
         )
 
         _state.update { state ->
             val updatedAgents = state.agents.map { agent ->
                 if (agent.id == agentId) {
-                    val updatedBranches = updateBranchPointer(agent.branches, branchKey, userMessage.id)
                     agent.copy(
                         messages = agent.messages + userMessage,
-                        branches = updatedBranches,
-                        totalTokensUsed = agent.totalTokensUsed + tokenCount
+                        branches = agent.branches.updatePointer(branchKey, userMessage.id),
+                        totalTokensUsed = agent.totalTokensUsed + userMessage.tokenCount
                     )
                 } else agent
             }
@@ -183,38 +152,21 @@ class LLMViewModel(
 
         flow.onStart {
             _state.update { it.copy(isLoading = false) }
-            val initialBotMessage = ChatMessage(
-                id = botMessageId,
-                parentId = parentId,
-                branchId = branchKey,
-                message = "",
-                source = SourceType.ASSISTANT,
-                timestamp = currentTimeMillis()
-            )
+            val initialBotMessage = createChatMessage("", SourceType.ASSISTANT, parentId, branchKey, botMessageId)
             addBotMessageLocally(agentId, initialBotMessage, branchKey)
         }
         .onCompletion {
-            val finalTokens = (currentContent.length / 4).coerceAtLeast(1)
-            val finalBotMessage = ChatMessage(
-                id = botMessageId,
-                parentId = parentId,
-                branchId = branchKey,
-                message = currentContent,
-                source = SourceType.ASSISTANT,
-                tokenCount = finalTokens,
-                timestamp = currentTimeMillis()
-            )
+            val finalBotMessage = createChatMessage(currentContent, SourceType.ASSISTANT, parentId, branchKey, botMessageId)
             _state.update { state ->
                 val updatedAgents = state.agents.map { agent ->
                     if (agent.id == agentId) {
                         val updatedMessages = agent.messages.map { msg ->
                             if (msg.id == botMessageId) finalBotMessage else msg
                         }
-                        val updatedBranches = updateBranchPointer(agent.branches, branchKey, finalBotMessage.id)
                         agent.copy(
                             messages = updatedMessages,
-                            branches = updatedBranches,
-                            totalTokensUsed = agent.totalTokensUsed + finalTokens
+                            branches = agent.branches.updatePointer(branchKey, finalBotMessage.id),
+                            totalTokensUsed = agent.totalTokensUsed + finalBotMessage.tokenCount
                         )
                     } else agent
                 }
@@ -241,19 +193,13 @@ class LLMViewModel(
         _state.update { state ->
             val updatedAgents = state.agents.map { agent ->
                 if (agent.id == agentId) {
-                    val updatedBranches = updateBranchPointer(agent.branches, branchKey, message.id)
-                    agent.copy(messages = agent.messages + message, branches = updatedBranches)
+                    agent.copy(
+                        messages = agent.messages + message, 
+                        branches = agent.branches.updatePointer(branchKey, message.id)
+                    )
                 } else agent
             }
             state.copy(agents = updatedAgents)
-        }
-    }
-
-    private fun updateBranchPointer(branches: List<ChatBranch>, branchId: String, lastMsgId: String): List<ChatBranch> {
-        return if (branches.any { it.id == branchId }) {
-            branches.map { if (it.id == branchId) it.copy(lastMessageId = lastMsgId) else it }
-        } else {
-            branches + ChatBranch(id = branchId, name = if (branchId == "main_branch") "Основная" else "Ветка", lastMessageId = lastMsgId)
         }
     }
 
@@ -264,7 +210,7 @@ class LLMViewModel(
                     val updatedMessages = agent.messages.map { msg ->
                         if (msg.id == messageId) msg.copy(
                             message = newMessage,
-                            tokenCount = (newMessage.length / 4).coerceAtLeast(1)
+                            tokenCount = estimateTokens(newMessage)
                         ) else msg
                     }
                     agent.copy(messages = updatedMessages)
@@ -356,5 +302,5 @@ class LLMViewModel(
         }
     }
     
-    private fun currentTimeMillis(): Long = System.currentTimeMillis()
+    private fun currentTimeMillis(): Long = com.example.ai_develop.util.currentTimeMillis()
 }
