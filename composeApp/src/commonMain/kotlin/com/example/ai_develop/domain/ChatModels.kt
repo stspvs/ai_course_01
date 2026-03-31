@@ -23,7 +23,7 @@ enum class SummaryDepth(val description: String) {
 data class ChatMessage(
     val id: String = Uuid.random().toString(),
     val parentId: String? = null,
-    val branchId: String? = null, // Идентификатор ветки, в которой было создано сообщение
+    val branchId: String? = null,
     val message: String,
     val source: SourceType,
     val tokenCount: Int = 0,
@@ -44,23 +44,27 @@ data class ChatFacts(
 
 @Serializable
 sealed interface ChatMemoryStrategy {
+    val windowSize: Int
+
     @Serializable
-    data class SlidingWindow(val windowSize: Int) : ChatMemoryStrategy
+    data class SlidingWindow(override val windowSize: Int) : ChatMemoryStrategy
     
     @Serializable
     data class StickyFacts(
-        val windowSize: Int,
+        override val windowSize: Int,
         val updateInterval: Int = 5,
         val facts: ChatFacts = ChatFacts()
     ) : ChatMemoryStrategy
 
     @Serializable
-    data class Branching(val windowSize: Int = 100) : ChatMemoryStrategy
+    data class Branching(override val windowSize: Int = 100) : ChatMemoryStrategy
 
     @Serializable
     data class Summarization(
-        val windowSize: Int,
-        val currentSummary: String? = null
+        override val windowSize: Int,
+        val summary: String? = null,
+        val summaryPrompt: String = "Кратко суммируй ключевые моменты этого диалога, чтобы сохранить контекст для продолжения беседы. Пиши только саму суть.",
+        val summaryDepth: SummaryDepth = SummaryDepth.LOW
     ) : ChatMemoryStrategy
 }
 
@@ -85,11 +89,7 @@ data class Agent(
     val branches: List<ChatBranch> = emptyList(),
     val currentBranchId: String? = null,
     val memoryStrategy: ChatMemoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
-    val keepLastMessagesCount: Int = 10,
-    val totalTokensUsed: Int = 0,
-    val summary: String? = null,
-    val summaryPrompt: String = "Кратко суммируй ключевые моменты этого диалога, чтобы сохранить контекст для продолжения беседы. Пиши только саму суть.",
-    val summaryDepth: SummaryDepth = SummaryDepth.LOW
+    val totalTokensUsed: Int = 0
 )
 
 @Serializable
@@ -98,6 +98,5 @@ data class AgentTemplate(
     val description: String,
     val systemPrompt: String,
     val temperature: Double,
-    val maxTokens: Int = 2000,
-    val keepLastMessagesCount: Int = 10
+    val maxTokens: Int = 2000
 )

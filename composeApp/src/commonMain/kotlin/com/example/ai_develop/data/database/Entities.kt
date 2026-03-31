@@ -16,13 +16,9 @@ data class AgentEntity(
     val stopWord: String,
     val maxTokens: Int,
     val totalTokensUsed: Int,
-    val summary: String? = null,
-    val summaryPrompt: String = "Кратко суммируй ключевые моменты этого диалога, чтобы сохранить контекст для продолжения беседы. Пиши только саму суть.",
-    val summaryDepth: SummaryDepth = SummaryDepth.LOW,
     val memoryStrategy: ChatMemoryStrategy,
     val branches: List<ChatBranch> = emptyList(),
-    val currentBranchId: String? = null,
-    val keepLastMessagesCount: Int = 10
+    val currentBranchId: String? = null
 )
 
 @Entity(
@@ -41,7 +37,7 @@ data class MessageEntity(
     @PrimaryKey val id: String,
     val agentId: String,
     val parentId: String? = null,
-    val branchId: String? = null, // Добавлено поле для идентификатора ветки
+    val branchId: String? = null,
     val message: String,
     val source: SourceType,
     val tokenCount: Int,

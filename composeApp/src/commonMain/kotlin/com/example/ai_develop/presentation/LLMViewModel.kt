@@ -271,9 +271,9 @@ class LLMViewModel(
         viewModelScope.launch { repository.saveAgentMetadata(newAgent) }
     }
 
-    fun updateAgent(id: String, name: String, systemPrompt: String, temperature: Double, provider: LLMProvider, stopWord: String, maxTokens: Int, keepLastMessagesCount: Int, summaryPrompt: String, summaryDepth: SummaryDepth, memoryStrategy: ChatMemoryStrategy) {
+    fun updateAgent(id: String, name: String, systemPrompt: String, temperature: Double, provider: LLMProvider, stopWord: String, maxTokens: Int, memoryStrategy: ChatMemoryStrategy) {
         val agent = _state.value.agents.find { it.id == id } ?: return
-        val updatedAgent = agentManager.updateAgent(agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy)
+        val updatedAgent = agentManager.updateAgent(agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy)
         _state.update { currentState -> currentState.copy(agents = currentState.agents.map { if (it.id == id) updatedAgent else it }) }
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
@@ -296,7 +296,7 @@ class LLMViewModel(
         currentJob?.cancel()
         val agent = _state.value.selectedAgent ?: return
         viewModelScope.launch {
-            val clearedAgent = agent.copy(messages = emptyList(), branches = emptyList(), currentBranchId = null, totalTokensUsed = 0, summary = null)
+            val clearedAgent = agent.copy(messages = emptyList(), branches = emptyList(), currentBranchId = null, totalTokensUsed = 0)
             repository.saveAgent(clearedAgent)
             _state.update { state -> state.copy(agents = state.agents.map { if (it.id == agent.id) clearedAgent else it }) }
         }

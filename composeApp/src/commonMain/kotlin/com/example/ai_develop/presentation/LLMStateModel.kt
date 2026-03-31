@@ -32,10 +32,6 @@ data class LLMStateModel(
     val selectedAgent: Agent?
         get() = agents.find { it.id == selectedAgentId }
 
-    /**
-     * Возвращает список сообщений только для текущей выбранной ветки.
-     * Делегирует логику в ChatMemoryManager.
-     */
     val currentMessages: List<ChatMessage>
         get() {
             val agent = selectedAgent ?: return emptyList()

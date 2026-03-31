@@ -30,7 +30,7 @@ internal fun AgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -67,7 +67,7 @@ private fun DesktopAgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -121,8 +121,8 @@ private fun DesktopAgentsContent(
             if (selectedAgent != null) {
                 AgentDetailSettings(
                     agent = selectedAgent,
-                    onUpdate = { name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy ->
-                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy)
+                    onUpdate = { name, prompt, temp, provider, stop, tokens, strategy ->
+                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, strategy)
                     },
                     templates = templates
                 )
@@ -139,7 +139,7 @@ private fun MobileAgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -217,8 +217,8 @@ private fun MobileAgentsContent(
             Box(modifier = Modifier.weight(1f)) {
                 AgentDetailSettings(
                     agent = selectedAgent,
-                    onUpdate = { name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy ->
-                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, keepLast, sPrompt, depth, strategy)
+                    onUpdate = { name, prompt, temp, provider, stop, tokens, strategy ->
+                        onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, strategy)
                     },
                     templates = templates
                 )
@@ -323,7 +323,7 @@ fun AgentItem(
 @Composable
 fun AgentDetailSettings(
     agent: Agent,
-    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit,
+    onUpdate: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     templates: List<AgentTemplate>
 ) {
     var selectedTabIndex by remember { mutableStateOf(0) }
@@ -372,7 +372,7 @@ fun AgentDetailSettings(
 fun MainSettingsTab(
     agent: Agent,
     templates: List<AgentTemplate>,
-    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit
+    onUpdate: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit
 ) {
     var name by remember(agent.id) { mutableStateOf(agent.name) }
     var prompt by remember(agent.id) { mutableStateOf(agent.systemPrompt) }
@@ -386,7 +386,7 @@ fun MainSettingsTab(
     LaunchedEffect(name, prompt, temp, provider, stopWord, maxTokens) {
         if (name != agent.name || prompt != agent.systemPrompt || temp != agent.temperature || 
             provider != agent.provider || stopWord != agent.stopWord || maxTokens != agent.maxTokens) {
-            onUpdate(name, prompt, temp, provider, stopWord, maxTokens, agent.keepLastMessagesCount, agent.summaryPrompt, agent.summaryDepth, agent.memoryStrategy)
+            onUpdate(name, prompt, temp, provider, stopWord, maxTokens, agent.memoryStrategy)
         }
     }
 
@@ -460,19 +460,14 @@ fun MainSettingsTab(
 @Composable
 fun SummarySettingsTab(
     agent: Agent,
-    onUpdate: (String, String, Double, LLMProvider, String, Int, Int, String, SummaryDepth, ChatMemoryStrategy) -> Unit
+    onUpdate: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit
 ) {
-    var keepLastMessagesCount by remember(agent.id) { mutableIntStateOf(agent.keepLastMessagesCount) }
-    var summaryPrompt by remember(agent.id) { mutableStateOf(agent.summaryPrompt) }
-    var summaryDepth by remember(agent.id) { mutableStateOf(agent.summaryDepth) }
     var memoryStrategy by remember(agent.id) { mutableStateOf(agent.memoryStrategy) }
+    var windowSize by remember(agent.id) { mutableIntStateOf(agent.memoryStrategy.windowSize) }
 
-    LaunchedEffect(keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy) {
-        if (keepLastMessagesCount != agent.keepLastMessagesCount || 
-            summaryPrompt != agent.summaryPrompt || 
-            summaryDepth != agent.summaryDepth ||
-            memoryStrategy != agent.memoryStrategy) {
-            onUpdate(agent.name, agent.systemPrompt, agent.temperature, agent.provider, agent.stopWord, agent.maxTokens, keepLastMessagesCount, summaryPrompt, summaryDepth, memoryStrategy)
+    LaunchedEffect(memoryStrategy) {
+        if (memoryStrategy != agent.memoryStrategy) {
+            onUpdate(agent.name, agent.systemPrompt, agent.temperature, agent.provider, agent.stopWord, agent.maxTokens, memoryStrategy)
         }
     }
 
@@ -482,13 +477,21 @@ fun SummarySettingsTab(
     ) {
         MemoryStrategySelector(
             currentStrategy = memoryStrategy, 
-            windowSize = keepLastMessagesCount,
+            windowSize = windowSize,
             onStrategyChange = { memoryStrategy = it }
         )
 
         OutlinedTextField(
-            value = keepLastMessagesCount.toString(),
-            onValueChange = { it.toIntOrNull()?.let { v -> keepLastMessagesCount = v } },
+            value = windowSize.toString(),
+            onValueChange = { it.toIntOrNull()?.let { v -> 
+                windowSize = v 
+                memoryStrategy = when(val s = memoryStrategy) {
+                    is ChatMemoryStrategy.SlidingWindow -> s.copy(windowSize = v)
+                    is ChatMemoryStrategy.StickyFacts -> s.copy(windowSize = v)
+                    is ChatMemoryStrategy.Branching -> s.copy(windowSize = v)
+                    is ChatMemoryStrategy.Summarization -> s.copy(windowSize = v)
+                }
+            } },
             label = { Text("Кол-во последних сообщений в контексте") },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp)
@@ -525,47 +528,50 @@ fun SummarySettingsTab(
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                HorizontalDivider()
+            val strategy = memoryStrategy as? ChatMemoryStrategy.Summarization
+            if (strategy != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    HorizontalDivider()
 
-                Text("Параметры суммаризации", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text("Параметры суммаризации", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
 
-                OutlinedTextField(
-                    value = summaryPrompt,
-                    onValueChange = { summaryPrompt = it },
-                    label = { Text("Инструкция для суммаризации") },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-                    shape = RoundedCornerShape(12.dp)
-                )
+                    OutlinedTextField(
+                        value = strategy.summaryPrompt,
+                        onValueChange = { memoryStrategy = strategy.copy(summaryPrompt = it) },
+                        label = { Text("Инструкция для суммаризации") },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    )
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Глубина суммаризации", style = MaterialTheme.typography.labelMedium)
-                    
-                    var depthExpanded by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = depthExpanded,
-                        onExpandedChange = { depthExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = summaryDepth.description,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = depthExpanded) },
-                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        ExposedDropdownMenu(
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Глубина суммаризации", style = MaterialTheme.typography.labelMedium)
+                        
+                        var depthExpanded by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
                             expanded = depthExpanded,
-                            onDismissRequest = { depthExpanded = false }
+                            onExpandedChange = { depthExpanded = it }
                         ) {
-                            SummaryDepth.entries.forEach { depth ->
-                                DropdownMenuItem(
-                                    text = { Text(depth.description) },
-                                    onClick = {
-                                        summaryDepth = depth
-                                        depthExpanded = false
-                                    }
-                                )
+                            OutlinedTextField(
+                                value = strategy.summaryDepth.description,
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = depthExpanded) },
+                                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = depthExpanded,
+                                onDismissRequest = { depthExpanded = false }
+                            ) {
+                                SummaryDepth.entries.forEach { depth ->
+                                    DropdownMenuItem(
+                                        text = { Text(depth.description) },
+                                        onClick = {
+                                            memoryStrategy = strategy.copy(summaryDepth = depth)
+                                            depthExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

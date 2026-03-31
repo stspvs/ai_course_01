@@ -78,6 +78,15 @@ kotlin {
                 implementation(libs.androidx.sqlite.bundled)
             }
         }
+
+        val commonTest by getting {
+            dependencies {
+                implementation(libs.kotlin.test)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.ktor.client.mock)
+                implementation(libs.koin.test)
+            }
+        }
         
         val androidMain by getting {
             dependencies {

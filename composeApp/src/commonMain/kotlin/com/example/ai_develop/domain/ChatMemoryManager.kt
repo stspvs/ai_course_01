@@ -9,13 +9,7 @@ class ChatMemoryManager {
         agentBranches: List<ChatBranch> = emptyList()
     ): List<ChatMessage> {
         val branchMessages = getBranchHistory(messages, currentBranchId, agentBranches)
-
-        return when (strategy) {
-            is ChatMemoryStrategy.SlidingWindow -> branchMessages.takeLast(strategy.windowSize)
-            is ChatMemoryStrategy.StickyFacts -> branchMessages.takeLast(strategy.windowSize)
-            is ChatMemoryStrategy.Branching -> branchMessages.takeLast(strategy.windowSize)
-            is ChatMemoryStrategy.Summarization -> branchMessages.takeLast(strategy.windowSize)
-        }
+        return branchMessages.takeLast(strategy.windowSize)
     }
 
     fun getBranchHistory(
@@ -57,7 +51,7 @@ class ChatMemoryManager {
         return when (strategy) {
             is ChatMemoryStrategy.StickyFacts -> basePrompt + strategy.facts.toSystemPrompt()
             is ChatMemoryStrategy.Summarization -> {
-                strategy.currentSummary?.let { 
+                strategy.summary?.let {
                     "$basePrompt\n\nSUMMARY OF PREVIOUS CONVERSATION:\n$it"
                 } ?: basePrompt
             }
