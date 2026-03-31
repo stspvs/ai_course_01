@@ -91,12 +91,16 @@ internal fun ChatContent(
                 currentBranchId = activeAgent?.currentBranchId,
                 onSwitchBranch = onSwitchBranch,
                 onCreateBranch = { branchName ->
-                    // Создаем ветку от последнего сообщения, если оно есть
-                    val lastMsgId = activeAgent?.messages?.lastOrNull()?.id
+                    val currentBranchId = activeAgent?.currentBranchId
+                    val lastMsgId = if (currentBranchId != null) {
+                        activeAgent.branches.find { it.id == currentBranchId }?.lastMessageId
+                    } else {
+                        activeAgent?.branches?.find { it.id == "main_branch" }?.lastMessageId
+                            ?: activeAgent?.messages?.lastOrNull()?.id
+                    }
+
                     if (lastMsgId != null) {
                         onCreateBranch(lastMsgId, branchName)
-                    } else {
-                        // Если сообщений нет, ветка по сути от начала (но UI обычно не дает создать без сообщений)
                     }
                 }
             )
