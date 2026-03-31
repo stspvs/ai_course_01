@@ -15,7 +15,7 @@ class PromptBuilderTest {
     @Test
     fun testBuildFactsExtractionPrompt() {
         val currentFacts = ChatFacts(mapOf("name" to "John"))
-        val messages = listOf(ChatMessage("I like Kotlin", SourceType.USER))
+        val messages = listOf(ChatMessage(message = "I like Kotlin", source = SourceType.USER))
         
         val prompt = PromptBuilder.buildFactsExtractionPrompt(currentFacts, messages, json)
         
@@ -27,7 +27,7 @@ class PromptBuilderTest {
     @Test
     fun testBuildFactsExtractionPromptEmpty() {
         val currentFacts = ChatFacts(emptyMap())
-        val messages = listOf(ChatMessage("Hello", SourceType.USER))
+        val messages = listOf(ChatMessage(message = "Hello", source = SourceType.USER))
         
         val prompt = PromptBuilder.buildFactsExtractionPrompt(currentFacts, messages, json)
         

@@ -1,5 +1,6 @@
 package com.example.ai_develop.data
 
+import com.example.ai_develop.domain.ChatFacts
 import com.example.ai_develop.domain.ChatMessage
 import com.example.ai_develop.domain.LLMProvider
 import com.example.ai_develop.domain.SourceType
@@ -34,7 +35,7 @@ class KtorChatRepositoryTest {
         )
 
         val results = repository.chatStreaming(
-            messages = listOf(ChatMessage("Hi", SourceType.USER)),
+            messages = listOf(ChatMessage(message = "Hi", source = SourceType.USER)),
             systemPrompt = "",
             maxTokens = 100,
             temperature = 0.7,
@@ -64,7 +65,7 @@ class KtorChatRepositoryTest {
         )
 
         val results = repository.chatStreaming(
-            messages = listOf(ChatMessage("Hi", SourceType.USER)),
+            messages = listOf(ChatMessage(message = "Hi", source = SourceType.USER)),
             systemPrompt = "",
             maxTokens = 100,
             temperature = 0.7,
@@ -82,7 +83,7 @@ class KtorChatRepositoryTest {
     fun testExtractFactsSuccess() = runTest {
         val mockEngine = MockEngine { request ->
             respond(
-                content = ByteReadChannel("{\"choices\":[{\"message\":{\"content\":\"{\\\"name\\\": \\\"Alice\\\"}\"}}]}"),
+                content = ByteReadChannel("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{\\\"name\\\": \\\"Alice\\\"}\"}}]}"),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, "application/json")
             )
@@ -97,12 +98,12 @@ class KtorChatRepositoryTest {
         )
 
         val result = repository.extractFacts(
-            messages = listOf(ChatMessage("My name is Alice", SourceType.USER)),
-            currentFacts = com.example.ai_develop.domain.ChatFacts(emptyMap()),
+            messages = listOf(ChatMessage(message = "My name is Alice", source = SourceType.USER)),
+            currentFacts = ChatFacts(emptyMap()),
             provider = LLMProvider.DeepSeek("deepseek-chat")
         )
 
-        assertTrue(result.isSuccess)
+        assertTrue(result.isSuccess, "Result should be success. Error: ${result.exceptionOrNull()?.message}")
         assertEquals("Alice", result.getOrNull()?.facts?.get("name"))
     }
 }

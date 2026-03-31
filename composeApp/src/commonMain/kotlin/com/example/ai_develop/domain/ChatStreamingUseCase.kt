@@ -2,10 +2,10 @@ package com.example.ai_develop.domain
 
 import kotlinx.coroutines.flow.Flow
 
-class ChatStreamingUseCase(
+open class ChatStreamingUseCase(
     private val repository: ChatRepository
 ) {
-    operator fun invoke(
+    open operator fun invoke(
         messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,

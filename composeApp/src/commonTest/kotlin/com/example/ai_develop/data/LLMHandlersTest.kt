@@ -19,7 +19,7 @@ class LLMHandlersTest {
     fun testDeepSeekHandlerBuildRequestBody() {
         val provider = LLMProvider.DeepSeek("deepseek-chat")
         val handler = DeepSeekHandler("key", provider, json)
-        val messages = listOf(ChatMessage("Hello", SourceType.USER))
+        val messages = listOf(ChatMessage(message = "Hello", source = SourceType.USER))
         
         val body = handler.buildChatRequestBody(
             messages = messages,
@@ -59,7 +59,7 @@ class LLMHandlersTest {
     fun testYandexHandlerBuildRequestBody() {
         val provider = LLMProvider.Yandex("yandexgpt")
         val handler = YandexHandler("key", "folderId", provider, json)
-        val messages = listOf(ChatMessage("Hello", SourceType.USER))
+        val messages = listOf(ChatMessage(message = "Hello", source = SourceType.USER))
         
         val body = handler.buildChatRequestBody(
             messages = messages,
