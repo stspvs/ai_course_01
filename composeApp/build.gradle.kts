@@ -1,6 +1,3 @@
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
 import java.util.Properties
 
 plugins {
@@ -11,43 +8,16 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.androidxRoom)
-    id("com.github.gmazzo.buildconfig") version "5.3.5"
+    alias(libs.plugins.sqldelight)
+    id("com.github.gmazzo.buildconfig") version "6.0.9"
 }
 
 kotlin {
-    androidTarget {
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_11)
-        }
-    }
+    jvmToolchain(11)
+
+    androidTarget()
     
     jvm("desktop")
-    
-    @OptIn(org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl::class)
-    wasmJs {
-        browser {
-            val projectDirPath = project.projectDir.path
-            commonWebpackConfig {
-                outputFileName = "composeApp.js"
-                devServer = (devServer ?: KotlinWebpackConfig.DevServer()).apply {
-                    static = (static ?: mutableListOf()).apply {
-                        add(projectDirPath)
-                    }
-                    proxy = mutableListOf(
-                        KotlinWebpackConfig.DevServer.Proxy(
-                            context = mutableListOf("/yandex-api"),
-                            target = "https://llm.api.cloud.yandex.net",
-                            pathRewrite = mutableMapOf("^/yandex-api" to ""),
-                            secure = true,
-                            changeOrigin = true
-                        )
-                    )
-                }
-            }
-        }
-        binaries.executable()
-    }
     
     sourceSets {
         val commonMain by getting {
@@ -72,6 +42,9 @@ kotlin {
                 implementation(libs.koin.core)
                 implementation(libs.koin.compose)
                 implementation(libs.koin.compose.viewmodel)
+
+                implementation(libs.sqldelight.runtime)
+                implementation(libs.sqldelight.coroutine.extensions)
             }
         }
 
@@ -105,6 +78,7 @@ kotlin {
                 implementation(libs.ktor.client.okhttp)
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.koin.android)
+                implementation(libs.sqldelight.android.driver)
             }
         }
 
@@ -119,6 +93,7 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.okhttp)
+                implementation(libs.sqldelight.sqlite.driver)
             }
         }
 
@@ -126,11 +101,13 @@ kotlin {
             dependsOn(desktopMain)
             dependsOn(roomTest)
         }
-        
-        val wasmJsMain by getting {
-            dependencies {
-                // Inherited from commonMain
-            }
+    }
+}
+
+sqldelight {
+    databases {
+        create("AgentDatabase") {
+            packageName.set("com.example.ai_develop.database")
         }
     }
 }
@@ -142,6 +119,7 @@ room {
 dependencies {
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspDesktop", libs.androidx.room.compiler)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
 }
 
 android {
@@ -179,6 +157,10 @@ compose.desktop {
             packageVersion = "1.0.0"
         }
     }
+}
+
+tasks.withType<JavaExec> {
+    standardInput = System.`in`
 }
 
 val localProperties = Properties()

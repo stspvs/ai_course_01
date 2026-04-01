@@ -25,6 +25,9 @@ data class LLMStateModel(
     val isStreamingEnabled: Boolean = true,
     val sendFullHistory: Boolean = true,
     val isJsonMode: Boolean = false,
+    // Новые поля для Stateful Agent
+    val currentAgentState: AgentState? = null,
+    val activeInvariants: List<Invariant> = emptyList()
 ) {
     @Transient
     private val memoryManager = ChatMemoryManager()

@@ -25,4 +25,16 @@ interface ChatRepository {
         instruction: String,
         provider: LLMProvider
     ): Result<String>
+
+    // Новые методы для Stateful Agent
+    suspend fun saveAgentState(state: AgentState)
+    suspend fun getAgentState(agentId: String): AgentState?
+    
+    suspend fun getProfile(agentId: String): AgentProfile?
+    suspend fun saveProfile(agentId: String, profile: AgentProfile)
+    
+    suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant>
+    suspend fun saveInvariant(invariant: Invariant)
+    
+    fun observeAgentState(agentId: String): Flow<AgentState?>
 }

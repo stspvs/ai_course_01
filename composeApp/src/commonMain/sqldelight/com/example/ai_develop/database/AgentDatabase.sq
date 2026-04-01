@@ -1,0 +1,68 @@
+import com.example.ai_develop.domain.AgentStage;
+import kotlin.Boolean;
+
+CREATE TABLE AgentStateEntity (
+    agentId TEXT NOT NULL PRIMARY KEY,
+    currentStage TEXT AS AgentStage NOT NULL DEFAULT 'PLANNING',
+    currentStepId TEXT,
+    planJson TEXT NOT NULL -- JSON AgentPlan
+);
+
+CREATE TABLE ProfileEntity (
+    agentId TEXT NOT NULL PRIMARY KEY,
+    style TEXT NOT NULL,
+    globalInstructions TEXT NOT NULL,
+    constraintsJson TEXT NOT NULL -- JSON List<String>
+);
+
+CREATE TABLE InvariantEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    agentId TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    stage TEXT AS AgentStage NOT NULL,
+    isActive INTEGER AS Boolean NOT NULL DEFAULT 1,
+    FOREIGN KEY(agentId) REFERENCES AgentStateEntity(agentId) ON DELETE CASCADE
+);
+
+CREATE TABLE AgentMessageEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    agentId TEXT NOT NULL,
+    stage TEXT AS AgentStage NOT NULL,
+    stepId TEXT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    FOREIGN KEY(agentId) REFERENCES AgentStateEntity(agentId) ON DELETE CASCADE
+);
+
+-- Queries
+saveAgentState:
+INSERT OR REPLACE INTO AgentStateEntity(agentId, currentStage, currentStepId, planJson)
+VALUES (?, ?, ?, ?);
+
+getAgentState:
+SELECT * FROM AgentStateEntity WHERE agentId = ?;
+
+saveProfile:
+INSERT OR REPLACE INTO ProfileEntity(agentId, style, globalInstructions, constraintsJson)
+VALUES (?, ?, ?, ?);
+
+getProfile:
+SELECT * FROM ProfileEntity WHERE agentId = ?;
+
+insertInvariant:
+INSERT OR REPLACE INTO InvariantEntity(id, agentId, rule, stage, isActive)
+VALUES (?, ?, ?, ?, ?);
+
+getInvariantsForStage:
+SELECT * FROM InvariantEntity WHERE agentId = ? AND stage = ? AND isActive = 1;
+
+insertMessage:
+INSERT INTO AgentMessageEntity(id, agentId, stage, stepId, role, content, timestamp)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getMessagesForAgent:
+SELECT * FROM AgentMessageEntity WHERE agentId = ? ORDER BY timestamp ASC;
+
+deleteAgent:
+DELETE FROM AgentStateEntity WHERE agentId = ?;
