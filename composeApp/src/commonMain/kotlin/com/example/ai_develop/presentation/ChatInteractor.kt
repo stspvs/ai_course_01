@@ -29,6 +29,7 @@ class ChatInteractor(
         val agentId = agent.id
         val branchKey = agent.currentBranchId ?: "main_branch"
         
+        // Получаем историю ДО добавления нового сообщения, чтобы найти parentId
         val historyBeforeNewMessage = memoryManager.getBranchHistory(
             messages = agent.messages,
             currentBranchId = agent.currentBranchId,
@@ -44,19 +45,25 @@ class ChatInteractor(
             branchId = branchKey
         )
 
+        // Сразу обновляем UI и сохраняем в БД (сообщение + указатель ветки)
         updateLocalAndDb(agentId, userMessage, branchKey, onAgentUpdate, onLoadingStatus, scope)
 
         return scope.launch {
+            // Берем актуальный снимок данных
             val agentSnapshot = repository.getAgentWithMessages(agentId).firstOrNull() ?: agent
+            
+            // Гарантируем, что для формирования истории LLM мы используем обновленные указатели
+            val updatedBranches = agentSnapshot.branches.updatePointer(branchKey, userMessage.id)
             val updatedMessages = agentSnapshot.messages.toMutableList().apply {
                 if (none { it.id == userMessage.id }) add(userMessage)
             }
 
+            // Формируем историю, которая ОБЯЗАТЕЛЬНО включает userMessage
             val history = memoryManager.processMessages(
                 messages = updatedMessages,
                 strategy = agentSnapshot.memoryStrategy,
                 currentBranchId = agentSnapshot.currentBranchId,
-                agentBranches = agentSnapshot.branches
+                agentBranches = updatedBranches
             )
 
             val flow = chatStreamingUseCase(
@@ -89,17 +96,22 @@ class ChatInteractor(
         onLoadingStatus: (Boolean) -> Unit,
         scope: CoroutineScope
     ) {
+        var agentToSave: Agent? = null
         onAgentUpdate(agentId) { current ->
-            current.copy(
+            val updated = current.copy(
                 messages = current.messages + message,
                 branches = current.branches.updatePointer(branchKey, message.id),
                 totalTokensUsed = current.totalTokensUsed + message.tokenCount
             )
+            agentToSave = updated
+            updated
         }
         onLoadingStatus(true)
 
         scope.launch {
             repository.saveMessage(agentId, message)
+            // Важно сохранять метаданные (ветки), иначе после рестарта или обновления из БД указатель пропадет
+            agentToSave?.let { repository.saveAgentMetadata(it) }
         }
     }
 
@@ -188,23 +200,31 @@ class ChatInteractor(
     ) {
         val finalBotMessage = createChatMessage(content, SourceType.ASSISTANT, parentId, branchKey, botMessageId)
         
+        var agentToSave: Agent? = null
         onAgentUpdate(agentId) { agent ->
             val updatedMessages = agent.messages.map { if (it.id == botMessageId) finalBotMessage else it }
-            agent.copy(
+            val updated = agent.copy(
                 messages = updatedMessages,
                 branches = agent.branches.updatePointer(branchKey, finalBotMessage.id),
                 totalTokensUsed = agent.totalTokensUsed + finalBotMessage.tokenCount
             )
+            agentToSave = updated
+            updated
         }
         
         scope.launch {
             repository.saveMessage(agentId, finalBotMessage)
+            agentToSave?.let { repository.saveAgentMetadata(it) }
+            
             repository.getAgentWithMessages(agentId).firstOrNull()?.let { latestAgent ->
                 strategyFactory.getDelegate(latestAgent.memoryStrategy).onMessageReceived(
                     scope = scope,
                     agent = latestAgent,
                     repository = repository,
-                    onAgentUpdated = { updated -> onAgentUpdate(agentId) { updated } }
+                    onAgentUpdated = { updated -> 
+                        onAgentUpdate(agentId) { updated }
+                        scope.launch { repository.saveAgentMetadata(updated) }
+                    }
                 )
             }
         }
