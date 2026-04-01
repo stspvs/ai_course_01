@@ -52,7 +52,7 @@ sealed interface ChatMemoryStrategy {
     @Serializable
     data class StickyFacts(
         override val windowSize: Int,
-        val updateInterval: Int = 5,
+        val updateInterval: Int = 10,
         val facts: ChatFacts = ChatFacts()
     ) : ChatMemoryStrategy
 
@@ -66,6 +66,19 @@ sealed interface ChatMemoryStrategy {
         val summaryPrompt: String = "Кратко суммируй ключевые моменты этого диалога, чтобы сохранить контекст для продолжения беседы. Пиши только саму суть.",
         val summaryDepth: SummaryDepth = SummaryDepth.LOW
     ) : ChatMemoryStrategy
+
+    /**
+     * Working Memory: Хранит текущую цель и прогресс по ней.
+     */
+    @Serializable
+    data class TaskOriented(
+        override val windowSize: Int = 10,
+        val updateInterval: Int = 10,
+        val analysisWindowSize: Int = 5, // 0 или -1 для "все сообщения"
+        val currentTask: String? = null,
+        val progress: String? = null,
+        val facts: ChatFacts = ChatFacts()
+    ) : ChatMemoryStrategy
 }
 
 @Serializable
@@ -73,6 +86,17 @@ data class ChatBranch(
     val id: String,
     val name: String,
     val lastMessageId: String?
+)
+
+/**
+ * Long-term Memory: Профиль пользователя и накопленные знания.
+ */
+@Serializable
+data class UserProfile(
+    val name: String = "",
+    val preferences: Map<String, String> = emptyMap(),
+    val globalFacts: List<String> = emptyList(),
+    val memoryModelProvider: LLMProvider? = null
 )
 
 @OptIn(ExperimentalUuidApi::class)
@@ -89,7 +113,8 @@ data class Agent(
     val branches: List<ChatBranch> = emptyList(),
     val currentBranchId: String? = null,
     val memoryStrategy: ChatMemoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
-    val totalTokensUsed: Int = 0
+    val totalTokensUsed: Int = 0,
+    val userProfile: UserProfile? = null
 )
 
 @Serializable

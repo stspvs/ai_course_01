@@ -30,6 +30,14 @@ class ChatInteractorTest {
         override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider): Flow<Result<String>> = emptyFlow()
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider): Result<ChatFacts> = Result.success(ChatFacts())
         override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider): Result<String> = Result.success("summary")
+        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult("", "", emptyMap()))
+        override suspend fun saveAgentState(state: AgentState) {}
+        override suspend fun getAgentState(agentId: String): AgentState? = null
+        override suspend fun getProfile(agentId: String): AgentProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
+        override suspend fun saveInvariant(invariant: Invariant) {}
+        override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
     }
 
     private class MockUseCase(repo: ChatRepository) : ChatStreamingUseCase(repo) {
@@ -46,7 +54,8 @@ class ChatInteractorTest {
         val memoryManager = ChatMemoryManager()
         val strategyFactory = StrategyDelegateFactory(
             ExtractFactsUseCase(chatRepo),
-            SummarizeChatUseCase(chatRepo)
+            SummarizeChatUseCase(chatRepo),
+            chatRepo
         )
         
         val interactor = ChatInteractor(useCase, repo, memoryManager, strategyFactory)

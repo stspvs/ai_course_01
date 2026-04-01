@@ -31,6 +31,7 @@ internal fun AgentsContent(
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -44,6 +45,7 @@ internal fun AgentsContent(
                 templates = templates,
                 onCreateAgent = onCreateAgent,
                 onUpdateAgent = onUpdateAgent,
+                onUpdateProfile = onUpdateProfile,
                 onDeleteAgent = onDeleteAgent,
                 onDuplicateAgent = onDuplicateAgent,
                 onSelectAgent = onSelectAgent
@@ -54,6 +56,7 @@ internal fun AgentsContent(
                 templates = templates,
                 onCreateAgent = onCreateAgent,
                 onUpdateAgent = onUpdateAgent,
+                onUpdateProfile = onUpdateProfile,
                 onDeleteAgent = onDeleteAgent,
                 onDuplicateAgent = onDuplicateAgent,
                 onSelectAgent = onSelectAgent
@@ -68,6 +71,7 @@ private fun DesktopAgentsContent(
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -124,6 +128,7 @@ private fun DesktopAgentsContent(
                     onUpdate = { name, prompt, temp, provider, stop, tokens, strategy ->
                         onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, strategy)
                     },
+                    onUpdateProfile = { profile -> onUpdateProfile(selectedAgent.id, profile) },
                     templates = templates
                 )
             } else {
@@ -140,6 +145,7 @@ private fun MobileAgentsContent(
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -220,6 +226,7 @@ private fun MobileAgentsContent(
                     onUpdate = { name, prompt, temp, provider, stop, tokens, strategy ->
                         onUpdateAgent(selectedAgent.id, name, prompt, temp, provider, stop, tokens, strategy)
                     },
+                    onUpdateProfile = { profile -> onUpdateProfile(selectedAgent.id, profile) },
                     templates = templates
                 )
             }
@@ -324,6 +331,7 @@ fun AgentItem(
 fun AgentDetailSettings(
     agent: Agent,
     onUpdate: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateProfile: (UserProfile) -> Unit,
     templates: List<AgentTemplate>
 ) {
     var selectedTabIndex by remember { mutableStateOf(0) }
@@ -354,15 +362,18 @@ fun AgentDetailSettings(
             Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }) {
                 Box(Modifier.padding(12.dp)) { Text("Память", style = MaterialTheme.typography.bodyMedium) }
             }
+            Tab(selected = selectedTabIndex == 2, onClick = { selectedTabIndex = 2 }) {
+                Box(Modifier.padding(12.dp)) { Text("Профиль", style = MaterialTheme.typography.bodyMedium) }
+            }
         }
 
         Spacer(Modifier.height(16.dp))
 
         Box(modifier = Modifier.weight(1f)) {
-            if (selectedTabIndex == 0) {
-                MainSettingsTab(agent, templates, onUpdate)
-            } else {
-                SummarySettingsTab(agent, onUpdate)
+            when (selectedTabIndex) {
+                0 -> MainSettingsTab(agent, templates, onUpdate)
+                1 -> SummarySettingsTab(agent, onUpdate)
+                2 -> UserProfileTab(agent, onUpdateProfile)
             }
         }
     }
@@ -490,12 +501,66 @@ fun SummarySettingsTab(
                     is ChatMemoryStrategy.StickyFacts -> s.copy(windowSize = v)
                     is ChatMemoryStrategy.Branching -> s.copy(windowSize = v)
                     is ChatMemoryStrategy.Summarization -> s.copy(windowSize = v)
+                    is ChatMemoryStrategy.TaskOriented -> s.copy(windowSize = v)
                 }
             } },
             label = { Text("Кол-во последних сообщений в контексте") },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp)
         )
+
+        AnimatedVisibility(
+            visible = memoryStrategy is ChatMemoryStrategy.TaskOriented,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            val strategy = memoryStrategy as? ChatMemoryStrategy.TaskOriented
+            if (strategy != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    HorizontalDivider()
+                    Text("Параметры Рабочей памяти", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    
+                    OutlinedTextField(
+                        value = strategy.updateInterval.toString(),
+                        onValueChange = { 
+                            it.toIntOrNull()?.let { v -> 
+                                memoryStrategy = strategy.copy(updateInterval = v)
+                            }
+                        },
+                        label = { Text("Авто-обновление задачи каждые N сообщений") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = if (strategy.analysisWindowSize <= 0) "Все" else strategy.analysisWindowSize.toString(),
+                        onValueChange = { 
+                            val v = if (it.equals("все", ignoreCase = true)) 0 else it.toIntOrNull() ?: 0
+                            memoryStrategy = strategy.copy(analysisWindowSize = v)
+                        },
+                        label = { Text("Окно анализа задачи (сообщений или 'Все')") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    Text("Текущее состояние:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = strategy.currentTask ?: "",
+                        onValueChange = { memoryStrategy = strategy.copy(currentTask = it) },
+                        label = { Text("Текущая задача") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = strategy.progress ?: "",
+                        onValueChange = { memoryStrategy = strategy.copy(progress = it) },
+                        label = { Text("Текущий прогресс") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+        }
 
         AnimatedVisibility(
             visible = memoryStrategy is ChatMemoryStrategy.StickyFacts,
@@ -519,6 +584,11 @@ fun SummarySettingsTab(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     )
+                    
+                    Text("Извлеченные факты:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    // Для упрощения редактирования Map, можно сделать текстовое поле или список
+                    // Пока добавим текстовое описание
+                    Text("Факты обновляются автоматически LLM.", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                 }
             }
         }
@@ -575,8 +645,61 @@ fun SummarySettingsTab(
                             }
                         }
                     }
+                    
+                    Text("Текущее саммари:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = strategy.summary ?: "",
+                        onValueChange = { memoryStrategy = strategy.copy(summary = it) },
+                        label = { Text("Контекст диалога") },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+fun UserProfileTab(
+    agent: Agent,
+    onUpdateProfile: (UserProfile) -> Unit
+) {
+    var profile by remember(agent.id) { mutableStateOf(agent.userProfile ?: UserProfile()) }
+
+    LaunchedEffect(profile) {
+        if (profile != agent.userProfile) {
+            onUpdateProfile(profile)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("Глобальные настройки памяти", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        
+        Text("Модель для работы с памятью", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+        
+        LLMSelector(
+            currentProvider = profile.memoryModelProvider ?: agent.provider,
+            onProviderChange = { profile = profile.copy(memoryModelProvider = it) }
+        )
+        Text(
+            "Эта модель будет использоваться для фонового извлечения фактов, суммаризации и анализа задач.",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray
+        )
+
+        HorizontalDivider()
+
+        Text("Ваше имя", style = MaterialTheme.typography.labelMedium)
+        OutlinedTextField(
+            value = profile.name,
+            onValueChange = { profile = profile.copy(name = it) },
+            label = { Text("Как агент должен к вам обращаться") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        )
     }
 }

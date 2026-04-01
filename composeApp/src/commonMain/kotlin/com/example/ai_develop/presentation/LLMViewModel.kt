@@ -98,6 +98,20 @@ class LLMViewModel(
         )
     }
 
+    fun forceUpdateMemory() {
+        val agent = _state.value.selectedAgent ?: return
+        interactor.forceUpdateMemory(
+            scope = viewModelScope,
+            agent = agent,
+            onAgentUpdate = { agentId, update ->
+                _state.update { state ->
+                    val updatedAgents = state.agents.map { if (it.id == agentId) update(it) else it }
+                    state.copy(agents = updatedAgents)
+                }
+            }
+        )
+    }
+
     fun updateMemoryStrategy(strategy: ChatMemoryStrategy) {
         val agentId = _state.value.selectedAgentId ?: return
         val currentAgent = _state.value.agents.find { it.id == agentId } ?: return
@@ -153,6 +167,15 @@ class LLMViewModel(
         val agent = _state.value.agents.find { it.id == id } ?: return
         val updatedAgent = agentManager.updateAgent(agent, name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy)
         _state.update { currentState -> currentState.copy(agents = currentState.agents.map { if (it.id == id) updatedAgent else it }) }
+        viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
+    }
+
+    fun updateAgentWithProfile(id: String, profile: UserProfile) {
+        val agent = _state.value.agents.find { it.id == id } ?: return
+        val updatedAgent = agent.copy(userProfile = profile)
+        _state.update { currentState ->
+            currentState.copy(agents = currentState.agents.map { if (it.id == id) updatedAgent else it })
+        }
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
 

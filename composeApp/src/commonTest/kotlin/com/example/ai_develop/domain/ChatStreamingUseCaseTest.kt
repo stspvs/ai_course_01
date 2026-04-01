@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlinx.coroutines.flow.Flow
 
 class ChatStreamingUseCaseTest {
 
@@ -31,6 +32,20 @@ class ChatStreamingUseCaseTest {
             instruction: String,
             provider: LLMProvider
         ): Result<String> = Result.success("summary")
+
+        override suspend fun analyzeTask(
+            messages: List<ChatMessage>,
+            instruction: String,
+            provider: LLMProvider
+        ): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult("", "", emptyMap()))
+
+        override suspend fun saveAgentState(state: AgentState) {}
+        override suspend fun getAgentState(agentId: String): AgentState? = null
+        override suspend fun getProfile(agentId: String): AgentProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
+        override suspend fun saveInvariant(invariant: Invariant) {}
+        override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
     }
 
     private val useCase = ChatStreamingUseCase(repository)

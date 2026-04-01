@@ -18,7 +18,8 @@ data class AgentEntity(
     val totalTokensUsed: Int,
     val memoryStrategy: ChatMemoryStrategy,
     val branches: List<ChatBranch> = emptyList(),
-    val currentBranchId: String? = null
+    val currentBranchId: String? = null,
+    val userProfile: UserProfile? = null
 )
 
 @Entity(

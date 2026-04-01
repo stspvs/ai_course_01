@@ -156,6 +156,9 @@ compose.desktop {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb)
             packageVersion = "1.0.0"
         }
+        buildTypes.release.proguard {
+            isEnabled.set(false)
+        }
     }
 }
 
@@ -177,6 +180,13 @@ fun getSecret(name: String): String {
 
 buildConfig {
     packageName("com.example.ai_develop")
+    
+    // Флаг дебага
+    buildConfigField("boolean", "IS_DEBUG", "false")
+    sourceSets.getByName("androidDebug") {
+        buildConfigField("boolean", "IS_DEBUG", "true")
+    }
+
     buildConfigField("String", "DEEPSEEK_KEY", "\"${getSecret("DEEPSEEK_KEY")}\"")
     buildConfigField("String", "YANDEX_KEY", "\"${getSecret("YANDEX_KEY")}\"")
     buildConfigField("String", "YANDEX_FOLDER_ID", "\"${getSecret("YANDEX_FOLDER_ID")}\"")

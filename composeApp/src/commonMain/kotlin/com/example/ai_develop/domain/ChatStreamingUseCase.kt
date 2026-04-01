@@ -8,7 +8,7 @@ import kotlinx.serialization.json.Json
 open class ChatStreamingUseCase(
     private val repository: ChatRepository
 ) {
-    operator fun invoke(
+    open operator fun invoke(
         messages: List<ChatMessage>,
         systemPrompt: String,
         maxTokens: Int,

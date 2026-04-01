@@ -79,8 +79,17 @@ class ChatMemoryManagerTest {
         val base = "You are an AI."
         val facts = ChatFacts(mapOf("user_name" to "Stas"))
         val strategy = ChatMemoryStrategy.StickyFacts(windowSize = 10, facts = facts)
+        val agent = Agent(
+            name = "Test", 
+            systemPrompt = base, 
+            memoryStrategy = strategy,
+            temperature = 0.7,
+            provider = LLMProvider.Yandex(),
+            stopWord = "",
+            maxTokens = 100
+        )
         
-        val wrapped = manager.wrapSystemPrompt(base, strategy)
+        val wrapped = manager.wrapSystemPrompt(agent)
         assertTrue(wrapped.contains(base))
         assertTrue(wrapped.contains("user_name: Stas"))
     }

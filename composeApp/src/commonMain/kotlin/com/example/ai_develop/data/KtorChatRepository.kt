@@ -115,7 +115,6 @@ class KtorChatRepository(
                 val responseText = response.bodyAsText()
                 val text = handler.parseFullResponse(responseText)
                 
-                // Extract JSON object from text
                 val start = text.indexOf("{")
                 val end = text.lastIndexOf("}")
                 
@@ -181,31 +180,67 @@ class KtorChatRepository(
         }
     }
 
-    override suspend fun saveAgentState(state: AgentState) {
-        // TODO: Implement
+    override suspend fun analyzeTask(
+        messages: List<ChatMessage>,
+        instruction: String,
+        provider: LLMProvider
+    ): Result<TaskAnalysisResult> {
+        return try {
+            val history = messages.joinToString("\n") { "${it.source.role}: ${it.message}" }
+            val fullPrompt = "$instruction\n\nCONVERSATION HISTORY:\n$history"
+
+            val analysisMessages = listOf(
+                ChatMessage(message = "You are a task analysis assistant. Output ONLY valid JSON.", source = SourceType.SYSTEM),
+                ChatMessage(message = fullPrompt, source = SourceType.USER)
+            )
+
+            val handler = getHandler(provider)
+            val platform = getPlatform()
+            val url = handler.buildUrl(platform)
+            val bodyString = handler.buildChatRequestBody(
+                messages = analysisMessages,
+                systemPrompt = "",
+                maxTokens = 1500,
+                temperature = 0.3,
+                stopWord = "",
+                isJsonMode = true,
+                stream = false
+            )
+
+            val response = httpClient.post(url) {
+                handler.buildHeaders().forEach { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                setBody(bodyString)
+            }
+
+            if (response.status.isSuccess()) {
+                val responseText = response.bodyAsText()
+                val text = handler.parseFullResponse(responseText)
+                
+                val start = text.indexOf("{")
+                val end = text.lastIndexOf("}")
+                
+                if (start != -1 && end != -1 && end > start) {
+                    val jsonString = text.substring(start, end + 1)
+                    val result = json.decodeFromString<TaskAnalysisResult>(jsonString)
+                    Result.success(result)
+                } else {
+                    Result.failure(Exception("No JSON object found in response: $text"))
+                }
+            } else {
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Task analysis failed: ${response.status}. Body: $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
-    override suspend fun getAgentState(agentId: String): AgentState? {
-        return null
-    }
-
-    override suspend fun getProfile(agentId: String): AgentProfile? {
-        return null
-    }
-
-    override suspend fun saveProfile(agentId: String, profile: AgentProfile) {
-        // TODO: Implement
-    }
-
-    override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> {
-        return emptyList()
-    }
-
-    override suspend fun saveInvariant(invariant: Invariant) {
-        // TODO: Implement
-    }
-
-    override fun observeAgentState(agentId: String): Flow<AgentState?> = flow {
-        emit(null)
-    }
+    override suspend fun saveAgentState(state: AgentState) {}
+    override suspend fun getAgentState(agentId: String): AgentState? = null
+    override suspend fun getProfile(agentId: String): AgentProfile? = null
+    override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+    override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
+    override suspend fun saveInvariant(invariant: Invariant) {}
+    override fun observeAgentState(agentId: String): Flow<AgentState?> = flow { emit(null) }
 }

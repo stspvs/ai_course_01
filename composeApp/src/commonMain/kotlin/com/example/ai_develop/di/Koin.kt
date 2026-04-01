@@ -43,8 +43,15 @@ val commonModule = module {
             install(ContentNegotiation) {
                 json(get())
             }
-            install(Logging) {
-                level = LogLevel.HEADERS
+            if (BuildConfig.IS_DEBUG) {
+                install(Logging) {
+                    logger = object : Logger {
+                        override fun log(message: String) {
+                            println("HTTP Client: $message")
+                        }
+                    }
+                    level = LogLevel.ALL
+                }
             }
         }
     }

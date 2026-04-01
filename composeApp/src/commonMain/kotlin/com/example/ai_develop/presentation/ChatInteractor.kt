@@ -68,7 +68,7 @@ class ChatInteractor(
 
             val flow = chatStreamingUseCase(
                 messages = history,
-                systemPrompt = memoryManager.wrapSystemPrompt(agentSnapshot.systemPrompt, agentSnapshot.memoryStrategy),
+                systemPrompt = memoryManager.wrapSystemPrompt(agentSnapshot),
                 maxTokens = agentSnapshot.maxTokens,
                 temperature = agentSnapshot.temperature,
                 stopWord = agentSnapshot.stopWord,
@@ -84,6 +84,23 @@ class ChatInteractor(
                 branchKey = branchKey,
                 onAgentUpdate = onAgentUpdate,
                 onLoadingStatus = onLoadingStatus
+            )
+        }
+    }
+
+    fun forceUpdateMemory(
+        scope: CoroutineScope,
+        agent: Agent,
+        onAgentUpdate: (String, (Agent) -> Agent) -> Unit
+    ) {
+        scope.launch {
+            strategyFactory.getDelegate(agent.memoryStrategy).forceUpdate(
+                scope = scope,
+                agent = agent,
+                repository = repository,
+                onAgentUpdated = { updated -> 
+                    onAgentUpdate(agent.id) { updated }
+                }
             )
         }
     }

@@ -37,4 +37,10 @@ class Converters {
 
     @TypeConverter
     fun toSummaryDepth(value: String): SummaryDepth = SummaryDepth.valueOf(value)
+
+    @TypeConverter
+    fun fromUserProfile(profile: UserProfile?): String? = profile?.let { json.encodeToString(it) }
+
+    @TypeConverter
+    fun toUserProfile(value: String?): UserProfile? = value?.let { json.decodeFromString(it) }
 }

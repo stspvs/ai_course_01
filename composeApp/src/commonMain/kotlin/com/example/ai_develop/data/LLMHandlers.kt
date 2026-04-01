@@ -52,7 +52,6 @@ internal class DeepSeekHandler(
         if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
         messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
         
-        // DeepSeek supports up to 2.0
         val validatedTemp = temperature.coerceIn(0.0, 2.0)
 
         return json.encodeToString(ChatRequest(
@@ -141,16 +140,12 @@ internal class YandexHandler(
             }
         }
         
-        // Ensure at least one message exists
         if (yandexMessages.isEmpty()) {
             yandexMessages.add(YandexMessage(role = "user", text = "."))
         }
 
-        // Validate temperature for Yandex (0.0 to 1.0)
         val validatedTemp = temperature.coerceIn(0.0, 1.0)
         
-        // Handle modelUri format. 
-        // If it doesn't contain a version, append /latest
         val modelName = provider.model.lowercase()
         val modelPath = if (modelName.contains("/") || modelName.startsWith("ds://") || modelName.startsWith("cls://")) {
             modelName
@@ -170,8 +165,14 @@ internal class YandexHandler(
     }
 
     override fun parseStreamChunk(line: String, context: StreamContext): StreamChunkResult {
-        val trimmedLine = line.trim()
+        var trimmedLine = line.trim()
         if (trimmedLine.isEmpty()) return StreamChunkResult.Ignore
+        
+        // Handle SSE data prefix if present
+        if (trimmedLine.startsWith("data:")) {
+            trimmedLine = trimmedLine.substringAfter("data:").trim()
+        }
+        if (trimmedLine == "[DONE]") return StreamChunkResult.Done
 
         return try {
             val chunk = try {
@@ -236,7 +237,6 @@ internal class OpenRouterHandler(
         if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
         messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
         
-        // OpenRouter: allow 2.0 ONLY for deepseek models, 1.0 for others
         val maxTemp = if (provider.model.contains("deepseek", ignoreCase = true)) 2.0 else 1.0
         val validatedTemp = temperature.coerceIn(0.0, maxTemp)
 

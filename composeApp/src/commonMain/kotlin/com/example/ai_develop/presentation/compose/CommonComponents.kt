@@ -131,7 +131,8 @@ internal fun MemoryStrategySelector(
         "Sliding Window" to "Хранит последние N сообщений",
         "Summarization" to "Сжимает старые сообщения в краткую суть",
         "Sticky Facts" to "Извлекает и хранит ключевые факты",
-        "Branching" to "Позволяет создавать ветки диалога"
+        "Branching" to "Позволяет создавать ветки диалога",
+        "Task Oriented" to "Хранит текущую цель и прогресс по ней"
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -146,6 +147,7 @@ internal fun MemoryStrategySelector(
                 is ChatMemoryStrategy.Summarization -> "Summarization"
                 is ChatMemoryStrategy.StickyFacts -> "Sticky Facts"
                 is ChatMemoryStrategy.Branching -> "Branching"
+                is ChatMemoryStrategy.TaskOriented -> "Task Oriented"
             }
             
             OutlinedTextField(
@@ -175,6 +177,7 @@ internal fun MemoryStrategySelector(
                                 "Summarization" -> ChatMemoryStrategy.Summarization(windowSize)
                                 "Sticky Facts" -> ChatMemoryStrategy.StickyFacts(windowSize)
                                 "Branching" -> ChatMemoryStrategy.Branching(windowSize)
+                                "Task Oriented" -> ChatMemoryStrategy.TaskOriented(windowSize)
                                 else -> currentStrategy
                             })
                             expanded = false

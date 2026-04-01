@@ -75,6 +75,9 @@ fun ChatScreen(viewModel: LLMViewModel) {
                     onUpdateAgent = { id, n, p, t, pr, s, m, k -> 
                         viewModel.updateAgent(id, n, p, t, pr, s, m, k) 
                     },
+                    onUpdateProfile = { id, profile ->
+                        viewModel.updateAgentWithProfile(id, profile)
+                    },
                     onDeleteAgent = { viewModel.deleteAgent(it) },
                     onDuplicateAgent = { viewModel.duplicateAgent(it) },
                     onSelectAgent = { viewModel.selectAgent(it ?: GENERAL_CHAT_ID) }

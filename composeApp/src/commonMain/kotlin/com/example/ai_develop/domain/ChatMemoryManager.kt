@@ -20,20 +20,15 @@ class ChatMemoryManager {
         val branchKey = currentBranchId ?: "main_branch"
         val branch = agentBranches.find { it.id == branchKey }
         
-        // 1. Ищем последний ID сообщения через указатель ветки
         var lastId = branch?.lastMessageId
         
-        // 2. Если указателя нет, ищем последнее сообщение, помеченное этим branchId
         if (lastId == null) {
             lastId = messages.lastOrNull { it.branchId == branchKey }?.id
         }
         
-        // 3. Специальная обработка для основной ветки
         if (lastId == null && branchKey == "main_branch") {
-            // Пробуем сообщения без указания ветки (старый формат или по умолчанию)
             lastId = messages.lastOrNull { it.branchId == null }?.id
             
-            // Если веток вообще нет, берем просто последнее сообщение
             if (lastId == null && agentBranches.isEmpty()) {
                 lastId = messages.lastOrNull()?.id
             }
@@ -51,7 +46,7 @@ class ChatMemoryManager {
         val result = mutableListOf<ChatMessage>()
         var currentId: String? = branchLastMessageId
         
-        val visited = mutableSetOf<String>() // Защита от циклов
+        val visited = mutableSetOf<String>()
         while (currentId != null && currentId !in visited) {
             visited.add(currentId)
             val msg = messageMap[currentId]
@@ -65,15 +60,35 @@ class ChatMemoryManager {
         return result
     }
 
-    fun wrapSystemPrompt(basePrompt: String, strategy: ChatMemoryStrategy): String {
-        return when (strategy) {
-            is ChatMemoryStrategy.StickyFacts -> basePrompt + strategy.facts.toSystemPrompt()
+    fun wrapSystemPrompt(agent: Agent): String {
+        var fullPrompt = agent.systemPrompt
+        
+        // 3. Long-term Memory (UserProfile)
+        agent.userProfile?.let { profile ->
+            fullPrompt += "\n\nUSER PROFILE:\n"
+            if (profile.name.isNotEmpty()) fullPrompt += "- Name: ${profile.name}\n"
+            profile.preferences.forEach { (key, value) -> fullPrompt += "- $key: $value\n" }
+            profile.globalFacts.forEach { fullPrompt += "- $it\n" }
+        }
+
+        // 2. Working Memory & Context
+        fullPrompt += when (val strategy = agent.memoryStrategy) {
+            is ChatMemoryStrategy.StickyFacts -> strategy.facts.toSystemPrompt()
             is ChatMemoryStrategy.Summarization -> {
                 strategy.summary?.let {
-                    "$basePrompt\n\nSUMMARY OF PREVIOUS CONVERSATION:\n$it"
-                } ?: basePrompt
+                    "\n\nSUMMARY OF PREVIOUS CONVERSATION:\n$it"
+                } ?: ""
             }
-            else -> basePrompt
+            is ChatMemoryStrategy.TaskOriented -> {
+                val taskInfo = mutableListOf<String>()
+                strategy.currentTask?.let { taskInfo.add("CURRENT TASK: $it") }
+                strategy.progress?.let { taskInfo.add("PROGRESS: $it") }
+                val facts = strategy.facts.toSystemPrompt()
+                "\n\n${taskInfo.joinToString("\n")}$facts"
+            }
+            else -> ""
         }
+        
+        return fullPrompt
     }
 }

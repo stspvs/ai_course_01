@@ -26,6 +26,12 @@ interface ChatRepository {
         provider: LLMProvider
     ): Result<String>
 
+    suspend fun analyzeTask(
+        messages: List<ChatMessage>,
+        instruction: String,
+        provider: LLMProvider
+    ): Result<TaskAnalysisResult>
+
     // Новые методы для Stateful Agent
     suspend fun saveAgentState(state: AgentState)
     suspend fun getAgentState(agentId: String): AgentState?
@@ -38,3 +44,10 @@ interface ChatRepository {
     
     fun observeAgentState(agentId: String): Flow<AgentState?>
 }
+
+@kotlinx.serialization.Serializable
+data class TaskAnalysisResult(
+    val task: String,
+    val progress: String,
+    val facts: Map<String, String>
+)

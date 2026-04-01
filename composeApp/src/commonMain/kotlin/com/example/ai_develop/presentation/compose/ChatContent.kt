@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -44,114 +45,219 @@ internal fun ChatContent(
     onSelectAgent: (String?) -> Unit,
     onUpdateStrategy: (ChatMemoryStrategy) -> Unit,
     onCreateBranch: (String, String) -> Unit,
-    onSwitchBranch: (String?) -> Unit
+    onSwitchBranch: (String?) -> Unit,
+    onForceUpdateMemory: () -> Unit = {}
 ) {
     val activeAgent = state.agents.find { it.id == state.selectedAgentId }
     var menuExpanded by remember { mutableStateOf(false) }
     var showFacts by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
     var showBranches by remember { mutableStateOf(false) }
+    var showTaskPanel by remember { mutableStateOf(false) }
 
     val strategy = activeAgent?.memoryStrategy
     val isBranchingMode = strategy is ChatMemoryStrategy.Branching
     val isSummarizationMode = strategy is ChatMemoryStrategy.Summarization
     val isStickyFactsMode = strategy is ChatMemoryStrategy.StickyFacts
+    val isTaskOrientedMode = strategy is ChatMemoryStrategy.TaskOriented
 
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFFE3F2FD))
-    ) {
-        ChatTopBar(
-            activeAgentName = activeAgent?.name ?: "Общий чат",
-            isAgentSelected = activeAgent != null,
-            isLoading = state.isLoading,
-            tokensUsed = state.currentTokensUsed,
-            agents = state.agents,
-            onSelectAgent = onSelectAgent,
-            menuExpanded = menuExpanded,
-            onMenuToggle = { menuExpanded = it },
-            onShowFacts = { showFacts = !showFacts },
-            hasFacts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.isNotEmpty() == true,
-            onShowSummary = { showSummary = !showSummary },
-            hasSummary = (strategy as? ChatMemoryStrategy.Summarization)?.summary?.isNotBlank() == true,
-            onShowBranches = { showBranches = !showBranches },
-            isBranchingMode = isBranchingMode,
-            isSummarizationMode = isSummarizationMode,
-            isStickyFactsMode = isStickyFactsMode,
-            hasBranches = activeAgent?.branches?.isNotEmpty() == true
-        )
-
-        AnimatedVisibility(
-            visible = showFacts && isStickyFactsMode,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+    Row(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFFE3F2FD))
         ) {
-            val facts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyMap()
-            FactsPanel(facts = facts)
-        }
+            ChatTopBar(
+                activeAgentName = activeAgent?.name ?: "Общий чат",
+                isAgentSelected = activeAgent != null,
+                isLoading = state.isLoading,
+                tokensUsed = state.currentTokensUsed,
+                agents = state.agents,
+                onSelectAgent = onSelectAgent,
+                menuExpanded = menuExpanded,
+                onMenuToggle = { menuExpanded = it },
+                onShowFacts = { showFacts = !showFacts },
+                hasFacts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.isNotEmpty() == true,
+                onShowSummary = { showSummary = !showSummary },
+                hasSummary = (strategy as? ChatMemoryStrategy.Summarization)?.summary?.isNotBlank() == true,
+                onShowBranches = { showBranches = !showBranches },
+                onShowTask = { showTaskPanel = !showTaskPanel },
+                isBranchingMode = isBranchingMode,
+                isSummarizationMode = isSummarizationMode,
+                isStickyFactsMode = isStickyFactsMode,
+                isTaskOrientedMode = isTaskOrientedMode,
+                hasBranches = activeAgent?.branches?.isNotEmpty() == true
+            )
 
-        AnimatedVisibility(
-            visible = showSummary && isSummarizationMode,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
-        ) {
-            val summary = (strategy as? ChatMemoryStrategy.Summarization)?.summary
-            SummaryPanel(summary = summary)
-        }
+            AnimatedVisibility(
+                visible = showFacts && isStickyFactsMode,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                val facts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyMap()
+                FactsPanel(facts = facts)
+            }
 
-        AnimatedVisibility(
-            visible = showBranches && isBranchingMode,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
-        ) {
-            BranchesPanel(
-                branches = activeAgent?.branches ?: emptyList(),
-                currentBranchId = activeAgent?.currentBranchId,
-                onSwitchBranch = onSwitchBranch,
-                onCreateBranch = { branchName ->
-                    val currentBranchId = activeAgent?.currentBranchId
-                    val lastMsgId = if (currentBranchId != null) {
-                        activeAgent.branches.find { it.id == currentBranchId }?.lastMessageId
-                    } else {
-                        activeAgent?.branches?.find { it.id == "main_branch" }?.lastMessageId
-                            ?: activeAgent?.messages?.lastOrNull()?.id
+            AnimatedVisibility(
+                visible = showSummary && isSummarizationMode,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                val summary = (strategy as? ChatMemoryStrategy.Summarization)?.summary
+                SummaryPanel(summary = summary)
+            }
+
+            AnimatedVisibility(
+                visible = showBranches && isBranchingMode,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                BranchesPanel(
+                    branches = activeAgent?.branches ?: emptyList(),
+                    currentBranchId = activeAgent?.currentBranchId,
+                    onSwitchBranch = onSwitchBranch,
+                    onCreateBranch = { branchName ->
+                        val currentBranchId = activeAgent?.currentBranchId
+                        val lastMsgId = if (currentBranchId != null) {
+                            activeAgent.branches.find { it.id == currentBranchId }?.lastMessageId
+                        } else {
+                            activeAgent?.branches?.find { it.id == "main_branch" }?.lastMessageId
+                                ?: activeAgent?.messages?.lastOrNull()?.id
+                        }
+
+                        if (lastMsgId != null) {
+                            onCreateBranch(lastMsgId, branchName)
+                        }
                     }
+                )
+            }
 
-                    if (lastMsgId != null) {
-                        onCreateBranch(lastMsgId, branchName)
-                    }
+            val messages = state.currentMessages
+            val listState = rememberLazyListState()
+            
+            LaunchedEffect(messages.size, messages.lastOrNull()?.message?.length) {
+                if (messages.isNotEmpty()) {
+                    listState.scrollToItem(messages.size - 1)
                 }
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                items(messages, key = { it.id }) { message ->
+                    MessageItem(
+                        message = message,
+                        onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) }
+                    )
+                }
+            }
+
+            ChatInputArea(
+                input = input,
+                onInputChange = onInputChange,
+                onSendMessage = onSendMessage,
+                onClearChat = onClearChat
             )
         }
 
-        val messages = state.currentMessages
-        val listState = rememberLazyListState()
-        
-        LaunchedEffect(messages.size, messages.lastOrNull()?.message?.length) {
-            if (messages.isNotEmpty()) {
-                listState.scrollToItem(messages.size - 1)
-            }
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
+        // Боковая панель Рабочей памяти
+        AnimatedVisibility(
+            visible = showTaskPanel && isTaskOrientedMode,
+            enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
+            exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut()
         ) {
-            items(messages, key = { it.id }) { message ->
-                MessageItem(
-                    message = message,
-                    onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) }
-                )
+            val taskStrategy = strategy as? ChatMemoryStrategy.TaskOriented
+            TaskSidePanel(
+                task = taskStrategy?.currentTask,
+                progress = taskStrategy?.progress,
+                facts = taskStrategy?.facts?.facts ?: emptyMap(),
+                onClose = { showTaskPanel = false },
+                onRefresh = onForceUpdateMemory
+            )
+        }
+    }
+}
+
+@Composable
+private fun TaskSidePanel(
+    task: String?,
+    progress: String?,
+    facts: Map<String, String>,
+    onClose: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.width(300.dp).fillMaxHeight(),
+        color = Color.White,
+        tonalElevation = 8.dp,
+        shadowElevation = 8.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Рабочая память", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
+                Row {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color(0xFF1565C0))
+                    }
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Текущая задача", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                Surface(
+                    color = Color(0xFFE3F2FD),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = task ?: "Задача еще не определена",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Прогресс", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                Surface(
+                    color = Color(0xFFE8F5E9),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = progress ?: "В процессе анализа...",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Ключевые факты", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                if (facts.isEmpty()) {
+                    Text("Факты не найдены", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                } else {
+                    facts.forEach { (key, value) ->
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text(key, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                            Text(value, style = MaterialTheme.typography.bodySmall)
+                            HorizontalDivider(modifier = Modifier.padding(top = 4.dp), thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
+                        }
+                    }
+                }
             }
         }
-
-        ChatInputArea(
-            input = input,
-            onInputChange = onInputChange,
-            onSendMessage = onSendMessage,
-            onClearChat = onClearChat
-        )
     }
 }
 
@@ -374,9 +480,11 @@ private fun ChatTopBar(
     onShowSummary: () -> Unit,
     hasSummary: Boolean,
     onShowBranches: () -> Unit,
+    onShowTask: () -> Unit,
     isBranchingMode: Boolean,
     isSummarizationMode: Boolean,
     isStickyFactsMode: Boolean,
+    isTaskOrientedMode: Boolean,
     hasBranches: Boolean
 ) {
     Surface(
@@ -433,49 +541,57 @@ private fun ChatTopBar(
                 }
                 
                 if (isAgentSelected) {
-                    when {
-                        isBranchingMode -> {
-                            IconButton(onClick = onShowBranches) {
-                                BadgedBox(
-                                    badge = { 
-                                        if (hasBranches) {
-                                            Badge(containerColor = Color(0xFF2E7D32)) {
-                                                Text("!", color = Color.White)
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Branches", tint = if (hasBranches) Color(0xFF2E7D32) else Color.Gray)
-                                }
+                    Row(horizontalArrangement = Arrangement.End) {
+                        if (isTaskOrientedMode) {
+                            IconButton(onClick = onShowTask) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = "Task Memory", tint = Color(0xFF1565C0))
                             }
                         }
-                        isSummarizationMode -> {
-                            IconButton(onClick = onShowSummary) {
-                                BadgedBox(
-                                    badge = { 
-                                        if (hasSummary) {
-                                            Badge(containerColor = Color(0xFF0277BD)) {
-                                                Text("!", color = Color.White)
+                        
+                        when {
+                            isBranchingMode -> {
+                                IconButton(onClick = onShowBranches) {
+                                    BadgedBox(
+                                        badge = { 
+                                            if (hasBranches) {
+                                                Badge(containerColor = Color(0xFF2E7D32)) {
+                                                    Text("!", color = Color.White)
+                                                }
                                             }
                                         }
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Branches", tint = if (hasBranches) Color(0xFF2E7D32) else Color.Gray)
                                     }
-                                ) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Summary", tint = if (hasSummary) Color(0xFF0277BD) else Color.Gray)
                                 }
                             }
-                        }
-                        isStickyFactsMode -> {
-                            IconButton(onClick = onShowFacts) {
-                                BadgedBox(
-                                    badge = { 
-                                        if (hasFacts) {
-                                            Badge(containerColor = Color(0xFFF57F17)) {
-                                                Text("!", color = Color.White)
+                            isSummarizationMode -> {
+                                IconButton(onClick = onShowSummary) {
+                                    BadgedBox(
+                                        badge = { 
+                                            if (hasSummary) {
+                                                Badge(containerColor = Color(0xFF0277BD)) {
+                                                    Text("!", color = Color.White)
+                                                }
                                             }
                                         }
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Summary", tint = if (hasSummary) Color(0xFF0277BD) else Color.Gray)
                                     }
-                                ) {
-                                    Icon(Icons.Default.Info, contentDescription = "Facts", tint = if (hasFacts) Color(0xFFF57F17) else Color.Gray)
+                                }
+                            }
+                            isStickyFactsMode -> {
+                                IconButton(onClick = onShowFacts) {
+                                    BadgedBox(
+                                        badge = { 
+                                            if (hasFacts) {
+                                                Badge(containerColor = Color(0xFFF57F17)) {
+                                                    Text("!", color = Color.White)
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Default.Info, contentDescription = "Facts", tint = if (hasFacts) Color(0xFFF57F17) else Color.Gray)
+                                    }
                                 }
                             }
                         }

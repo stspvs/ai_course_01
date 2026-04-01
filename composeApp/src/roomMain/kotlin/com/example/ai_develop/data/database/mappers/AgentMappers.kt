@@ -17,7 +17,8 @@ fun AgentEntity.toDomain(messages: List<ChatMessage>) = Agent(
     totalTokensUsed = totalTokensUsed,
     memoryStrategy = memoryStrategy,
     branches = branches,
-    currentBranchId = currentBranchId
+    currentBranchId = currentBranchId,
+    userProfile = userProfile
 )
 
 fun Agent.toEntity() = AgentEntity(
@@ -31,7 +32,8 @@ fun Agent.toEntity() = AgentEntity(
     totalTokensUsed = totalTokensUsed,
     memoryStrategy = memoryStrategy,
     branches = branches,
-    currentBranchId = currentBranchId
+    currentBranchId = currentBranchId,
+    userProfile = userProfile
 )
 
 fun MessageEntity.toDomain() = ChatMessage(
