@@ -134,4 +134,50 @@ class KtorChatRepository(
             Result.failure(e)
         }
     }
+
+    override suspend fun summarize(
+        messages: List<ChatMessage>,
+        previousSummary: String?,
+        instruction: String,
+        provider: LLMProvider
+    ): Result<String> {
+        return try {
+            val prompt = PromptBuilder.buildSummarizationPrompt(previousSummary, messages, instruction)
+
+            val summarizationMessages = listOf(
+                ChatMessage(message = "You are a helpful assistant that summarizes conversations.", source = SourceType.SYSTEM),
+                ChatMessage(message = prompt, source = SourceType.USER)
+            )
+
+            val handler = getHandler(provider)
+            val platform = getPlatform()
+            val url = handler.buildUrl(platform)
+            val bodyString = handler.buildChatRequestBody(
+                messages = summarizationMessages,
+                systemPrompt = "",
+                maxTokens = 1000,
+                temperature = 0.5,
+                stopWord = "",
+                isJsonMode = false,
+                stream = false
+            )
+
+            val response = httpClient.post(url) {
+                handler.buildHeaders().forEach { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                setBody(bodyString)
+            }
+
+            if (response.status.isSuccess()) {
+                val responseText = response.bodyAsText()
+                val text = handler.parseFullResponse(responseText)
+                Result.success(text.trim())
+            } else {
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Summarization failed: ${response.status}. Body: $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

@@ -24,6 +24,13 @@ class ChatStreamingUseCaseTest {
             currentFacts: ChatFacts,
             provider: LLMProvider
         ): Result<ChatFacts> = Result.success(ChatFacts())
+
+        override suspend fun summarize(
+            messages: List<ChatMessage>,
+            previousSummary: String?,
+            instruction: String,
+            provider: LLMProvider
+        ): Result<String> = Result.success("summary")
     }
 
     private val useCase = ChatStreamingUseCase(repository)

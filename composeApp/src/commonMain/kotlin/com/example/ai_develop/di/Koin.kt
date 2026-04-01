@@ -2,10 +2,11 @@ package com.example.ai_develop.di
 
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
-import com.example.ai_develop.domain.ChatRepository
-import com.example.ai_develop.domain.ChatStreamingUseCase
-import com.example.ai_develop.domain.ExtractFactsUseCase
+import com.example.ai_develop.data.database.LocalChatRepository
+import com.example.ai_develop.domain.*
+import com.example.ai_develop.presentation.ChatInteractor
 import com.example.ai_develop.presentation.LLMViewModel
+import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
 import io.ktor.client.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
@@ -16,6 +17,8 @@ import org.koin.core.module.Module
 import org.koin.dsl.KoinAppDeclaration
 import org.koin.dsl.module
 import org.koin.compose.viewmodel.dsl.viewModelOf
+import org.koin.core.module.dsl.singleOf
+import org.koin.core.module.dsl.factoryOf
 
 expect val platformModule: Module
 
@@ -56,8 +59,13 @@ val commonModule = module {
         )
     }
 
-    single { ChatStreamingUseCase(get()) }
-    single { ExtractFactsUseCase(get()) }
+    singleOf(::ChatStreamingUseCase)
+    singleOf(::ExtractFactsUseCase)
+    singleOf(::SummarizeChatUseCase)
+    singleOf(::ChatMemoryManager)
+    singleOf(::StrategyDelegateFactory)
+    
+    factoryOf(::ChatInteractor)
 
     viewModelOf(::LLMViewModel)
 }

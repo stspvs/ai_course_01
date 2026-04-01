@@ -60,7 +60,9 @@ class StickyFactsStrategyDelegate(
     }
 }
 
-class SummarizationStrategyDelegate : ChatStrategyDelegate {
+class SummarizationStrategyDelegate(
+    private val summarizeChatUseCase: SummarizeChatUseCase
+) : ChatStrategyDelegate {
     override fun onMessageReceived(
         scope: CoroutineScope,
         agent: Agent,
@@ -72,19 +74,34 @@ class SummarizationStrategyDelegate : ChatStrategyDelegate {
         scope.launch {
             repository.saveAgentMetadata(agent)
             
-            // Здесь в будущем можно добавить автоматическую саммаризацию 
-            // при достижении определенного количества сообщений
+            val assistantMessagesCount = agent.messages.count { it.source == SourceType.ASSISTANT }
+            // Саммаризируем каждые windowSize сообщений ассистента, чтобы освежить контекст
+            if (assistantMessagesCount > 0 && assistantMessagesCount % strategy.windowSize == 0) {
+                summarizeChatUseCase(
+                    messages = agent.messages,
+                    previousSummary = strategy.summary,
+                    instruction = strategy.summaryPrompt,
+                    provider = agent.provider
+                ).onSuccess { newSummary ->
+                    val updatedAgent = agent.copy(
+                        memoryStrategy = strategy.copy(summary = newSummary)
+                    )
+                    onAgentUpdated(updatedAgent)
+                    repository.saveAgentMetadata(updatedAgent)
+                }
+            }
         }
     }
 }
 
 class StrategyDelegateFactory(
-    private val extractFactsUseCase: ExtractFactsUseCase
+    private val extractFactsUseCase: ExtractFactsUseCase,
+    private val summarizeChatUseCase: SummarizeChatUseCase
 ) {
     fun getDelegate(strategy: ChatMemoryStrategy): ChatStrategyDelegate {
         return when (strategy) {
             is ChatMemoryStrategy.StickyFacts -> StickyFactsStrategyDelegate(extractFactsUseCase)
-            is ChatMemoryStrategy.Summarization -> SummarizationStrategyDelegate()
+            is ChatMemoryStrategy.Summarization -> SummarizationStrategyDelegate(summarizeChatUseCase)
             else -> DefaultStrategyDelegate()
         }
     }

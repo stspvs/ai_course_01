@@ -1,5 +1,6 @@
 package com.example.ai_develop.domain
 
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -11,13 +12,20 @@ class ExtractFactsUseCaseTest {
         var lastMessages: List<ChatMessage> = emptyList()
         var lastFacts: ChatFacts? = null
         
-        override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider) = kotlinx.coroutines.flow.emptyFlow<Result<String>>()
+        override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider) = emptyFlow<Result<String>>()
         
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider): Result<ChatFacts> {
             lastMessages = messages
             lastFacts = currentFacts
             return Result.success(ChatFacts(mapOf("extracted" to "true")))
         }
+
+        override suspend fun summarize(
+            messages: List<ChatMessage>,
+            previousSummary: String?,
+            instruction: String,
+            provider: LLMProvider
+        ): Result<String> = Result.success("summary")
     }
 
     @Test

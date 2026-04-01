@@ -18,4 +18,11 @@ interface ChatRepository {
         currentFacts: ChatFacts,
         provider: LLMProvider
     ): Result<ChatFacts>
+
+    suspend fun summarize(
+        messages: List<ChatMessage>,
+        previousSummary: String?,
+        instruction: String,
+        provider: LLMProvider
+    ): Result<String>
 }

@@ -49,9 +49,13 @@ internal fun ChatContent(
     val activeAgent = state.agents.find { it.id == state.selectedAgentId }
     var menuExpanded by remember { mutableStateOf(false) }
     var showFacts by remember { mutableStateOf(false) }
+    var showSummary by remember { mutableStateOf(false) }
     var showBranches by remember { mutableStateOf(false) }
 
-    val isBranchingMode = activeAgent?.memoryStrategy is ChatMemoryStrategy.Branching
+    val strategy = activeAgent?.memoryStrategy
+    val isBranchingMode = strategy is ChatMemoryStrategy.Branching
+    val isSummarizationMode = strategy is ChatMemoryStrategy.Summarization
+    val isStickyFactsMode = strategy is ChatMemoryStrategy.StickyFacts
 
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFFE3F2FD))
@@ -66,19 +70,32 @@ internal fun ChatContent(
             menuExpanded = menuExpanded,
             onMenuToggle = { menuExpanded = it },
             onShowFacts = { showFacts = !showFacts },
-            hasFacts = (activeAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.isNotEmpty() == true,
+            hasFacts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.isNotEmpty() == true,
+            onShowSummary = { showSummary = !showSummary },
+            hasSummary = (strategy as? ChatMemoryStrategy.Summarization)?.summary?.isNotBlank() == true,
             onShowBranches = { showBranches = !showBranches },
             isBranchingMode = isBranchingMode,
+            isSummarizationMode = isSummarizationMode,
+            isStickyFactsMode = isStickyFactsMode,
             hasBranches = activeAgent?.branches?.isNotEmpty() == true
         )
 
         AnimatedVisibility(
-            visible = showFacts && !isBranchingMode,
+            visible = showFacts && isStickyFactsMode,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
-            val facts = (activeAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyMap()
+            val facts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyMap()
             FactsPanel(facts = facts)
+        }
+
+        AnimatedVisibility(
+            visible = showSummary && isSummarizationMode,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            val summary = (strategy as? ChatMemoryStrategy.Summarization)?.summary
+            SummaryPanel(summary = summary)
         }
 
         AnimatedVisibility(
@@ -165,6 +182,35 @@ private fun FactsPanel(facts: Map<String, String>) {
                         Text(value, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryPanel(summary: String?) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        color = Color(0xFFE1F5FE),
+        shape = RoundedCornerShape(12.dp),
+        tonalElevation = 2.dp,
+        shadowElevation = 2.dp
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFF0277BD), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Summarization (Краткое содержание):", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(0xFF0277BD))
+            }
+            Spacer(Modifier.height(8.dp))
+            if (summary.isNullOrBlank()) {
+                Text("Суммаризация еще не выполнена. Продолжайте диалог!", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            } else {
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Black
+                )
             }
         }
     }
@@ -325,8 +371,12 @@ private fun ChatTopBar(
     onMenuToggle: (Boolean) -> Unit,
     onShowFacts: () -> Unit,
     hasFacts: Boolean,
+    onShowSummary: () -> Unit,
+    hasSummary: Boolean,
     onShowBranches: () -> Unit,
     isBranchingMode: Boolean,
+    isSummarizationMode: Boolean,
+    isStickyFactsMode: Boolean,
     hasBranches: Boolean
 ) {
     Surface(
@@ -383,32 +433,50 @@ private fun ChatTopBar(
                 }
                 
                 if (isAgentSelected) {
-                    if (isBranchingMode) {
-                        IconButton(onClick = onShowBranches) {
-                            BadgedBox(
-                                badge = { 
-                                    if (hasBranches) {
-                                        Badge(containerColor = Color(0xFF2E7D32)) {
-                                            Text("!", color = Color.White)
+                    when {
+                        isBranchingMode -> {
+                            IconButton(onClick = onShowBranches) {
+                                BadgedBox(
+                                    badge = { 
+                                        if (hasBranches) {
+                                            Badge(containerColor = Color(0xFF2E7D32)) {
+                                                Text("!", color = Color.White)
+                                            }
                                         }
                                     }
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Branches", tint = if (hasBranches) Color(0xFF2E7D32) else Color.Gray)
                                 }
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Branches", tint = if (hasBranches) Color(0xFF2E7D32) else Color.Gray)
                             }
                         }
-                    } else {
-                        IconButton(onClick = onShowFacts) {
-                            BadgedBox(
-                                badge = { 
-                                    if (hasFacts) {
-                                        Badge(containerColor = Color(0xFFF57F17)) {
-                                            Text("!", color = Color.White)
+                        isSummarizationMode -> {
+                            IconButton(onClick = onShowSummary) {
+                                BadgedBox(
+                                    badge = { 
+                                        if (hasSummary) {
+                                            Badge(containerColor = Color(0xFF0277BD)) {
+                                                Text("!", color = Color.White)
+                                            }
                                         }
                                     }
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Summary", tint = if (hasSummary) Color(0xFF0277BD) else Color.Gray)
                                 }
-                            ) {
-                                Icon(Icons.Default.Info, contentDescription = "Facts", tint = if (hasFacts) Color(0xFFF57F17) else Color.Gray)
+                            }
+                        }
+                        isStickyFactsMode -> {
+                            IconButton(onClick = onShowFacts) {
+                                BadgedBox(
+                                    badge = { 
+                                        if (hasFacts) {
+                                            Badge(containerColor = Color(0xFFF57F17)) {
+                                                Text("!", color = Color.White)
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Info, contentDescription = "Facts", tint = if (hasFacts) Color(0xFFF57F17) else Color.Gray)
+                                }
                             }
                         }
                     }

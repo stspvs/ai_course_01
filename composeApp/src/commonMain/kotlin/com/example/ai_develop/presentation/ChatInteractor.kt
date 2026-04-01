@@ -28,7 +28,14 @@ class ChatInteractor(
     ): Job {
         val agentId = agent.id
         val branchKey = agent.currentBranchId ?: "main_branch"
-        val lastMessageId = agent.branches.find { it.id == branchKey }?.lastMessageId ?: agent.messages.lastOrNull()?.id
+        
+        val historyBeforeNewMessage = memoryManager.getBranchHistory(
+            messages = agent.messages,
+            currentBranchId = agent.currentBranchId,
+            agentBranches = agent.branches
+        )
+        
+        val lastMessageId = historyBeforeNewMessage.lastOrNull()?.id
 
         val userMessage = createChatMessage(
             message = messageText,
@@ -40,21 +47,26 @@ class ChatInteractor(
         updateLocalAndDb(agentId, userMessage, branchKey, onAgentUpdate, onLoadingStatus, scope)
 
         return scope.launch {
+            val agentSnapshot = repository.getAgentWithMessages(agentId).firstOrNull() ?: agent
+            val updatedMessages = agentSnapshot.messages.toMutableList().apply {
+                if (none { it.id == userMessage.id }) add(userMessage)
+            }
+
             val history = memoryManager.processMessages(
-                messages = agent.messages + userMessage,
-                strategy = agent.memoryStrategy,
-                currentBranchId = agent.currentBranchId,
-                agentBranches = agent.branches
+                messages = updatedMessages,
+                strategy = agentSnapshot.memoryStrategy,
+                currentBranchId = agentSnapshot.currentBranchId,
+                agentBranches = agentSnapshot.branches
             )
 
             val flow = chatStreamingUseCase(
                 messages = history,
-                systemPrompt = memoryManager.wrapSystemPrompt(agent.systemPrompt, agent.memoryStrategy),
-                maxTokens = agent.maxTokens,
-                temperature = agent.temperature,
-                stopWord = agent.stopWord,
+                systemPrompt = memoryManager.wrapSystemPrompt(agentSnapshot.systemPrompt, agentSnapshot.memoryStrategy),
+                maxTokens = agentSnapshot.maxTokens,
+                temperature = agentSnapshot.temperature,
+                stopWord = agentSnapshot.stopWord,
                 isJsonMode = isJsonMode,
-                provider = agent.provider
+                provider = agentSnapshot.provider
             )
 
             handleStreamingResponse(

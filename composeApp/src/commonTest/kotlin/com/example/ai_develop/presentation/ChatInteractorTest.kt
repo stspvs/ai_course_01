@@ -29,6 +29,7 @@ class ChatInteractorTest {
     private class MockChatRepository : ChatRepository {
         override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider): Flow<Result<String>> = emptyFlow()
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider): Result<ChatFacts> = Result.success(ChatFacts())
+        override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider): Result<String> = Result.success("summary")
     }
 
     private class MockUseCase(repo: ChatRepository) : ChatStreamingUseCase(repo) {
@@ -43,7 +44,10 @@ class ChatInteractorTest {
         val chatRepo = MockChatRepository()
         val useCase = MockUseCase(chatRepo)
         val memoryManager = ChatMemoryManager()
-        val strategyFactory = StrategyDelegateFactory(ExtractFactsUseCase(chatRepo))
+        val strategyFactory = StrategyDelegateFactory(
+            ExtractFactsUseCase(chatRepo),
+            SummarizeChatUseCase(chatRepo)
+        )
         
         val interactor = ChatInteractor(useCase, repo, memoryManager, strategyFactory)
         

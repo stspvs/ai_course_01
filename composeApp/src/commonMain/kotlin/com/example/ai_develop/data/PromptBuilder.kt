@@ -32,4 +32,21 @@ internal object PromptBuilder {
             Example output: {"user_name": "Ivan", "goal": "learn kotlin", "language": "Russian"}
         """.trimIndent()
     }
+
+    fun buildSummarizationPrompt(
+        previousSummary: String?,
+        messages: List<ChatMessage>,
+        instruction: String
+    ): String {
+        return """
+            $instruction
+            
+            ${previousSummary?.let { "Previous summary: $it\n" } ?: ""}
+            
+            Messages to summarize:
+            ${messages.joinToString("\n") { "${it.source.role}: ${it.message}" }}
+            
+            Return ONLY the new summary text.
+        """.trimIndent()
+    }
 }
