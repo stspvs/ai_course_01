@@ -1,3 +1,3 @@
 package com.example.ai_develop.data.database
 
-// Moved to roomTest
+// Room is not supported on Wasm.

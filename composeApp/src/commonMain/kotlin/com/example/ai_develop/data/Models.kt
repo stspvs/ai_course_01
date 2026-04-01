@@ -101,15 +101,15 @@ data class YandexCompletionOptions(
     @SerialName("temperature")
     val temperature: Double = 0.6,
     @SerialName("maxTokens")
-    val maxTokens: Int = 2000
+    val maxTokens: Long = 2000 // Using Long for safety with large numbers, though Int is usually fine
 )
 
 @Serializable
 data class YandexMessage(
     @SerialName("role")
-    val role: String? = null,
+    val role: String,
     @SerialName("text")
-    val text: String? = null
+    val text: String
 )
 
 @Serializable

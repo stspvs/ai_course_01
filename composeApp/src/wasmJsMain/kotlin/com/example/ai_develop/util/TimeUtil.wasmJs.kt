@@ -1,5 +1,6 @@
 package com.example.ai_develop.util
 
-import kotlin.js.Date
+@JsFun("() => Date.now()")
+external fun jsDateNow(): Double
 
-actual fun currentTimeMillis(): Long = Date.now().toLong()
+actual fun currentTimeMillis(): Long = jsDateNow().toLong()

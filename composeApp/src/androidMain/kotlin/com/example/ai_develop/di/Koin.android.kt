@@ -1,11 +1,16 @@
 package com.example.ai_develop.di
 
+import com.example.ai_develop.data.database.AppDatabase
+import com.example.ai_develop.data.database.DatabaseChatRepository
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.data.database.getDatabaseBuilder
 import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
 
 actual val platformModule = module {
-    single {
+    single<AppDatabase> {
         getDatabaseBuilder(androidContext()).build()
     }
+    single { get<AppDatabase>().agentDao() }
+    single<LocalChatRepository> { DatabaseChatRepository(get()) }
 }

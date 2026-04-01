@@ -2,8 +2,6 @@ package com.example.ai_develop.di
 
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
-import com.example.ai_develop.data.database.AppDatabase
-import com.example.ai_develop.data.database.DatabaseChatRepository
 import com.example.ai_develop.domain.ChatRepository
 import com.example.ai_develop.domain.ChatStreamingUseCase
 import com.example.ai_develop.domain.ExtractFactsUseCase
@@ -29,14 +27,18 @@ fun initKoin(appDeclaration: KoinAppDeclaration = {}) =
 
 val commonModule = module {
     single {
+        Json {
+            ignoreUnknownKeys = true
+            prettyPrint = true
+            isLenient = true
+            encodeDefaults = true
+        }
+    }
+
+    single {
         HttpClient {
             install(ContentNegotiation) {
-                json(Json {
-                    ignoreUnknownKeys = true
-                    prettyPrint = true
-                    isLenient = true
-                    encodeDefaults = true
-                })
+                json(get())
             }
             install(Logging) {
                 level = LogLevel.HEADERS
@@ -56,10 +58,6 @@ val commonModule = module {
 
     single { ChatStreamingUseCase(get()) }
     single { ExtractFactsUseCase(get()) }
-
-    // Database
-    single { get<AppDatabase>().agentDao() }
-    single { DatabaseChatRepository(get()) }
 
     viewModelOf(::LLMViewModel)
 }

@@ -52,11 +52,14 @@ internal class DeepSeekHandler(
         if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
         messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
         
+        // DeepSeek supports up to 2.0
+        val validatedTemp = temperature.coerceIn(0.0, 2.0)
+
         return json.encodeToString(ChatRequest(
             model = provider.model,
             messages = apiMessages,
             maxTokens = maxTokens,
-            temperature = temperature,
+            temperature = validatedTemp,
             stream = stream,
             responseFormat = if (isJsonMode) ResponseFormat("json_object") else null,
             stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
@@ -128,15 +131,39 @@ internal class YandexHandler(
         stream: Boolean
     ): String {
         val yandexMessages = mutableListOf<YandexMessage>()
-        if (systemPrompt.isNotBlank()) yandexMessages.add(YandexMessage(role = "system", text = systemPrompt))
-        messages.forEach { msg -> yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message)) }
+        if (systemPrompt.isNotBlank()) {
+            yandexMessages.add(YandexMessage(role = "system", text = systemPrompt))
+        }
         
+        messages.forEach { msg ->
+            if (msg.message.isNotBlank()) {
+                yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message))
+            }
+        }
+        
+        // Ensure at least one message exists
+        if (yandexMessages.isEmpty()) {
+            yandexMessages.add(YandexMessage(role = "user", text = "."))
+        }
+
+        // Validate temperature for Yandex (0.0 to 1.0)
+        val validatedTemp = temperature.coerceIn(0.0, 1.0)
+        
+        // Handle modelUri format. 
+        // If it doesn't contain a version, append /latest
+        val modelName = provider.model.lowercase()
+        val modelPath = if (modelName.contains("/") || modelName.startsWith("ds://") || modelName.startsWith("cls://")) {
+            modelName
+        } else {
+            "$modelName/latest"
+        }
+
         return json.encodeToString(YandexChatRequest(
-            modelUri = "gpt://$folderId/${provider.model}",
+            modelUri = "gpt://$folderId/$modelPath",
             completionOptions = YandexCompletionOptions(
                 stream = stream,
-                temperature = temperature,
-                maxTokens = maxTokens
+                temperature = validatedTemp,
+                maxTokens = maxTokens.toLong()
             ),
             messages = yandexMessages
         ))
@@ -209,11 +236,15 @@ internal class OpenRouterHandler(
         if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
         messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
         
+        // OpenRouter: allow 2.0 ONLY for deepseek models, 1.0 for others
+        val maxTemp = if (provider.model.contains("deepseek", ignoreCase = true)) 2.0 else 1.0
+        val validatedTemp = temperature.coerceIn(0.0, maxTemp)
+
         return json.encodeToString(ChatRequest(
             model = provider.model,
             messages = apiMessages,
             maxTokens = maxTokens,
-            temperature = temperature,
+            temperature = validatedTemp,
             stream = stream,
             responseFormat = if (isJsonMode) ResponseFormat("json_object") else null,
             stop = if (stopWord.isNotBlank()) listOf(stopWord) else null

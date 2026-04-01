@@ -1,9 +1,9 @@
 package com.example.ai_develop.domain
 
-class ExtractFactsUseCase(
+open class ExtractFactsUseCase(
     private val repository: ChatRepository
 ) {
-    suspend operator fun invoke(
+    open suspend operator fun invoke(
         messages: List<ChatMessage>,
         currentFacts: ChatFacts,
         provider: LLMProvider,

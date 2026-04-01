@@ -86,26 +86,30 @@ internal fun TemperatureSlider(
     provider: LLMProvider,
     onTempChange: (Double) -> Unit
 ) {
+    val isDeepSeek = provider is LLMProvider.DeepSeek
+    val maxTemp = if (isDeepSeek) 2.0 else 1.0
+    val coercedTemp = temp.coerceIn(0.0, maxTemp)
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val displayTemp = (round(temp * 10) / 10).toString()
+            val displayTemp = (round(coercedTemp * 10) / 10).toString()
             Text("Температура: $displayTemp", style = MaterialTheme.typography.labelMedium)
             val description = when {
-                temp < 0.3 -> "Точные ответы"
-                temp < 0.7 -> "Сбалансированно"
+                coercedTemp < 0.3 * maxTemp -> "Точные ответы"
+                coercedTemp < 0.7 * maxTemp -> "Сбалансированно"
                 else -> "Креативность"
             }
             Text(description, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
         }
         Slider(
-            value = temp.toFloat(),
+            value = coercedTemp.toFloat(),
             onValueChange = { onTempChange(it.toDouble()) },
-            valueRange = 0f..2f,
-            steps = 19,
+            valueRange = 0f..maxTemp.toFloat(),
+            steps = if (isDeepSeek) 19 else 9,
             colors = SliderDefaults.colors(
                 thumbColor = Color(0xFF4A148C),
                 activeTrackColor = Color(0xFF4A148C)

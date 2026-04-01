@@ -1,6 +1,6 @@
 package com.example.ai_develop.presentation
 
-import com.example.ai_develop.data.database.DatabaseChatRepository
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -20,7 +20,7 @@ class LLMViewModelTest : KoinTest {
     private lateinit var viewModel: LLMViewModel
     private val testDispatcher = StandardTestDispatcher()
     
-    private class MockRepository : DatabaseChatRepository(null) {
+    private class MockRepository : LocalChatRepository {
         var agentsFlow = flowOf(listOf<Agent>())
         var savedMetadata: Agent? = null
         var lastDeletedId: String? = null

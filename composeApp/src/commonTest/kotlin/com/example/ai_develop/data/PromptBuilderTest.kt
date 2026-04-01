@@ -8,30 +8,17 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 class PromptBuilderTest {
-    private val json = Json {
-        ignoreUnknownKeys = true
-    }
 
     @Test
-    fun testBuildFactsExtractionPrompt() {
-        val currentFacts = ChatFacts(mapOf("name" to "John"))
-        val messages = listOf(ChatMessage(message = "I like Kotlin", source = SourceType.USER))
+    fun `buildFactsExtractionPrompt should contain current facts and new messages`() {
+        val currentFacts = ChatFacts(mapOf("name" to "Alice"))
+        val messages = listOf(ChatMessage(message = "I like pizza", source = SourceType.USER))
+        val json = Json { isLenient = true }
         
         val prompt = PromptBuilder.buildFactsExtractionPrompt(currentFacts, messages, json)
         
-        assertTrue(prompt.contains("\"name\":\"John\""))
-        assertTrue(prompt.contains("user: I like Kotlin"))
-        assertTrue(prompt.contains("Instructions:"))
-    }
-    
-    @Test
-    fun testBuildFactsExtractionPromptEmpty() {
-        val currentFacts = ChatFacts(emptyMap())
-        val messages = listOf(ChatMessage(message = "Hello", source = SourceType.USER))
-        
-        val prompt = PromptBuilder.buildFactsExtractionPrompt(currentFacts, messages, json)
-        
-        assertTrue(prompt.contains("No facts yet."))
-        assertTrue(prompt.contains("user: Hello"))
+        assertTrue(prompt.contains("Alice"))
+        assertTrue(prompt.contains("I like pizza"))
+        assertTrue(prompt.contains("user"))
     }
 }

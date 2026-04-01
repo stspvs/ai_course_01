@@ -1,6 +1,6 @@
 package com.example.ai_develop.presentation
 
-import com.example.ai_develop.data.database.DatabaseChatRepository
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
 import kotlinx.coroutines.CoroutineScope
@@ -13,7 +13,7 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class ChatInteractor(
     private val chatStreamingUseCase: ChatStreamingUseCase,
-    private val repository: DatabaseChatRepository,
+    private val repository: LocalChatRepository,
     private val memoryManager: ChatMemoryManager,
     private val strategyFactory: StrategyDelegateFactory
 ) {

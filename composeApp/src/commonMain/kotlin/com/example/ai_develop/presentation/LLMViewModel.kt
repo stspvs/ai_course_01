@@ -2,7 +2,7 @@ package com.example.ai_develop.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ai_develop.data.database.DatabaseChatRepository
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -13,7 +13,7 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class LLMViewModel(
     private val chatStreamingUseCase: ChatStreamingUseCase,
-    private val repository: DatabaseChatRepository
+    private val repository: LocalChatRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LLMStateModel())

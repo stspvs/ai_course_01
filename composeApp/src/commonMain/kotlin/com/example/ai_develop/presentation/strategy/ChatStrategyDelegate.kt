@@ -1,6 +1,6 @@
 package com.example.ai_develop.presentation.strategy
 
-import com.example.ai_develop.data.database.DatabaseChatRepository
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -9,7 +9,7 @@ interface ChatStrategyDelegate {
     fun onMessageReceived(
         scope: CoroutineScope,
         agent: Agent,
-        repository: DatabaseChatRepository,
+        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     )
 }
@@ -18,7 +18,7 @@ class DefaultStrategyDelegate : ChatStrategyDelegate {
     override fun onMessageReceived(
         scope: CoroutineScope,
         agent: Agent,
-        repository: DatabaseChatRepository,
+        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
         scope.launch {
@@ -33,7 +33,7 @@ class StickyFactsStrategyDelegate(
     override fun onMessageReceived(
         scope: CoroutineScope,
         agent: Agent,
-        repository: DatabaseChatRepository,
+        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
         val strategy = agent.memoryStrategy as? ChatMemoryStrategy.StickyFacts ?: return
@@ -64,7 +64,7 @@ class SummarizationStrategyDelegate : ChatStrategyDelegate {
     override fun onMessageReceived(
         scope: CoroutineScope,
         agent: Agent,
-        repository: DatabaseChatRepository,
+        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
         val strategy = agent.memoryStrategy as? ChatMemoryStrategy.Summarization ?: return

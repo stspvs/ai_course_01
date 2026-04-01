@@ -34,7 +34,6 @@ kotlin {
                     static = (static ?: mutableListOf()).apply {
                         add(projectDirPath)
                     }
-                    // Корректная конфигурация прокси для WASM/JS
                     proxy = mutableListOf(
                         KotlinWebpackConfig.DevServer.Proxy(
                             context = mutableListOf("/yandex-api"),
@@ -73,7 +72,12 @@ kotlin {
                 implementation(libs.koin.core)
                 implementation(libs.koin.compose)
                 implementation(libs.koin.compose.viewmodel)
+            }
+        }
 
+        val roomMain by creating {
+            dependsOn(commonMain)
+            dependencies {
                 implementation(libs.androidx.room.runtime)
                 implementation(libs.androidx.sqlite.bundled)
             }
@@ -87,8 +91,14 @@ kotlin {
                 implementation(libs.koin.test)
             }
         }
+
+        val roomTest by creating {
+            dependsOn(commonTest)
+            dependsOn(roomMain)
+        }
         
         val androidMain by getting {
+            dependsOn(roomMain)
             dependencies {
                 implementation(libs.androidx.appcompat)
                 implementation(libs.androidx.activity.compose)
@@ -97,18 +107,29 @@ kotlin {
                 implementation(libs.koin.android)
             }
         }
+
+        val androidUnitTest by getting {
+            dependsOn(androidMain)
+            dependsOn(roomTest)
+        }
         
         val desktopMain by getting {
+            dependsOn(roomMain)
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.okhttp)
             }
         }
+
+        val desktopTest by getting {
+            dependsOn(desktopMain)
+            dependsOn(roomTest)
+        }
         
         val wasmJsMain by getting {
             dependencies {
-                implementation(libs.ktor.client.core)
+                // Inherited from commonMain
             }
         }
     }
@@ -121,7 +142,6 @@ room {
 dependencies {
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspDesktop", libs.androidx.room.compiler)
-    add("kspWasmJs", libs.androidx.room.compiler)
 }
 
 android {
