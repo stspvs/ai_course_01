@@ -27,7 +27,7 @@ fun Agent.mergeWith(db: Agent): Agent {
         messages = allMessages,
         branches = finalBranches,
         currentBranchId = this.currentBranchId ?: db.currentBranchId,
-        agentProfile = this.agentProfile ?: db.agentProfile,
+        userProfile = this.userProfile ?: db.userProfile,
         workingMemory = this.workingMemory,
         // Поля, которые приходят из БД (метаданные могут обновиться в БД и мы хотим их видеть)
         // Но если мы редактируем их в UI, 'this' приоритетнее.

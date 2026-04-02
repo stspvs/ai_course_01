@@ -34,8 +34,8 @@ class ChatInteractorTest {
         override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<WorkingMemoryAnalysis> = Result.success(WorkingMemoryAnalysis())
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
-        override suspend fun getProfile(agentId: String): AgentProfile? = null
-        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun getProfile(agentId: String): UserProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
         override suspend fun saveInvariant(invariant: Invariant) {}
         override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
@@ -68,7 +68,7 @@ class ChatInteractorTest {
             name = "Test Agent",
             systemPrompt = "System",
             temperature = 0.7,
-            provider = LLMProvider.DeepSeek(),
+            provider = LLMProvider.Yandex(),
             stopWord = "",
             maxTokens = 100,
             messages = emptyList()

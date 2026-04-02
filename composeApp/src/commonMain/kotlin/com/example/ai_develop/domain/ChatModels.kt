@@ -105,7 +105,7 @@ data class Agent(
     val currentBranchId: String? = null,
     val memoryStrategy: ChatMemoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
     val totalTokensUsed: Int = 0,
-    val agentProfile: AgentProfile? = null,
+    val userProfile: UserProfile? = null,
     val workingMemory: WorkingMemory = WorkingMemory()
 )
 

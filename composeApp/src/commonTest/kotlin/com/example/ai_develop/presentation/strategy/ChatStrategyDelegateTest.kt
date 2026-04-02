@@ -4,23 +4,25 @@ import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 class ChatStrategyDelegateTest {
 
     private class MockChatRepo : ChatRepository {
         override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider) = flowOf(Result.success(""))
-        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
-        override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
+        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts(facts = listOf("New Fact")))
+        override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("Summary")
         override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(TaskAnalysisResult())
-        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(WorkingMemoryAnalysis())
+        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(WorkingMemoryAnalysis(currentTask = "Updated Task", progress = "In Progress"))
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String) = null
-        override suspend fun getProfile(agentId: String) = null
-        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun getProfile(agentId: String): UserProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         override suspend fun getInvariants(agentId: String, stage: AgentStage) = emptyList<Invariant>()
         override suspend fun saveInvariant(invariant: Invariant) {}
         override fun observeAgentState(agentId: String) = flowOf(null)
@@ -39,7 +41,7 @@ class ChatStrategyDelegateTest {
             name = "Test",
             systemPrompt = "system",
             temperature = 0.7,
-            provider = LLMProvider.DeepSeek(),
+            provider = LLMProvider.Yandex(),
             stopWord = "",
             maxTokens = 1000,
             memoryStrategy = ChatMemoryStrategy.SlidingWindow(10)
@@ -50,26 +52,25 @@ class ChatStrategyDelegateTest {
             agent = agent,
             repository = localRepo,
             onAgentUpdated = { updated ->
-                runTest { localRepo.saveAgent(updated) }
+                localRepo.savedAgents.add(updated)
             }
         )
         
         advanceUntilIdle()
 
-        // В DefaultStrategyDelegate.onMessageReceived обновление происходит только каждые 5 сообщений
-        // Для теста просто проверим инициализацию или вызовем forceUpdate
         delegate.forceUpdate(
             scope = this,
             agent = agent,
             repository = localRepo,
             onAgentUpdated = { updated ->
-                runTest { localRepo.saveAgent(updated) }
+                localRepo.savedAgents.add(updated)
             }
         )
         advanceUntilIdle()
 
         assertEquals(1, localRepo.savedAgents.size)
-        assertEquals("Test", localRepo.savedAgents[0].name)
+        val lastAgent = localRepo.savedAgents.last()
+        assertEquals("Updated Task", lastAgent.workingMemory.currentTask)
     }
 
     private class FakeLocalChatRepository : LocalChatRepository {

@@ -19,8 +19,8 @@ class SummarizeChatUseCaseTest {
         override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = TODO()
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String) = null
-        override suspend fun getProfile(agentId: String) = null
-        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun getProfile(agentId: String): UserProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         override suspend fun getInvariants(agentId: String, stage: AgentStage) = emptyList<Invariant>()
         override suspend fun saveInvariant(invariant: Invariant) {}
         override fun observeAgentState(agentId: String) = TODO()

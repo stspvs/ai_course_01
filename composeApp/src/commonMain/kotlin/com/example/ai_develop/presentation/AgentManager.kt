@@ -10,7 +10,7 @@ class AgentManager {
         AgentTemplate(
             name = "Переводчик",
             description = "Профессиональный переводчик, сохраняющий контекст и стиль.",
-            systemPrompt = "Ты — опытный переводчик. Твоя задача — максимально точно переводить текст, сохраняя оригинальный смысл, стиль и нюансы языка. Если в тексте есть идиомы, предлагай наиболее подходящие эквиваленты.",
+            systemPrompt = "Ты — опытный переводчик. Твоя задача — максимально точно переводить текст, сохраняя оригинальный смысл, стиль и нюансы языка. Если в тексте есть идиомы, предлагай наиболее подходящие эквивалинты.",
             temperature = 0.3
         ),
         AgentTemplate(
@@ -48,7 +48,8 @@ class AgentManager {
             stopWord = "",
             maxTokens = 2000,
             messages = emptyList(),
-            memoryStrategy = ChatMemoryStrategy.SlidingWindow(10)
+            memoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
+            userProfile = UserProfile()
         )
     }
 

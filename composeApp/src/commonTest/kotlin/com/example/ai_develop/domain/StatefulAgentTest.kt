@@ -25,13 +25,13 @@ class StatefulAgentTest {
 
         override suspend fun saveAgentState(state: AgentState) { savedState = state }
         override suspend fun getAgentState(agentId: String) = AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
-        override suspend fun getProfile(agentId: String) = AgentProfile(name = "Test", style = "TestStyle", globalInstructions = "Global instructions")
+        override suspend fun getProfile(agentId: String) = UserProfile(preferences = "pref", constraints = "cons")
         override suspend fun getInvariants(agentId: String, stage: AgentStage) = listOf(Invariant("1", "Test Rule", stage))
         override suspend fun saveInvariant(invariant: Invariant) {}
         override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
         override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
-        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         
         override suspend fun analyzeTask(
             messages: List<ChatMessage>,

@@ -12,8 +12,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-// Имитируем контекст для Android тестов если нужно, но в KMP Room 2.7.0+ 
-// для Unit тестов контекст часто не нужен при использовании билдера без параметров или с factory
 class DatabaseChatRepositoryTest {
     private lateinit var db: AppDatabase
     private lateinit var repository: DatabaseChatRepository
@@ -39,7 +37,7 @@ class DatabaseChatRepositoryTest {
             name = "Test Agent",
             systemPrompt = "You are a tester",
             temperature = 0.7,
-            provider = LLMProvider.DeepSeek(),
+            provider = LLMProvider.Yandex(),
             stopWord = "done",
             maxTokens = 1000,
             memoryStrategy = ChatMemoryStrategy.SlidingWindow(5)
@@ -75,14 +73,9 @@ class DatabaseChatRepositoryTest {
                 windowSize = 15,
                 facts = ChatFacts(listOf("fact1", "fact2"))
             ),
-            agentProfile = AgentProfile(
-                name = "Profile Name",
-                about = "About info",
-                style = "Professional",
-                globalInstructions = "Always be polite",
-                constraints = listOf("No slang", "No emojis"),
-                preferences = mapOf("key" to "value"),
-                globalFacts = listOf("Global fact 1"),
+            userProfile = UserProfile(
+                preferences = "Style: Professional",
+                constraints = "No slang, No emojis",
                 memoryModelProvider = LLMProvider.OpenRouter("google/gemini-pro")
             ),
             workingMemory = WorkingMemory(
@@ -99,18 +92,18 @@ class DatabaseChatRepositoryTest {
 
         val initialLoad = repository.getAgents().first().find { it.id == complexAgent.id }
         assertNotNull(initialLoad)
-        assertEquals(complexAgent.agentProfile, initialLoad.agentProfile)
+        assertEquals(complexAgent.userProfile, initialLoad.userProfile)
         assertEquals(complexAgent.workingMemory, initialLoad.workingMemory)
         assertEquals(complexAgent.memoryStrategy, initialLoad.memoryStrategy)
 
         val updatedAgent = complexAgent.copy(
             name = "Updated Advanced Agent",
             temperature = 0.9,
-            provider = LLMProvider.DeepSeek("deepseek-reasoner"),
+            provider = LLMProvider.Yandex("new-model"),
             memoryStrategy = ChatMemoryStrategy.Summarization(windowSize = 25),
-            agentProfile = complexAgent.agentProfile?.copy(
-                style = "Casual",
-                constraints = listOf("Use emojis")
+            userProfile = complexAgent.userProfile?.copy(
+                preferences = "Style: Casual",
+                constraints = "Use emojis"
             ),
             workingMemory = complexAgent.workingMemory.copy(
                 progress = "100%",
@@ -124,14 +117,13 @@ class DatabaseChatRepositoryTest {
         assertNotNull(finalLoad)
         assertEquals("Updated Advanced Agent", finalLoad.name)
         assertEquals(0.9, finalLoad.temperature)
-        assertEquals(LLMProvider.DeepSeek("deepseek-reasoner"), finalLoad.provider)
+        assertEquals(LLMProvider.Yandex("new-model"), finalLoad.provider)
         assertEquals(ChatMemoryStrategy.Summarization(windowSize = 25), finalLoad.memoryStrategy)
-        assertEquals("Casual", finalLoad.agentProfile?.style)
-        assertEquals(listOf("Use emojis"), finalLoad.agentProfile?.constraints)
+        assertEquals("Style: Casual", finalLoad.userProfile?.preferences)
+        assertEquals("Use emojis", finalLoad.userProfile?.constraints)
         assertEquals("100%", finalLoad.workingMemory.progress)
         assertTrue(finalLoad.workingMemory.isAutoUpdateEnabled)
         
-        assertEquals(complexAgent.agentProfile?.about, finalLoad.agentProfile?.about)
         assertEquals(complexAgent.workingMemory.currentTask, finalLoad.workingMemory.currentTask)
     }
 }

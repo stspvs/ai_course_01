@@ -22,13 +22,14 @@ class KtorChatRepositoryMemoryTest {
             respond(
                 content = """
                     {
-                      "result": {
-                        "alternatives": [{
+                      "choices": [
+                        {
                           "message": {
-                            "text": "```json\n[\"Факт 1\", \"Факт 2\"]\n```"
+                            "role": "assistant",
+                            "content": "```json\n[\"Факт 1\", \"Факт 2\"]\n```"
                           }
-                        }]
-                      }
+                        }
+                      ]
                     }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
@@ -36,14 +37,12 @@ class KtorChatRepositoryMemoryTest {
             )
         }
 
-        val client = HttpClient(mockEngine) {
-            install(ContentNegotiation) { json(json) }
-        }
+        val client = HttpClient(mockEngine)
 
-        val repository = KtorChatRepository(client, "", "", "", "")
-        val result = repository.extractFacts(emptyList(), ChatFacts(), LLMProvider.Yandex())
+        val repository = KtorChatRepository(client, "key", "key", "id", "key")
+        val result = repository.extractFacts(emptyList(), ChatFacts(), LLMProvider.DeepSeek())
 
-        assertTrue(result.isSuccess)
+        assertTrue(result.isSuccess, "Result should be success: ${result.exceptionOrNull()?.message}")
         assertEquals(listOf("Факт 1", "Факт 2"), result.getOrNull()?.facts)
     }
 
@@ -53,13 +52,14 @@ class KtorChatRepositoryMemoryTest {
             respond(
                 content = """
                     {
-                      "result": {
-                        "alternatives": [{
+                      "choices": [
+                        {
                           "message": {
-                            "text": "{\"currentTask\": \"Тестовая задача\", \"progress\": \"50%\"}"
+                            "role": "assistant",
+                            "content": "{\"currentTask\": \"Тестовая задача\", \"progress\": \"50%\"}"
                           }
-                        }]
-                      }
+                        }
+                      ]
                     }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
@@ -67,14 +67,12 @@ class KtorChatRepositoryMemoryTest {
             )
         }
 
-        val client = HttpClient(mockEngine) {
-            install(ContentNegotiation) { json(json) }
-        }
+        val client = HttpClient(mockEngine)
 
-        val repository = KtorChatRepository(client, "", "", "", "")
-        val result = repository.analyzeWorkingMemory(emptyList(), "instruction", LLMProvider.Yandex())
+        val repository = KtorChatRepository(client, "key", "key", "id", "key")
+        val result = repository.analyzeWorkingMemory(emptyList(), "instruction", LLMProvider.DeepSeek())
 
-        assertTrue(result.isSuccess)
+        assertTrue(result.isSuccess, "Result should be success: ${result.exceptionOrNull()?.message}")
         assertEquals("Тестовая задача", result.getOrNull()?.currentTask)
         assertEquals("50%", result.getOrNull()?.progress)
     }

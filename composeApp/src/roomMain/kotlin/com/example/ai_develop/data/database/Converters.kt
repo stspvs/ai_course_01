@@ -39,10 +39,10 @@ class Converters {
     fun toSummaryDepth(value: String): SummaryDepth = SummaryDepth.valueOf(value)
 
     @TypeConverter
-    fun fromAgentProfile(profile: AgentProfile?): String? = profile?.let { json.encodeToString(it) }
+    fun fromUserProfile(profile: UserProfile?): String? = profile?.let { json.encodeToString(it) }
 
     @TypeConverter
-    fun toAgentProfile(value: String?): AgentProfile? = value?.let { json.decodeFromString(it) }
+    fun toUserProfile(value: String?): UserProfile? = value?.let { json.decodeFromString(it) }
 
     @TypeConverter
     fun fromWorkingMemory(wm: WorkingMemory): String = json.encodeToString(wm)

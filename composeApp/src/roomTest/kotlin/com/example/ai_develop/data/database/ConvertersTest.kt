@@ -3,6 +3,7 @@ package com.example.ai_develop.data.database
 import com.example.ai_develop.domain.ChatFacts
 import com.example.ai_develop.domain.ChatMemoryStrategy
 import com.example.ai_develop.domain.LLMProvider
+import com.example.ai_develop.domain.UserProfile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -31,5 +32,13 @@ class ConvertersTest {
         val string = converters.fromMemoryStrategy(strategy)
         val result = converters.toMemoryStrategy(string)
         assertEquals(strategy, result)
+    }
+
+    @Test
+    fun testUserProfileConversion() {
+        val profile = UserProfile(preferences = "pref", constraints = "cons")
+        val string = converters.fromUserProfile(profile)
+        val result = converters.toUserProfile(string)
+        assertEquals(profile, result)
     }
 }

@@ -83,7 +83,7 @@ class KtorChatRepositoryTest {
     fun testExtractFactsSuccess() = runTest {
         val mockEngine = MockEngine { request ->
             respond(
-                content = ByteReadChannel("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{\\\"name\\\": \\\"Alice\\\"}\"}}]}"),
+                content = ByteReadChannel("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"[\\\"Fact 1\\\"]\"}}]}"),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, "application/json")
             )
@@ -104,6 +104,6 @@ class KtorChatRepositoryTest {
         )
 
         assertTrue(result.isSuccess, "Result should be success. Error: ${result.exceptionOrNull()?.message}")
-        // В новой модели ChatFacts.facts — это List<String>, а не Map
+        assertEquals(listOf("Fact 1"), result.getOrNull()?.facts)
     }
 }

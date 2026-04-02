@@ -10,9 +10,9 @@ CREATE TABLE AgentStateEntity (
 
 CREATE TABLE ProfileEntity (
     agentId TEXT NOT NULL PRIMARY KEY,
-    style TEXT NOT NULL,
-    globalInstructions TEXT NOT NULL,
-    constraintsJson TEXT NOT NULL -- JSON List<String>
+    preferences TEXT NOT NULL,
+    constraints TEXT NOT NULL,
+    memoryModelProviderJson TEXT -- JSON LLMProvider
 );
 
 CREATE TABLE InvariantEntity (
@@ -44,7 +44,7 @@ getAgentState:
 SELECT * FROM AgentStateEntity WHERE agentId = ?;
 
 saveProfile:
-INSERT OR REPLACE INTO ProfileEntity(agentId, style, globalInstructions, constraintsJson)
+INSERT OR REPLACE INTO ProfileEntity(agentId, preferences, constraints, memoryModelProviderJson)
 VALUES (?, ?, ?, ?);
 
 getProfile:

@@ -52,22 +52,24 @@ class SqlDelightChatRepository(
             }
     }
 
-    override suspend fun getProfile(agentId: String): AgentProfile? {
+    override suspend fun getProfile(agentId: String): UserProfile? {
         return db.agentDatabaseQueries.getProfile(agentId).executeAsOneOrNull()?.let {
-            AgentProfile(
-                style = it.style,
-                globalInstructions = it.globalInstructions,
-                constraints = json.decodeFromString<List<String>>(it.constraintsJson)
+            UserProfile(
+                preferences = it.preferences,
+                constraints = it.constraints,
+                memoryModelProvider = it.memoryModelProviderJson?.let { jsonStr ->
+                    json.decodeFromString<LLMProvider>(jsonStr)
+                }
             )
         }
     }
 
-    override suspend fun saveProfile(agentId: String, profile: AgentProfile) {
+    override suspend fun saveProfile(agentId: String, profile: UserProfile) {
         db.agentDatabaseQueries.saveProfile(
             agentId = agentId,
-            style = profile.style,
-            globalInstructions = profile.globalInstructions,
-            constraintsJson = json.encodeToString(profile.constraints)
+            preferences = profile.preferences,
+            constraints = profile.constraints,
+            memoryModelProviderJson = profile.memoryModelProvider?.let { json.encodeToString(it) }
         )
     }
 

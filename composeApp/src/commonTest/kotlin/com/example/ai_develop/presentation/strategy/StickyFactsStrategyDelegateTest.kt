@@ -29,10 +29,11 @@ class StickyFactsStrategyDelegateTest {
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts(facts = listOf("Fact 1: Value 1")))
         override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider): Result<String> = Result.success("summary")
         override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
+        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<WorkingMemoryAnalysis> = Result.success(WorkingMemoryAnalysis(currentTask = "New", progress = "Done"))
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
-        override suspend fun getProfile(agentId: String): AgentProfile? = null
-        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun getProfile(agentId: String): UserProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
         override suspend fun saveInvariant(invariant: Invariant) {}
         override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
@@ -50,7 +51,8 @@ class StickyFactsStrategyDelegateTest {
     fun `should extract facts when interval reached`() = runTest {
         val chatRepo = MockChatRepository()
         val extractUseCase = MockExtractFactsUseCase(chatRepo)
-        val delegate = StickyFactsStrategyDelegate(extractUseCase)
+        val updateWorkingMemoryUseCase = UpdateWorkingMemoryUseCase(chatRepo)
+        val delegate = StickyFactsStrategyDelegate(extractUseCase, updateWorkingMemoryUseCase)
         val repo = MockLocalRepository()
         
         val strategy = ChatMemoryStrategy.StickyFacts(windowSize = 10, updateInterval = 2)
@@ -59,7 +61,7 @@ class StickyFactsStrategyDelegateTest {
             name = "Test",
             systemPrompt = "",
             temperature = 0.7,
-            provider = LLMProvider.DeepSeek(),
+            provider = LLMProvider.Yandex(),
             stopWord = "",
             maxTokens = 100,
             memoryStrategy = strategy,

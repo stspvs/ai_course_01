@@ -6,7 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.Agent
-import com.example.ai_develop.domain.AgentProfile
+import com.example.ai_develop.domain.UserProfile
 import com.example.ai_develop.domain.AgentTemplate
 import com.example.ai_develop.domain.ChatBranch
 import com.example.ai_develop.domain.ChatMemoryStrategy
@@ -224,9 +224,9 @@ class LLMViewModel(
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
 
-    fun updateAgentWithProfile(id: String, profile: AgentProfile) {
+    fun updateUserProfile(id: String, profile: UserProfile) {
         val agent = _state.value.agents.find { it.id == id } ?: return
-        val updatedAgent = agent.copy(agentProfile = profile)
+        val updatedAgent = agent.copy(userProfile = profile)
         _state.update { currentState ->
             currentState.copy(agents = currentState.agents.map { if (it.id == id) updatedAgent else it })
         }

@@ -63,20 +63,11 @@ class ChatMemoryManager {
     fun wrapSystemPrompt(agent: Agent): String {
         val promptBuilder = StringBuilder(agent.systemPrompt)
         
-        // 1. Agent Profile (Long-term Memory / Persona)
-        agent.agentProfile?.let { profile ->
-            promptBuilder.append("\n\n=== AGENT PROFILE (Context) ===\n")
-            if (profile.name.isNotEmpty()) promptBuilder.append("Agent Secondary Name/Role: ${profile.name}\n")
-            if (profile.about.isNotEmpty()) promptBuilder.append("Background/About: ${profile.about}\n")
-            
-            if (profile.preferences.isNotEmpty()) {
-                promptBuilder.append("Operational Preferences:\n")
-                profile.preferences.forEach { (key, value) -> promptBuilder.append("- $key: $value\n") }
-            }
-            if (profile.globalFacts.isNotEmpty()) {
-                promptBuilder.append("Known Global Facts:\n")
-                profile.globalFacts.forEach { promptBuilder.append("- $it\n") }
-            }
+        // 1. User Profile (Personalization)
+        agent.userProfile?.let { profile ->
+            promptBuilder.append("\n\n=== USER PROFILE (Personalization) ===\n")
+            if (profile.preferences.isNotEmpty()) promptBuilder.append("User Preferences (style, format, etc.): ${profile.preferences}\n")
+            if (profile.constraints.isNotEmpty()) promptBuilder.append("User Constraints (what NOT to use): ${profile.constraints}\n")
         }
 
         // 2. Working Memory

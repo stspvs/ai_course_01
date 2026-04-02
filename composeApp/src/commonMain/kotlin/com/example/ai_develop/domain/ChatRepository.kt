@@ -43,8 +43,8 @@ interface ChatRepository {
     suspend fun saveAgentState(state: AgentState)
     suspend fun getAgentState(agentId: String): AgentState?
     
-    suspend fun getProfile(agentId: String): AgentProfile?
-    suspend fun saveProfile(agentId: String, profile: AgentProfile)
+    suspend fun getProfile(agentId: String): UserProfile?
+    suspend fun saveProfile(agentId: String, profile: UserProfile)
     
     suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant>
     suspend fun saveInvariant(invariant: Invariant)

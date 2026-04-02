@@ -302,29 +302,31 @@ private fun MemorySidePanel(
 
             // 3. Долговременная память (Profile & Knowledge)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("👉 ДОЛГОВРЕМЕННАЯ ПАМЯТЬ", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
+                Text("👉 ПЕРСОНАЛИЗАЦИЯ (ПРОФИЛЬ)", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
                 Surface(
                     color = Color(0xFFE3F2FD),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val profile = agent.agentProfile
+                        val profile = agent.userProfile
                         if (profile != null) {
-                            Text("Профиль: ${profile.name}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                            if (profile.about.isNotEmpty()) {
-                                Text(profile.about, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                            if (profile.preferences.isNotEmpty()) {
+                                Text("Предпочтения:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text(profile.preferences, style = MaterialTheme.typography.bodySmall)
                             }
                             
-                            if (profile.globalFacts.isNotEmpty()) {
-                                HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
-                                Text("Глобальные знания (Факты):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                profile.globalFacts.forEach { fact ->
-                                    Text("📌 $fact", style = MaterialTheme.typography.bodySmall)
-                                }
+                            if (profile.constraints.isNotEmpty()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text("Ограничения:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F))
+                                Text(profile.constraints, style = MaterialTheme.typography.bodySmall)
+                            }
+
+                            if (profile.preferences.isEmpty() && profile.constraints.isEmpty()) {
+                                Text("Предпочтения не заданы.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                             }
                         } else {
-                            Text("Профиль не настроен.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Text("Профиль пользователя не настроен.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
                     }
                 }

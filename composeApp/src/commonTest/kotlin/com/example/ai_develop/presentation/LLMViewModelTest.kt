@@ -138,7 +138,7 @@ class LLMViewModelTest {
     }
 
     @Test
-    fun testUpdateAgentWithProfileApplied() = runTest {
+    fun testUpdateUserProfileApplied() = runTest {
         val viewModel = LLMViewModel(repository, interactor)
         advanceUntilIdle()
         
@@ -147,18 +147,16 @@ class LLMViewModelTest {
         val agentId = viewModel.state.value.agents.first { it.id != GENERAL_CHAT_ID }.id
         viewModel.selectAgent(agentId)
 
-        val profile = AgentProfile(
-            name = "Profile Name",
-            about = "About",
-            style = "Style",
-            constraints = listOf("Constraint 1")
+        val profile = UserProfile(
+            preferences = "Style: formal",
+            constraints = "No emojis"
         )
 
-        viewModel.updateAgentWithProfile(agentId, profile)
+        viewModel.updateUserProfile(agentId, profile)
         advanceUntilIdle()
 
-        assertEquals(profile, viewModel.state.value.selectedAgent?.agentProfile)
-        assertEquals(profile, repository.savedAgents[agentId]?.agentProfile)
+        assertEquals(profile, viewModel.state.value.selectedAgent?.userProfile)
+        assertEquals(profile, repository.savedAgents[agentId]?.userProfile)
     }
 
     @Test
@@ -188,8 +186,8 @@ private class FakeChatRepo : ChatRepository {
     override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(WorkingMemoryAnalysis())
     override suspend fun saveAgentState(state: AgentState) {}
     override suspend fun getAgentState(agentId: String) = null
-    override suspend fun getProfile(agentId: String) = null
-    override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+    override suspend fun getProfile(agentId: String): UserProfile? = null
+    override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
     override suspend fun getInvariants(agentId: String, stage: AgentStage) = emptyList<Invariant>()
     override suspend fun saveInvariant(invariant: Invariant) {}
     override fun observeAgentState(agentId: String) = flowOf(null)

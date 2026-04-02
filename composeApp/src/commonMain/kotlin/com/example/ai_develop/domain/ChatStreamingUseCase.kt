@@ -28,7 +28,7 @@ open class ChatStreamingUseCase(
         provider: LLMProvider
     ): Flow<Result<String>> {
         val state = repository.getAgentState(agentId) ?: AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
-        val profile = repository.getProfile(agentId) ?: AgentProfile()
+        val profile = repository.getProfile(agentId) ?: UserProfile()
         val invariants = repository.getInvariants(agentId, state.currentStage)
         
         val systemPrompt = buildPrompt(state, profile, invariants)
@@ -52,10 +52,10 @@ open class ChatStreamingUseCase(
         }
     }
 
-    private fun buildPrompt(state: AgentState, profile: AgentProfile, invariants: List<Invariant>): String {
+    private fun buildPrompt(state: AgentState, profile: UserProfile, invariants: List<Invariant>): String {
         return """
-            SYSTEM: ${profile.globalInstructions}
-            STYLE: ${profile.style}
+            USER PREFERENCES: ${profile.preferences}
+            USER CONSTRAINTS: ${profile.constraints}
             CURRENT STAGE: ${state.currentStage}
             CURRENT PLAN: ${Json.encodeToString(AgentPlan.serializer(), state.plan)}
             

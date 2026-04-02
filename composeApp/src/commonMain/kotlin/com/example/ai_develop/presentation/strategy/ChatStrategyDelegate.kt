@@ -29,14 +29,26 @@ class DefaultChatStrategyDelegate(
         // Prepare context based on strategy
         val context = prepareContext(agent)
         
+        // Build personalization prompt from user profile
+        val personalizationPrompt = agent.userProfile?.let { profile ->
+            buildString {
+                if (profile.preferences.isNotBlank()) {
+                    append("\nUSER PREFERENCES:\n${profile.preferences}")
+                }
+                if (profile.constraints.isNotBlank()) {
+                    append("\nUSER CONSTRAINTS (DO NOT DO THIS):\n${profile.constraints}")
+                }
+            }
+        } ?: ""
+        
         return chatStreamingUseCase(
             messages = agent.messages.filter { it.branchId == branchId },
-            systemPrompt = agent.systemPrompt + context,
+            systemPrompt = agent.systemPrompt + personalizationPrompt + context,
             maxTokens = agent.maxTokens,
             temperature = agent.temperature,
             stopWord = agent.stopWord,
             isJsonMode = false,
-            provider = agent.agentProfile?.memoryModelProvider ?: agent.provider
+            provider = agent.userProfile?.memoryModelProvider ?: agent.provider
         )
     }
 

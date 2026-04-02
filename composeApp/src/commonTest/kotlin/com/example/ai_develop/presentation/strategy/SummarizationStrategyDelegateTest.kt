@@ -5,6 +5,7 @@ import com.example.ai_develop.domain.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -16,9 +17,11 @@ class SummarizationStrategyDelegateTest {
 
     @Test
     fun `test summarization is triggered after windowSize assistant messages`() = runTest {
-        val mockUseCase = MockSummarizeChatUseCase()
+        val chatRepo = FakeChatRepository()
+        val mockUseCase = MockSummarizeChatUseCase(chatRepo)
+        val wmUseCase = UpdateWorkingMemoryUseCase(chatRepo)
         val localRepo = FakeLocalChatRepository()
-        val delegate = SummarizationStrategyDelegate(mockUseCase)
+        val delegate = SummarizationStrategyDelegate(mockUseCase, wmUseCase)
         
         val strategy = ChatMemoryStrategy.Summarization(windowSize = 2)
         val agent = Agent(
@@ -26,7 +29,7 @@ class SummarizationStrategyDelegateTest {
             name = "Summarizer",
             systemPrompt = "system",
             temperature = 0.7,
-            provider = LLMProvider.DeepSeek(),
+            provider = LLMProvider.Yandex(),
             stopWord = "",
             maxTokens = 1000,
             memoryStrategy = strategy,
@@ -43,12 +46,15 @@ class SummarizationStrategyDelegateTest {
             scope = this,
             agent = agent,
             repository = localRepo,
-            onAgentUpdated = { updatedAgent = it }
+            onAgentUpdated = { 
+                updatedAgent = it
+                launch { localRepo.saveAgent(it) }
+            }
         )
         
         advanceUntilIdle()
 
-        assertTrue(mockUseCase.invoked)
+        assertTrue(mockUseCase.invoked, "SummarizeChatUseCase should be invoked")
         assertEquals("New Summary", (updatedAgent?.memoryStrategy as? ChatMemoryStrategy.Summarization)?.summary)
         // Verify it was saved to repository
         assertTrue(localRepo.savedAgents.any { (it.memoryStrategy as? ChatMemoryStrategy.Summarization)?.summary == "New Summary" })
@@ -56,9 +62,11 @@ class SummarizationStrategyDelegateTest {
 
     @Test
     fun `test summarization is NOT triggered if windowSize not reached`() = runTest {
-        val mockUseCase = MockSummarizeChatUseCase()
+        val chatRepo = FakeChatRepository()
+        val mockUseCase = MockSummarizeChatUseCase(chatRepo)
+        val wmUseCase = UpdateWorkingMemoryUseCase(chatRepo)
         val localRepo = FakeLocalChatRepository()
-        val delegate = SummarizationStrategyDelegate(mockUseCase)
+        val delegate = SummarizationStrategyDelegate(mockUseCase, wmUseCase)
         
         val strategy = ChatMemoryStrategy.Summarization(windowSize = 5)
         val agent = Agent(
@@ -66,7 +74,7 @@ class SummarizationStrategyDelegateTest {
             name = "Summarizer",
             systemPrompt = "system",
             temperature = 0.7,
-            provider = LLMProvider.DeepSeek(),
+            provider = LLMProvider.Yandex(),
             stopWord = "",
             maxTokens = 1000,
             memoryStrategy = strategy,
@@ -85,10 +93,10 @@ class SummarizationStrategyDelegateTest {
         
         advanceUntilIdle()
 
-        assertTrue(!mockUseCase.invoked)
+        assertTrue(!mockUseCase.invoked, "SummarizeChatUseCase should NOT be invoked")
     }
 
-    private class MockSummarizeChatUseCase : SummarizeChatUseCase(FakeChatRepository()) {
+    private class MockSummarizeChatUseCase(repo: ChatRepository) : SummarizeChatUseCase(repo) {
         var invoked = false
         override suspend fun invoke(
             messages: List<ChatMessage>,
@@ -131,10 +139,16 @@ class SummarizationStrategyDelegateTest {
             provider: LLMProvider
         ): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
 
+        override suspend fun analyzeWorkingMemory(
+            messages: List<ChatMessage>,
+            instruction: String,
+            provider: LLMProvider
+        ): Result<WorkingMemoryAnalysis> = Result.success(WorkingMemoryAnalysis(currentTask = "Updated Task", progress = "80%"))
+
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
-        override suspend fun getProfile(agentId: String): AgentProfile? = null
-        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        override suspend fun getProfile(agentId: String): UserProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
         override suspend fun saveInvariant(invariant: Invariant) {}
         override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)

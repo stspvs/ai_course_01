@@ -20,7 +20,8 @@ class MappersTest {
             totalTokensUsed = 10,
             memoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
             branches = emptyList(),
-            currentBranchId = null
+            currentBranchId = null,
+            userProfile = UserProfile(preferences = "pref", constraints = "cons")
         )
         
         val messages = listOf(ChatMessage(message = "Hello", source = SourceType.USER))
@@ -30,6 +31,7 @@ class MappersTest {
         assertEquals(entity.name, domain.name)
         assertEquals(messages, domain.messages)
         assertEquals(entity.memoryStrategy, domain.memoryStrategy)
+        assertEquals(entity.userProfile, domain.userProfile)
     }
 
     @Test

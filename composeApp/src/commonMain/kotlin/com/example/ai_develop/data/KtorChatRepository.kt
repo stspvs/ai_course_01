@@ -122,6 +122,9 @@ class KtorChatRepository(
                     val jsonString = text.substring(start, end + 1)
                     val newFactsList = json.decodeFromString<List<String>>(jsonString)
                     Result.success(ChatFacts(newFactsList))
+                } else if (text.contains("{") && text.contains("}")) {
+                    // Fail-safe for object response
+                    Result.success(currentFacts)
                 } else {
                     Result.failure(Exception("No JSON array found in response: $text"))
                 }
@@ -307,8 +310,8 @@ class KtorChatRepository(
 
     override suspend fun saveAgentState(state: AgentState) {}
     override suspend fun getAgentState(agentId: String): AgentState? = null
-    override suspend fun getProfile(agentId: String): AgentProfile? = null
-    override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+    override suspend fun getProfile(agentId: String): UserProfile? = null
+    override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
     override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
     override suspend fun saveInvariant(invariant: Invariant) {}
     override fun observeAgentState(agentId: String): Flow<AgentState?> = flow { emit(null) }

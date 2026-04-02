@@ -32,7 +32,7 @@ internal fun AgentsContent(
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
-    onUpdateProfile: (String, AgentProfile) -> Unit,
+    onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -72,7 +72,7 @@ private fun DesktopAgentsContent(
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
-    onUpdateProfile: (String, AgentProfile) -> Unit,
+    onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -113,7 +113,7 @@ private fun MobileAgentsContent(
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
-    onUpdateProfile: (String, AgentProfile) -> Unit,
+    onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
     onSelectAgent: (String?) -> Unit
@@ -238,7 +238,7 @@ private fun AgentDetails(
     agent: Agent,
     templates: List<AgentTemplate>,
     onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
-    onUpdateProfile: (AgentProfile) -> Unit,
+    onUpdateProfile: (UserProfile) -> Unit,
     onDeleteAgent: () -> Unit,
     onDuplicateAgent: () -> Unit
 ) {
@@ -250,7 +250,7 @@ private fun AgentDetails(
                 Text("Настройки", modifier = Modifier.padding(12.dp))
             }
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                Text("Память & Личность", modifier = Modifier.padding(12.dp))
+                Text("Память & Персонализация", modifier = Modifier.padding(12.dp))
             }
         }
         
@@ -263,7 +263,7 @@ private fun AgentDetails(
                     onDeleteAgent = onDeleteAgent,
                     onDuplicateAgent = onDuplicateAgent
                 )
-                1 -> AgentMemoryTab(
+                1 -> UserMemoryTab(
                     agent = agent,
                     onUpdateProfile = onUpdateProfile
                 )
@@ -418,14 +418,14 @@ private fun AgentSettingsTab(
 }
 
 @Composable
-private fun AgentMemoryTab(
+private fun UserMemoryTab(
     agent: Agent,
-    onUpdateProfile: (AgentProfile) -> Unit
+    onUpdateProfile: (UserProfile) -> Unit
 ) {
-    var profile by remember(agent.id) { mutableStateOf(agent.agentProfile ?: AgentProfile()) }
+    var profile by remember(agent.id) { mutableStateOf(agent.userProfile ?: UserProfile()) }
 
     LaunchedEffect(profile) {
-        if (profile != agent.agentProfile) {
+        if (profile != agent.userProfile) {
             delay(500)
             onUpdateProfile(profile)
         }
@@ -435,21 +435,23 @@ private fun AgentMemoryTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Профиль агента", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Text("Профиль пользователя", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         
         OutlinedTextField(
-            value = profile.name,
-            onValueChange = { profile = profile.copy(name = it) },
-            label = { Text("Доп. имя / Роль") },
-            modifier = Modifier.fillMaxWidth(),
+            value = profile.preferences,
+            onValueChange = { profile = profile.copy(preferences = it) },
+            label = { Text("Предпочтения (стиль, формат и пр.)") },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+            placeholder = { Text("Например: отвечай кратко, используй Markdown, стиль официально-деловой") },
             shape = RoundedCornerShape(12.dp)
         )
 
         OutlinedTextField(
-            value = profile.about,
-            onValueChange = { profile = profile.copy(about = it) },
-            label = { Text("Описание личности") },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp),
+            value = profile.constraints,
+            onValueChange = { profile = profile.copy(constraints = it) },
+            label = { Text("Ограничения (что не использовать)") },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+            placeholder = { Text("Например: не используй эмодзи, не упоминай конкурентов") },
             shape = RoundedCornerShape(12.dp)
         )
 
