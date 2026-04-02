@@ -129,6 +129,9 @@ class LLMViewModel(
                         state.agents.map { if (it.id == agentId) update(it) else it }
                     state.copy(agents = updatedAgents)
                 }
+            },
+            onLoadingStatus = { isLoading ->
+                _state.update { it.copy(isLoading = isLoading) }
             }
         )
     }

@@ -29,7 +29,6 @@ class ChatInteractor(
         val agentId = agent.id
         val branchKey = agent.currentBranchId ?: "main_branch"
         
-        // Получаем историю ДО добавления нового сообщения, чтобы найти parentId
         val historyBeforeNewMessage = memoryManager.getBranchHistory(
             messages = agent.messages,
             currentBranchId = agent.currentBranchId,
@@ -45,20 +44,16 @@ class ChatInteractor(
             branchId = branchKey
         )
 
-        // Сразу обновляем UI и сохраняем в БД (сообщение + указатель ветки)
         updateLocalAndDb(agentId, userMessage, branchKey, onAgentUpdate, onLoadingStatus, scope)
 
         return scope.launch {
-            // Берем актуальный снимок данных
             val agentSnapshot = repository.getAgentWithMessages(agentId).firstOrNull() ?: agent
             
-            // Гарантируем, что для формирования истории LLM мы используем обновленные указатели
             val updatedBranches = agentSnapshot.branches.updatePointer(branchKey, userMessage.id)
             val updatedMessages = agentSnapshot.messages.toMutableList().apply {
                 if (none { it.id == userMessage.id }) add(userMessage)
             }
 
-            // Формируем историю, которая ОБЯЗАТЕЛЬНО включает userMessage
             val history = memoryManager.processMessages(
                 messages = updatedMessages,
                 strategy = agentSnapshot.memoryStrategy,
@@ -91,17 +86,24 @@ class ChatInteractor(
     fun forceUpdateMemory(
         scope: CoroutineScope,
         agent: Agent,
-        onAgentUpdate: (String, (Agent) -> Agent) -> Unit
+        onAgentUpdate: (String, (Agent) -> Agent) -> Unit,
+        onLoadingStatus: (Boolean) -> Unit
     ) {
+        onLoadingStatus(true)
         scope.launch {
-            strategyFactory.getDelegate(agent.memoryStrategy).forceUpdate(
-                scope = scope,
-                agent = agent,
-                repository = repository,
-                onAgentUpdated = { updated -> 
-                    onAgentUpdate(agent.id) { updated }
-                }
-            )
+            try {
+                strategyFactory.getDelegate(agent.memoryStrategy).forceUpdate(
+                    scope = scope,
+                    agent = agent,
+                    repository = repository,
+                    onAgentUpdated = { updated -> 
+                        onAgentUpdate(agent.id) { updated }
+                        scope.launch { repository.saveAgentMetadata(updated) }
+                    }
+                )
+            } finally {
+                onLoadingStatus(false)
+            }
         }
     }
 
@@ -127,7 +129,6 @@ class ChatInteractor(
 
         scope.launch {
             repository.saveMessage(agentId, message)
-            // Важно сохранять метаданные (ветки), иначе после рестарта или обновления из БД указатель пропадет
             agentToSave?.let { repository.saveAgentMetadata(it) }
         }
     }

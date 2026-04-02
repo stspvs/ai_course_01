@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.*
+import kotlin.math.min
 
 @Composable
 internal fun ChatContent(
@@ -49,6 +50,7 @@ internal fun ChatContent(
     onForceUpdateMemory: () -> Unit = {}
 ) {
     val activeAgent = state.agents.find { it.id == state.selectedAgentId }
+    val messages = state.currentMessages
     var menuExpanded by remember { mutableStateOf(false) }
     var showFacts by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
@@ -84,7 +86,13 @@ internal fun ChatContent(
                 isSummarizationMode = isSummarizationMode,
                 isStickyFactsMode = isStickyFactsMode,
                 isTaskOrientedMode = isTaskOrientedMode,
-                hasBranches = activeAgent?.branches?.isNotEmpty() == true
+                hasBranches = activeAgent?.branches?.isNotEmpty() == true,
+                isSlidingMode = strategy is ChatMemoryStrategy.SlidingWindow || strategy == null,
+                slidingCount = min(messages.size, strategy?.windowSize ?: 10),
+                summarySnippet = (strategy as? ChatMemoryStrategy.Summarization)?.summary,
+                factsCount = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts?.size ?: 0,
+                branchName = activeAgent?.branches?.find { it.id == activeAgent.currentBranchId }?.name ?: "Основная",
+                branchMessagesCount = messages.size
             )
 
             AnimatedVisibility(
@@ -130,7 +138,6 @@ internal fun ChatContent(
                 )
             }
 
-            val messages = state.currentMessages
             val listState = rememberLazyListState()
             
             LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length) {
@@ -161,51 +168,51 @@ internal fun ChatContent(
             )
         }
 
-        // Боковая панель Состояния Памяти (Рабочая + Долгая)
+        // Боковая панель Состояния Памяти (Краткосрочная + Рабочая + Долгая)
         AnimatedVisibility(
             visible = showMemoryPanel && activeAgent != null,
             enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
             exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut()
         ) {
-            val wm = activeAgent?.workingMemory
-            MemorySidePanel(
-                task = wm?.currentTask,
-                progress = wm?.progress, 
-                facts = wm?.extractedFacts?.facts ?: emptyList(),
-                onClose = { showMemoryPanel = false },
-                onRefresh = onForceUpdateMemory
-            )
+            activeAgent?.let { agent ->
+                MemorySidePanel(
+                    agent = agent,
+                    currentMessagesCount = messages.size,
+                    onClose = { showMemoryPanel = false },
+                    onRefresh = onForceUpdateMemory
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun MemorySidePanel(
-    task: String?,
-    progress: String?,
-    facts: List<String>,
+    agent: Agent,
+    currentMessagesCount: Int,
     onClose: () -> Unit,
     onRefresh: () -> Unit
 ) {
     Surface(
-        modifier = Modifier.width(300.dp).fillMaxHeight(),
+        modifier = Modifier.width(320.dp).fillMaxHeight(),
         color = Color.White,
         tonalElevation = 8.dp,
         shadowElevation = 8.dp
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Состояние памяти", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
+                Text("Состояние памяти", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
                 Row {
                     IconButton(onClick = onRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Принудительное обновление", tint = Color(0xFF1565C0))
+                        Icon(Icons.Default.Refresh, contentDescription = "Обновить всё", tint = Color(0xFF1565C0))
                     }
                     IconButton(onClick = onClose) {
                         Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = Color.Gray)
@@ -213,36 +220,111 @@ private fun MemorySidePanel(
                 }
             }
 
-            if (!progress.isNullOrBlank()) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Прогресс выполнения: $progress", style = MaterialTheme.typography.labelMedium, color = Color(0xFF2E7D32))
+            // 1. Краткосрочная память (Current Strategy / Dialogue)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("👉 КРАТКОСРОЧНАЯ ПАМЯТЬ", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F))
+                Surface(
+                    color = Color(0xFFFFEBEE),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        when (val strategy = agent.memoryStrategy) {
+                            is ChatMemoryStrategy.SlidingWindow -> {
+                                val windowSize = strategy.windowSize
+                                val activeCount = min(currentMessagesCount, windowSize)
+                                Text("Тип: Sliding Window", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text("В памяти: $activeCount из $windowSize последних сообщ.", style = MaterialTheme.typography.bodyMedium)
+                                Text("Всего в истории: $currentMessagesCount", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            }
+                            is ChatMemoryStrategy.Summarization -> {
+                                Text("Тип: Summarization", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text("Суммаризация (сжатый контекст):", style = MaterialTheme.typography.labelSmall)
+                                Text(
+                                    text = strategy.summary ?: "Еще не выполнена. Нажмите 'Обновить'.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            is ChatMemoryStrategy.StickyFacts -> {
+                                Text("Тип: Sticky Facts", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text("Временные факты контекста:", style = MaterialTheme.typography.labelSmall)
+                                if (strategy.facts.facts.isEmpty()) {
+                                    Text("Пусто", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                } else {
+                                    strategy.facts.facts.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                                }
+                            }
+                            is ChatMemoryStrategy.Branching -> {
+                                val branchName = agent.branches.find { it.id == agent.currentBranchId }?.name ?: "Основная"
+                                Text("Тип: Branching", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text("Активная ветка: $branchName", style = MaterialTheme.typography.bodyMedium)
+                                Text("Сообщений в ветке: $currentMessagesCount", style = MaterialTheme.typography.bodySmall)
+                            }
+                            is ChatMemoryStrategy.TaskOriented -> {
+                                Text("Тип: Task Oriented", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text("Фокус на задаче: ${strategy.currentGoal ?: "Не задана"}", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                 }
             }
 
+            // 2. Рабочая память (Current Task)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Рабочая (короткая) память", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                Text("👉 РАБОЧАЯ ПАМЯТЬ", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                Surface(
+                    color = Color(0xFFE8F5E9),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Текущая задача:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = agent.workingMemory.currentTask ?: "Активная задача не определена",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        val progress = agent.workingMemory.progress
+                        if (!progress.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text("Прогресс:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            Text(text = progress, style = MaterialTheme.typography.bodySmall, color = Color(0xFF1B5E20))
+                        }
+                        
+                        val wmFacts = agent.workingMemory.extractedFacts.facts
+                        if (wmFacts.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("Извлеченные факты задачи:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            wmFacts.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
+                }
+            }
+
+            // 3. Долговременная память (Profile & Knowledge)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("👉 ДОЛГОВРЕМЕННАЯ ПАМЯТЬ", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
                 Surface(
                     color = Color(0xFFE3F2FD),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = task ?: "Активная задача не определена",
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Долгая память (ключевые факты)", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
-                if (facts.isEmpty()) {
-                    Text("Факты еще не извлечены", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
-                } else {
-                    facts.forEach { fact ->
-                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                            Text(fact, style = MaterialTheme.typography.bodySmall)
-                            HorizontalDivider(modifier = Modifier.padding(top = 4.dp), thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val profile = agent.agentProfile
+                        if (profile != null) {
+                            Text("Профиль: ${profile.name}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            if (profile.about.isNotEmpty()) {
+                                Text(profile.about, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                            }
+                            
+                            if (profile.globalFacts.isNotEmpty()) {
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
+                                Text("Глобальные знания (Факты):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                profile.globalFacts.forEach { fact ->
+                                    Text("📌 $fact", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        } else {
+                            Text("Профиль не настроен.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
                     }
                 }
@@ -473,7 +555,13 @@ private fun ChatTopBar(
     isSummarizationMode: Boolean,
     isStickyFactsMode: Boolean,
     isTaskOrientedMode: Boolean,
-    hasBranches: Boolean
+    hasBranches: Boolean,
+    isSlidingMode: Boolean = false,
+    slidingCount: Int = 0,
+    summarySnippet: String? = null,
+    factsCount: Int = 0,
+    branchName: String? = null,
+    branchMessagesCount: Int = 0
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -529,18 +617,40 @@ private fun ChatTopBar(
                 }
                 
                 if (isAgentSelected) {
-                    Row(horizontalArrangement = Arrangement.End) {
-                        // Кнопка памяти теперь доступна для всех агентов
+                    Row(horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onShowTask) {
                             Icon(
                                 Icons.Default.CheckCircle, 
                                 contentDescription = "Memory State", 
-                                tint = if (isTaskOrientedMode) Color(0xFF1565C0) else Color.Gray
+                                tint = Color(0xFF1565C0)
                             )
                         }
                         
                         when {
+                            isSlidingMode -> {
+                                Text(
+                                    text = "Слайдинг: $slidingCount сообщ.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
+                            }
                             isBranchingMode -> {
+                                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 8.dp)) {
+                                    Text(
+                                        text = branchName ?: "Основная",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF2E7D32),
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "$branchMessagesCount сообщ.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp,
+                                        color = Color.Gray
+                                    )
+                                }
                                 IconButton(onClick = onShowBranches) {
                                     BadgedBox(
                                         badge = { 
@@ -556,6 +666,15 @@ private fun ChatTopBar(
                                 }
                             }
                             isSummarizationMode -> {
+                                if (!summarySnippet.isNullOrBlank()) {
+                                    Text(
+                                        text = "Суммари: " + summarySnippet.take(15) + "...",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF0277BD),
+                                        modifier = Modifier.padding(end = 8.dp),
+                                        maxLines = 1
+                                    )
+                                }
                                 IconButton(onClick = onShowSummary) {
                                     BadgedBox(
                                         badge = { 
@@ -571,6 +690,14 @@ private fun ChatTopBar(
                                 }
                             }
                             isStickyFactsMode -> {
+                                if (factsCount > 0) {
+                                    Text(
+                                        text = "Факты: $factsCount",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFFF57F17),
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                }
                                 IconButton(onClick = onShowFacts) {
                                     BadgedBox(
                                         badge = { 
