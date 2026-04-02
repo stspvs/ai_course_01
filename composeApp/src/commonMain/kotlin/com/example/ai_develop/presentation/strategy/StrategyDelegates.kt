@@ -45,7 +45,12 @@ class DefaultStrategyDelegate(
     ) {
         // Обновляем и рабочую память (задачу), и факты (долгую память)
         val wmResult = updateWorkingMemoryUseCase.update(agent)
-        val factsResult = extractFactsUseCase(agent.messages, agent.workingMemory.extractedFacts, agent.provider, 20)
+        val factsResult = extractFactsUseCase(
+            messages = agent.messages, 
+            currentFacts = agent.workingMemory.extractedFacts, 
+            provider = agent.memoryProvider, 
+            windowSize = 20
+        )
         
         var updatedAgent = agent
         wmResult.onSuccess { newWm ->
@@ -93,7 +98,7 @@ class SummarizationStrategyDelegate(
             messages = agent.messages,
             previousSummary = strategy.summary,
             instruction = strategy.summaryPrompt,
-            provider = agent.provider
+            provider = agent.memoryProvider
         )
         
         val wmResult = updateWorkingMemoryUseCase.update(agent)
@@ -140,7 +145,7 @@ class StickyFactsStrategyDelegate(
         val factsResult = extractFactsUseCase(
             messages = agent.messages,
             currentFacts = strategy.facts,
-            provider = agent.provider,
+            provider = agent.memoryProvider,
             windowSize = strategy.windowSize
         )
         

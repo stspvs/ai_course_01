@@ -43,11 +43,14 @@ val commonModule = module {
             install(ContentNegotiation) {
                 json(get())
             }
-            // Включаем логирование всегда для отладки, так как BuildConfig.IS_DEBUG может быть false на некоторых платформах
+            // Включаем логирование всегда для отладки
             install(Logging) {
                 logger = object : Logger {
                     override fun log(message: String) {
-                        println("HTTP Client: $message")
+                        // Ktor логирует сообщения, которые могут содержать кириллицу в UTF-8.
+                        // На Windows консоль часто использует другую кодировку.
+                        // println() в Kotlin/JVM пытается использовать системную кодировку.
+                        println("[HTTP] $message")
                     }
                 }
                 level = LogLevel.ALL

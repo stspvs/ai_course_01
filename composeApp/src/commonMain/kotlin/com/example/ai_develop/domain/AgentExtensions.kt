@@ -4,6 +4,14 @@ import com.example.ai_develop.util.currentTimeMillis
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/**
+ * Возвращает провайдера для задач памяти (суммаризация, факты, рабочая память).
+ * Если в профиле пользователя указана модель для памяти, используется она.
+ * В противном случае используется основной провайдер агента.
+ */
+val Agent.memoryProvider: LLMProvider
+    get() = userProfile?.memoryModelProvider ?: provider
+
 fun Agent.mergeWith(db: Agent): Agent {
     val dbIds = db.messages.map { it.id }.toSet()
     val pendingMessages = this.messages.filter { it.id !in dbIds }

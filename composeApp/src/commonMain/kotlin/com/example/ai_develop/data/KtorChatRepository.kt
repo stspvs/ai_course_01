@@ -7,6 +7,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.utils.io.*
+import io.ktor.utils.io.charsets.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -70,7 +71,7 @@ class KtorChatRepository(
                         }
                     }
                 } else {
-                    val errorBody = response.bodyAsText()
+                    val errorBody = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                     emit(Result.failure(Exception("HTTP ${response.status}: $errorBody")))
                 }
             }
@@ -112,7 +113,7 @@ class KtorChatRepository(
             }
 
             if (response.status.isSuccess()) {
-                val responseText = response.bodyAsText()
+                val responseText = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 val text = cleanJsonResponse(handler.parseFullResponse(responseText))
                 
                 val start = text.indexOf("[")
@@ -129,7 +130,7 @@ class KtorChatRepository(
                     Result.failure(Exception("No JSON array found in response: $text"))
                 }
             } else {
-                val errorBody = response.bodyAsText()
+                val errorBody = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 Result.failure(Exception("Facts extraction failed: ${response.status}. Body: $errorBody"))
             }
         } catch (e: Exception) {
@@ -171,11 +172,11 @@ class KtorChatRepository(
             }
 
             if (response.status.isSuccess()) {
-                val responseText = response.bodyAsText()
+                val responseText = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 val text = handler.parseFullResponse(responseText)
                 Result.success(text.trim())
             } else {
-                val errorBody = response.bodyAsText()
+                val errorBody = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 Result.failure(Exception("Summarization failed: ${response.status}. Body: $errorBody"))
             }
         } catch (e: Exception) {
@@ -217,7 +218,7 @@ class KtorChatRepository(
             }
 
             if (response.status.isSuccess()) {
-                val responseText = response.bodyAsText()
+                val responseText = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 val text = cleanJsonResponse(handler.parseFullResponse(responseText))
                 
                 val start = text.indexOf("{")
@@ -231,7 +232,7 @@ class KtorChatRepository(
                     Result.failure(Exception("No JSON object found in response: $text"))
                 }
             } else {
-                val errorBody = response.bodyAsText()
+                val errorBody = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 Result.failure(Exception("Task analysis failed: ${response.status}. Body: $errorBody"))
             }
         } catch (e: Exception) {
@@ -273,7 +274,7 @@ class KtorChatRepository(
             }
 
             if (response.status.isSuccess()) {
-                val responseText = response.bodyAsText()
+                val responseText = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 val text = cleanJsonResponse(handler.parseFullResponse(responseText))
                 
                 val start = text.indexOf("{")
@@ -287,7 +288,7 @@ class KtorChatRepository(
                     Result.failure(Exception("No JSON object found in response: $text"))
                 }
             } else {
-                val errorBody = response.bodyAsText()
+                val errorBody = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
                 Result.failure(Exception("Memory analysis failed: ${response.status}. Body: $errorBody"))
             }
         } catch (e: Exception) {

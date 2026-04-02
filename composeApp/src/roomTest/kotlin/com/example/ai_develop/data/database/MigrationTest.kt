@@ -7,14 +7,13 @@ import com.example.ai_develop.domain.LLMProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class MigrationTest {
 
     @Test
     fun testDataPersistenceAcrossVersionBumps() = runTest {
-        // 1. Создаем БД версии 6 (текущая)
+        // Correct Room inMemoryDatabaseBuilder for KMP
         val db = Room.inMemoryDatabaseBuilder<AppDatabase>(
             factory = { AppDatabaseConstructor.initialize() }
         ).setDriver(BundledSQLiteDriver()).build()
@@ -37,10 +36,6 @@ class MigrationTest {
         // 3. Проверяем, что они там
         val before = repository.getAgents().first()
         assertTrue(before.any { it.id == "persistent_agent" })
-        
-        // 4. Имитируем "перезапуск" с той же схемой
-        // В реальном приложении здесь бы проверялась миграция 6 -> 7
-        // Если бы мы добавили autoMigrations в AppDatabase, мы бы тестировали их здесь
         
         db.close()
     }

@@ -54,12 +54,17 @@ class ChatInteractor(
                 if (none { it.id == userMessage.id }) add(userMessage)
             }
 
-            val history = memoryManager.processMessages(
+            var history = memoryManager.processMessages(
                 messages = updatedMessages,
                 strategy = agentSnapshot.memoryStrategy,
                 currentBranchId = agentSnapshot.currentBranchId,
                 agentBranches = updatedBranches
             )
+
+            // Добавляем кратковременную память в список сообщений (простой промпт)
+            memoryManager.getShortTermMemoryMessage(agentSnapshot)?.let { stmMessage ->
+                history = listOf(stmMessage) + history
+            }
 
             val flow = chatStreamingUseCase(
                 messages = history,

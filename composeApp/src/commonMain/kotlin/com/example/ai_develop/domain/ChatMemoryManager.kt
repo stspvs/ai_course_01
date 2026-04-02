@@ -60,14 +60,23 @@ class ChatMemoryManager {
         return result
     }
 
+    /**
+     * Формирует системный промпт, включая данные из профиля пользователя и рабочей памяти.
+     */
     fun wrapSystemPrompt(agent: Agent): String {
         val promptBuilder = StringBuilder(agent.systemPrompt)
         
-        // 1. User Profile (Personalization)
+        // 1. Personalization (User Profile)
         agent.userProfile?.let { profile ->
-            promptBuilder.append("\n\n=== USER PROFILE (Personalization) ===\n")
-            if (profile.preferences.isNotEmpty()) promptBuilder.append("User Preferences (style, format, etc.): ${profile.preferences}\n")
-            if (profile.constraints.isNotEmpty()) promptBuilder.append("User Constraints (what NOT to use): ${profile.constraints}\n")
+            if (profile.preferences.isNotEmpty() || profile.constraints.isNotEmpty()) {
+                promptBuilder.append("\n\n=== USER PERSONALIZATION ===\n")
+                if (profile.preferences.isNotEmpty()) {
+                    promptBuilder.append("User Preferences (Style, Format, Tone): ${profile.preferences}\n")
+                }
+                if (profile.constraints.isNotEmpty()) {
+                    promptBuilder.append("User Constraints (What NOT to use): ${profile.constraints}\n")
+                }
+            }
         }
 
         // 2. Working Memory
@@ -81,26 +90,39 @@ class ChatMemoryManager {
             promptBuilder.append("\n=== RELEVANT CONTEXT (Extracted Facts) ===\n")
             extractedFacts.forEach { promptBuilder.append("- $it\n") }
         }
+        
+        return promptBuilder.toString()
+    }
 
-        // 3. Temporary Memory (Сжатие контекста)
-        when (val strategy = agent.memoryStrategy) {
+    /**
+     * Формирует сообщение с данными из кратковременной памяти (summary, sticky facts)
+     * для подстановки в простой промпт (список сообщений).
+     */
+    fun getShortTermMemoryMessage(agent: Agent): ChatMessage? {
+        val content = when (val strategy = agent.memoryStrategy) {
             is ChatMemoryStrategy.StickyFacts -> {
                 val facts = strategy.facts.facts
                 if (facts.isNotEmpty()) {
-                    promptBuilder.append("\n=== TEMPORARY MEMORY (Active Facts) ===\n")
-                    facts.forEach { promptBuilder.append("- $it\n") }
-                }
+                    "=== TEMPORARY MEMORY (Active Facts) ===\n" + facts.joinToString("\n") { "- $it" }
+                } else null
             }
             is ChatMemoryStrategy.Summarization -> {
                 strategy.summary?.let {
                     if (it.isNotEmpty()) {
-                        promptBuilder.append("\n=== TEMPORARY MEMORY (Conversation Summary) ===\n$it")
-                    }
+                        "=== TEMPORARY MEMORY (Conversation Summary) ===\n$it"
+                    } else null
                 }
             }
-            else -> {}
+            else -> null
         }
         
-        return promptBuilder.toString()
+        return content?.let {
+            ChatMessage(
+                role = "system",
+                message = it,
+                source = SourceType.SYSTEM,
+                isSystemNotification = true
+            )
+        }
     }
 }

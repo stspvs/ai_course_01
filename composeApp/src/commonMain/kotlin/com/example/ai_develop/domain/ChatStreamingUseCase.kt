@@ -54,10 +54,13 @@ open class ChatStreamingUseCase(
 
     private fun buildPrompt(state: AgentState, profile: UserProfile, invariants: List<Invariant>): String {
         return """
-            USER PREFERENCES: ${profile.preferences}
-            USER CONSTRAINTS: ${profile.constraints}
-            CURRENT STAGE: ${state.currentStage}
-            CURRENT PLAN: ${Json.encodeToString(AgentPlan.serializer(), state.plan)}
+            USER PERSONALIZATION:
+            - Preferences (Style, Format): ${profile.preferences.ifEmpty { "Not specified" }}
+            - Constraints (What to avoid): ${profile.constraints.ifEmpty { "None" }}
+
+            AGENT STATE:
+            - Current Stage: ${state.currentStage}
+            - Current Plan: ${Json.encodeToString(AgentPlan.serializer(), state.plan)}
             
             ACTIVE INVARIANTS FOR THIS STAGE:
             ${invariants.joinToString("\n") { "- ${it.rule}" }}
@@ -65,13 +68,11 @@ open class ChatStreamingUseCase(
             INSTRUCTIONS:
             If you are in PLANNING, output a structured plan.
             If you are in EXECUTION, perform the next step of the plan.
-            Strictly follow the active invariants.
+            Strictly follow the user personalization and active invariants.
         """.trimIndent()
     }
 
     private suspend fun validateResponse(agentId: String, response: String, invariants: List<Invariant>) {
         // Здесь будет логика вызова extractFacts или LLM-валидации
-        // Если обнаружено нарушение:
-        // repository.saveAgentState(state.copy(currentStage = AgentStage.PLANNING))
     }
 }

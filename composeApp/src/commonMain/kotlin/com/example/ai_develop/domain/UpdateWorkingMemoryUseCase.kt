@@ -15,7 +15,7 @@ class UpdateWorkingMemoryUseCase(
             messages = agent.messages
         )
         
-        return repository.analyzeWorkingMemory(agent.messages, prompt, agent.provider).map { result ->
+        return repository.analyzeWorkingMemory(agent.messages, prompt, agent.memoryProvider).map { result ->
             agent.workingMemory.copy(
                 currentTask = result.currentTask ?: agent.workingMemory.currentTask,
                 progress = result.progress ?: agent.workingMemory.progress

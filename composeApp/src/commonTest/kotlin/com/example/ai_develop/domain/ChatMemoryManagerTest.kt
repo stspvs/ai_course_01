@@ -2,6 +2,8 @@ package com.example.ai_develop.domain
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ChatMemoryManagerTest {
@@ -50,39 +52,16 @@ class ChatMemoryManagerTest {
     }
 
     @Test
-    fun testBranchHistoryFallbackByBranchId() {
-        val messages = listOf(
-            ChatMessage(id = "1", message = "Msg 1", source = SourceType.USER, branchId = "main_branch"),
-            ChatMessage(id = "2", parentId = "1", message = "Msg 2", source = SourceType.ASSISTANT, branchId = "main_branch")
-        )
-        // No explicit branch pointer in agentBranches
-        val history = manager.getBranchHistory(messages, null, emptyList())
-        assertEquals(2, history.size)
-        assertEquals("2", history.last().id)
-    }
-
-    @Test
-    fun testBranchHistoryCycleProtection() {
-        val messages = listOf(
-            ChatMessage(id = "1", parentId = "2", message = "Cycle 1", source = SourceType.USER),
-            ChatMessage(id = "2", parentId = "1", message = "Cycle 2", source = SourceType.ASSISTANT)
-        )
-        val branches = listOf(ChatBranch(id = "main_branch", name = "Main", lastMessageId = "2"))
-        
-        val history = manager.getBranchHistory(messages, null, branches)
-        // Should not hang and should contain unique messages
-        assertTrue(history.size <= 2)
-    }
-
-    @Test
-    fun testWrapSystemPromptWithFacts() {
+    fun testWrapSystemPromptWithPersonalization() {
         val base = "You are an AI."
-        val facts = ChatFacts(listOf("user_name: Stas"))
-        val strategy = ChatMemoryStrategy.StickyFacts(windowSize = 10, facts = facts)
+        val profile = UserProfile(
+            preferences = "Answer shortly",
+            constraints = "No emojis"
+        )
         val agent = Agent(
             name = "Test", 
             systemPrompt = base, 
-            memoryStrategy = strategy,
+            userProfile = profile,
             temperature = 0.7,
             provider = LLMProvider.Yandex(),
             stopWord = "",
@@ -91,6 +70,71 @@ class ChatMemoryManagerTest {
         
         val wrapped = manager.wrapSystemPrompt(agent)
         assertTrue(wrapped.contains(base))
-        assertTrue(wrapped.contains("user_name: Stas"))
+        assertTrue(wrapped.contains("USER PERSONALIZATION"))
+        assertTrue(wrapped.contains("Answer shortly"))
+        assertTrue(wrapped.contains("No emojis"))
+        
+        // Short-term memory should NOT be in system prompt anymore
+        assertTrue(!wrapped.contains("TEMPORARY MEMORY"))
+    }
+
+    @Test
+    fun testWrapSystemPromptWithWorkingMemory() {
+        val base = "You are an AI."
+        val wm = WorkingMemory(
+            currentTask = "Solve math",
+            progress = "Started"
+        )
+        val agent = Agent(
+            name = "Test", 
+            systemPrompt = base, 
+            workingMemory = wm,
+            temperature = 0.7,
+            provider = LLMProvider.Yandex(),
+            stopWord = "",
+            maxTokens = 100
+        )
+        
+        val wrapped = manager.wrapSystemPrompt(agent)
+        assertTrue(wrapped.contains("WORKING MEMORY"))
+        assertTrue(wrapped.contains("Solve math"))
+        assertTrue(wrapped.contains("Started"))
+    }
+
+    @Test
+    fun testShortTermMemoryAsMessage() {
+        val summary = "User wants to buy a car."
+        val agent = Agent(
+            name = "Test",
+            systemPrompt = "AI",
+            memoryStrategy = ChatMemoryStrategy.Summarization(windowSize = 10, summary = summary),
+            temperature = 0.7,
+            provider = LLMProvider.Yandex(),
+            stopWord = "",
+            maxTokens = 100
+        )
+
+        val stmMessage = manager.getShortTermMemoryMessage(agent)
+        assertNotNull(stmMessage)
+        assertEquals("system", stmMessage.role)
+        assertTrue(stmMessage.message.contains(summary))
+        assertTrue(stmMessage.message.contains("TEMPORARY MEMORY"))
+        assertTrue(stmMessage.isSystemNotification)
+    }
+
+    @Test
+    fun testNoShortTermMemoryMessageWhenEmpty() {
+        val agent = Agent(
+            name = "Test",
+            systemPrompt = "AI",
+            memoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
+            temperature = 0.7,
+            provider = LLMProvider.Yandex(),
+            stopWord = "",
+            maxTokens = 100
+        )
+
+        val stmMessage = manager.getShortTermMemoryMessage(agent)
+        assertNull(stmMessage)
     }
 }

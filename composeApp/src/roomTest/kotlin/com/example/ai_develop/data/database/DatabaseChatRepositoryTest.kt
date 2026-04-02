@@ -18,16 +18,22 @@ class DatabaseChatRepositoryTest {
 
     @BeforeTest
     fun setup() {
-        val builder = Room.inMemoryDatabaseBuilder<AppDatabase>(
-            factory = { AppDatabaseConstructor.initialize() }
-        )
-        db = builder.setDriver(BundledSQLiteDriver()).build()
+        // Для KMP тестов в roomTest, если мы хотим, чтобы они компилировались и под Android,
+        // обычно используется expect/actual. Но для текущей конфигурации Desktop:
+        db = createInMemoryDatabase()
         repository = DatabaseChatRepository(db)
     }
 
     @AfterTest
     fun tearDown() {
         db.close()
+    }
+
+    // Вспомогательная функция (в реальном проекте она была бы в expect/actual)
+    private fun createInMemoryDatabase(): AppDatabase {
+        return Room.inMemoryDatabaseBuilder<AppDatabase>(
+            factory = { AppDatabaseConstructor.initialize() }
+        ).setDriver(BundledSQLiteDriver()).build()
     }
 
     @Test
