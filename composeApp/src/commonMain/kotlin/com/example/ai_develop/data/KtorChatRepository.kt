@@ -88,7 +88,7 @@ class KtorChatRepository(
             val prompt = PromptBuilder.buildFactsExtractionPrompt(currentFacts, messages, json)
 
             val factMessages = listOf(
-                ChatMessage(message = "You are a factual memory assistant. Output ONLY valid JSON.", role = "system", source = SourceType.SYSTEM),
+                ChatMessage(message = "You are a factual memory assistant. Output ONLY valid JSON array of strings.", role = "system", source = SourceType.SYSTEM),
                 ChatMessage(message = prompt, role = "user", source = SourceType.USER)
             )
 
@@ -113,17 +113,17 @@ class KtorChatRepository(
 
             if (response.status.isSuccess()) {
                 val responseText = response.bodyAsText()
-                val text = handler.parseFullResponse(responseText)
+                val text = cleanJsonResponse(handler.parseFullResponse(responseText))
                 
-                val start = text.indexOf("{")
-                val end = text.lastIndexOf("}")
+                val start = text.indexOf("[")
+                val end = text.lastIndexOf("]")
                 
                 if (start != -1 && end != -1 && end > start) {
                     val jsonString = text.substring(start, end + 1)
                     val newFactsList = json.decodeFromString<List<String>>(jsonString)
                     Result.success(ChatFacts(newFactsList))
                 } else {
-                    Result.failure(Exception("No JSON object found in response: $text"))
+                    Result.failure(Exception("No JSON array found in response: $text"))
                 }
             } else {
                 val errorBody = response.bodyAsText()
@@ -190,7 +190,7 @@ class KtorChatRepository(
             val fullPrompt = "$instruction\n\nCONVERSATION HISTORY:\n$history"
 
             val analysisMessages = listOf(
-                ChatMessage(message = "You are a task analysis assistant. Output ONLY valid JSON.", role = "system", source = SourceType.SYSTEM),
+                ChatMessage(message = "You are a task analysis assistant. Output ONLY valid JSON object.", role = "system", source = SourceType.SYSTEM),
                 ChatMessage(message = fullPrompt, role = "user", source = SourceType.USER)
             )
 
@@ -215,7 +215,7 @@ class KtorChatRepository(
 
             if (response.status.isSuccess()) {
                 val responseText = response.bodyAsText()
-                val text = handler.parseFullResponse(responseText)
+                val text = cleanJsonResponse(handler.parseFullResponse(responseText))
                 
                 val start = text.indexOf("{")
                 val end = text.lastIndexOf("}")
@@ -234,6 +234,75 @@ class KtorChatRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    override suspend fun analyzeWorkingMemory(
+        messages: List<ChatMessage>,
+        instruction: String,
+        provider: LLMProvider
+    ): Result<WorkingMemoryAnalysis> {
+        return try {
+            val history = messages.takeLast(15).joinToString("\n") { "${it.role}: ${it.message}" }
+            val fullPrompt = "$instruction\n\nCONVERSATION HISTORY:\n$history"
+
+            val analysisMessages = listOf(
+                ChatMessage(message = "You are a memory assistant. Output ONLY valid JSON object.", role = "system", source = SourceType.SYSTEM),
+                ChatMessage(message = fullPrompt, role = "user", source = SourceType.USER)
+            )
+
+            val handler = getHandler(provider)
+            val platform = getPlatform()
+            val url = handler.buildUrl(platform)
+            val bodyString = handler.buildChatRequestBody(
+                messages = analysisMessages,
+                systemPrompt = "",
+                maxTokens = 1000,
+                temperature = 0.3,
+                stopWord = "",
+                isJsonMode = true,
+                stream = false
+            )
+
+            val response = httpClient.post(url) {
+                handler.buildHeaders().forEach { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                setBody(bodyString)
+            }
+
+            if (response.status.isSuccess()) {
+                val responseText = response.bodyAsText()
+                val text = cleanJsonResponse(handler.parseFullResponse(responseText))
+                
+                val start = text.indexOf("{")
+                val end = text.lastIndexOf("}")
+                
+                if (start != -1 && end != -1 && end > start) {
+                    val jsonString = text.substring(start, end + 1)
+                    val result = json.decodeFromString<WorkingMemoryAnalysis>(jsonString)
+                    Result.success(result)
+                } else {
+                    Result.failure(Exception("No JSON object found in response: $text"))
+                }
+            } else {
+                val errorBody = response.bodyAsText()
+                Result.failure(Exception("Memory analysis failed: ${response.status}. Body: $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun cleanJsonResponse(text: String): String {
+        var cleaned = text.trim()
+        if (cleaned.startsWith("```")) {
+            // Remove ```json or just ```
+            cleaned = cleaned.removePrefix("```json").removePrefix("```")
+            // Remove trailing ```
+            if (cleaned.endsWith("```")) {
+                cleaned = cleaned.removeSuffix("```")
+            }
+        }
+        return cleaned.trim()
     }
 
     override suspend fun saveAgentState(state: AgentState) {}

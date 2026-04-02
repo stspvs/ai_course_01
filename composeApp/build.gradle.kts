@@ -119,7 +119,7 @@ room {
 dependencies {
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspDesktop", libs.androidx.room.compiler)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation(libs.kotlinx.coroutines.core.v1102)
 }
 
 android {
@@ -182,7 +182,7 @@ buildConfig {
     packageName("com.example.ai_develop")
     
     // Флаг дебага
-    buildConfigField("boolean", "IS_DEBUG", "false")
+    buildConfigField("boolean", "IS_DEBUG", "true")
 
     buildConfigField("String", "DEEPSEEK_KEY", "\"${getSecret("DEEPSEEK_KEY")}\"")
     buildConfigField("String", "YANDEX_KEY", "\"${getSecret("YANDEX_KEY")}\"")

@@ -9,16 +9,41 @@ import kotlin.test.assertTrue
 
 class PromptBuilderTest {
 
+    private val json = Json { isLenient = true }
+
     @Test
-    fun `buildFactsExtractionPrompt should contain current facts and new messages`() {
-        val currentFacts = ChatFacts(listOf("name: Alice"))
-        val messages = listOf(ChatMessage(message = "I like pizza", source = SourceType.USER))
-        val json = Json { isLenient = true }
+    fun `buildFactsExtractionPrompt should contain current facts and new messages in Russian`() {
+        val currentFacts = ChatFacts(listOf("имя: Алиса"))
+        val messages = listOf(ChatMessage(message = "Я люблю пиццу", role = "user", source = SourceType.USER))
         
         val prompt = PromptBuilder.buildFactsExtractionPrompt(currentFacts, messages, json)
         
-        assertTrue(prompt.contains("Alice"))
-        assertTrue(prompt.contains("I like pizza"))
+        assertTrue(prompt.contains("Алиса"))
+        assertTrue(prompt.contains("Я люблю пиццу"))
         assertTrue(prompt.contains("user"))
+        assertTrue(prompt.contains("Проанализируй диалог"))
+        assertTrue(prompt.contains("JSON"))
+    }
+
+    @Test
+    fun `buildSummarizationPrompt should contain instruction and messages`() {
+        val messages = listOf(ChatMessage(message = "Важное сообщение", role = "assistant", source = SourceType.ASSISTANT))
+        val prompt = PromptBuilder.buildSummarizationPrompt("Старое резюме", messages, "Сделай кратко")
+        
+        assertTrue(prompt.contains("Сделай кратко"))
+        assertTrue(prompt.contains("Старое резюме"))
+        assertTrue(prompt.contains("Важное сообщение"))
+        assertTrue(prompt.contains("НА РУССКОМ ЯЗЫКЕ"))
+    }
+
+    @Test
+    fun `buildWorkingMemoryPrompt should contain task and progress`() {
+        val messages = listOf(ChatMessage(message = "Работаем над кодом", role = "user", source = SourceType.USER))
+        val prompt = PromptBuilder.buildWorkingMemoryPrompt("Пишем тесты", "20%", messages)
+        
+        assertTrue(prompt.contains("Пишем тесты"))
+        assertTrue(prompt.contains("20%"))
+        assertTrue(prompt.contains("Работаем над кодом"))
+        assertTrue(prompt.contains("ТЕКУЩУЮ ЗАДАЧУ"))
     }
 }

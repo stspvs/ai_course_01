@@ -68,9 +68,11 @@ class LLMViewModelTest {
             ) = flowOf(Result.success("test"))
         }
         
+        val updateWorkingMemoryUseCase = UpdateWorkingMemoryUseCase(fakeChatRepo)
         val strategyFactory = StrategyDelegateFactory(
             extractFactsUseCase = ExtractFactsUseCase(fakeChatRepo),
             summarizeChatUseCase = SummarizeChatUseCase(fakeChatRepo),
+            updateWorkingMemoryUseCase = updateWorkingMemoryUseCase,
             repository = fakeChatRepo
         )
         
@@ -183,6 +185,7 @@ private class FakeChatRepo : ChatRepository {
     override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
     override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
     override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(TaskAnalysisResult())
+    override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(WorkingMemoryAnalysis())
     override suspend fun saveAgentState(state: AgentState) {}
     override suspend fun getAgentState(agentId: String) = null
     override suspend fun getProfile(agentId: String) = null

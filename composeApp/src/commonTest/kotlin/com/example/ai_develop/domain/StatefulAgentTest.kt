@@ -38,17 +38,19 @@ class StatefulAgentTest {
             instruction: String,
             provider: LLMProvider
         ): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
+
+        override suspend fun analyzeWorkingMemory(
+            messages: List<ChatMessage>,
+            instruction: String,
+            provider: LLMProvider
+        ): Result<WorkingMemoryAnalysis> = Result.success(WorkingMemoryAnalysis())
     }
 
     @Test
     fun `test system prompt contains invariants and plan`() = runTest {
         val repo = MockRepository()
-        val useCase = ChatStreamingUseCase(repo)
-        
         // В реальном использовании мы перехватываем системный промпт перед вызовом
         val state = AgentState("default", AgentStage.PLANNING, null, AgentPlan(listOf(AgentStep("1", "Step 1"))))
-        val profile = AgentProfile(style = "Style", globalInstructions = "Instr")
-        val invariants = listOf(Invariant("1", "Stay polite", AgentStage.PLANNING))
 
         // Имитируем логику промпта
         val prompt = "PLANNING Step 1 Stay polite"

@@ -29,6 +29,9 @@ class ExtractFactsUseCaseTest {
         ): Result<String> = Result.success("summary")
 
         override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
+        
+        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<WorkingMemoryAnalysis> = Result.success(WorkingMemoryAnalysis())
+
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
         override suspend fun getProfile(agentId: String): AgentProfile? = null

@@ -31,6 +31,7 @@ class ChatInteractorTest {
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider): Result<ChatFacts> = Result.success(ChatFacts())
         override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider): Result<String> = Result.success("summary")
         override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
+        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<WorkingMemoryAnalysis> = Result.success(WorkingMemoryAnalysis())
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
         override suspend fun getProfile(agentId: String): AgentProfile? = null
@@ -52,9 +53,11 @@ class ChatInteractorTest {
         val chatRepo = MockChatRepository()
         val useCase = MockUseCase(chatRepo)
         val memoryManager = ChatMemoryManager()
+        val updateWorkingMemoryUseCase = UpdateWorkingMemoryUseCase(chatRepo)
         val strategyFactory = StrategyDelegateFactory(
             ExtractFactsUseCase(chatRepo),
             SummarizeChatUseCase(chatRepo),
+            updateWorkingMemoryUseCase,
             chatRepo
         )
         

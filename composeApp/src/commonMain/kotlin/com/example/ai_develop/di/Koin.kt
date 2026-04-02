@@ -68,6 +68,7 @@ val commonModule = module {
     singleOf(::ChatStreamingUseCase)
     singleOf(::ExtractFactsUseCase)
     singleOf(::SummarizeChatUseCase)
+    singleOf(::UpdateWorkingMemoryUseCase)
     singleOf(::ChatMemoryManager)
     singleOf(::StrategyDelegateFactory)
     

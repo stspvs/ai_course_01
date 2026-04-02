@@ -12,24 +12,24 @@ internal object PromptBuilder {
         json: Json
     ): String {
         return """
-            Analyze the dialogue and update the list of key facts. 
-            Keep track of: goals, constraints, preferences, decisions, user names/info.
+            Проанализируй диалог и обнови список ключевых фактов. 
+            Отслеживай: цели, ограничения, предпочтения, принятые решения, информацию о пользователе.
             
-            Current facts: 
-            ${if (currentFacts.facts.isEmpty()) "No facts yet." else json.encodeToString(currentFacts.facts)}
+            Текущие факты: 
+            ${if (currentFacts.facts.isEmpty()) "Фактов пока нет." else json.encodeToString(currentFacts.facts)}
             
-            New messages for analysis:
+            Новые сообщения для анализа:
             ${newMessages.joinToString("\n") { "${it.role}: ${it.content}" }}
             
-            Instructions:
-            1. Review current facts and new messages.
-            2. If a new fact is discovered, add it to the list.
-            3. If a current fact is updated or corrected, modify it in the list.
-            4. Do NOT delete any current facts unless they are explicitly contradicted or became obsolete.
-            5. Return the FINAL COMPLETE list of all facts (old and new).
-            6. Output MUST be a valid JSON array of strings.
+            Инструкции:
+            1. Просмотри текущие факты и новые сообщения.
+            2. Если обнаружен новый факт, добавь его в список.
+            3. Если текущий факт обновлен или исправлен, измени его в списке.
+            4. НЕ удаляй текущие факты, если они явно не противоречат новым данным или не устарели.
+            5. Верни ПОЛНЫЙ список всех фактов (старых и новых) НА РУССКОМ ЯЗЫКЕ.
+            6. Ответ ДОЛЖЕН быть только валидным JSON-массивом строк.
             
-            Example output: ["User name is Ivan", "Goal is to learn Kotlin", "Primary language is Russian"]
+            Пример вывода: ["Имя пользователя — Иван", "Цель — выучить Kotlin", "Основной язык — русский"]
         """.trimIndent()
     }
 
@@ -41,12 +41,36 @@ internal object PromptBuilder {
         return """
             $instruction
             
-            ${previousSummary?.let { "Previous summary: $it\n" } ?: ""}
+            ${previousSummary?.let { "Предыдущее резюме: $it\n" } ?: ""}
             
-            Messages to summarize:
+            Сообщения для суммаризации:
             ${messages.joinToString("\n") { "${it.role}: ${it.content}" }}
             
-            Return ONLY the new summary text.
+            Верни ТОЛЬКО текст нового резюме НА РУССКОМ ЯЗЫКЕ.
+        """.trimIndent()
+    }
+
+    fun buildWorkingMemoryPrompt(
+        currentTask: String?,
+        progress: String?,
+        messages: List<ChatMessage>
+    ): String {
+        return """
+            Проанализируй переписку и извлеки ТЕКУЩУЮ ЗАДАЧУ и ПРОГРЕСС.
+            
+            Текущая задача в памяти: ${currentTask ?: "Нет"}
+            Текущий прогресс: ${progress ?: "0%"}
+            
+            История переписки:
+            ${messages.takeLast(15).joinToString("\n") { "${it.role}: ${it.content}" }}
+            
+            Инструкции:
+            1. Определи, над чем сейчас работают пользователь и ассистент.
+            2. Оцени прогресс выполнения этой задачи (например, "Начато", "В процессе (50%)", "Почти готово").
+            3. Ответ должен быть НА РУССКОМ ЯЗЫКЕ.
+            4. Верни ТОЛЬКО JSON-объект с полями "currentTask" и "progress".
+            
+            Пример: {"currentTask": "Написание функции на Kotlin", "progress": "60%"}
         """.trimIndent()
     }
 }

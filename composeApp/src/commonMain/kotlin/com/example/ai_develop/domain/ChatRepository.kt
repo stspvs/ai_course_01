@@ -1,6 +1,7 @@
 package com.example.ai_develop.domain
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 interface ChatRepository {
     fun chatStreaming(
@@ -32,6 +33,12 @@ interface ChatRepository {
         provider: LLMProvider
     ): Result<TaskAnalysisResult>
 
+    suspend fun analyzeWorkingMemory(
+        messages: List<ChatMessage>,
+        instruction: String,
+        provider: LLMProvider
+    ): Result<WorkingMemoryAnalysis>
+
     // Новые методы для Stateful Agent
     suspend fun saveAgentState(state: AgentState)
     suspend fun getAgentState(agentId: String): AgentState?
@@ -45,8 +52,14 @@ interface ChatRepository {
     fun observeAgentState(agentId: String): Flow<AgentState?>
 }
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class TaskAnalysisResult(
     val stage: AgentStage = AgentStage.PLANNING,
     val plan: AgentPlan = AgentPlan()
+)
+
+@Serializable
+data class WorkingMemoryAnalysis(
+    val currentTask: String? = null,
+    val progress: String? = null
 )

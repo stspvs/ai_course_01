@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -24,7 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.*
@@ -49,7 +53,7 @@ internal fun ChatContent(
     var showFacts by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
     var showBranches by remember { mutableStateOf(false) }
-    var showTaskPanel by remember { mutableStateOf(false) }
+    var showMemoryPanel by remember { mutableStateOf(false) }
 
     val strategy = activeAgent?.memoryStrategy
     val isBranchingMode = strategy is ChatMemoryStrategy.Branching
@@ -75,7 +79,7 @@ internal fun ChatContent(
                 onShowSummary = { showSummary = !showSummary },
                 hasSummary = (strategy as? ChatMemoryStrategy.Summarization)?.summary?.isNotBlank() == true,
                 onShowBranches = { showBranches = !showBranches },
-                onShowTask = { showTaskPanel = !showTaskPanel },
+                onShowTask = { showMemoryPanel = !showMemoryPanel },
                 isBranchingMode = isBranchingMode,
                 isSummarizationMode = isSummarizationMode,
                 isStickyFactsMode = isStickyFactsMode,
@@ -157,18 +161,18 @@ internal fun ChatContent(
             )
         }
 
-        // Боковая панель Рабочей памяти
+        // Боковая панель Состояния Памяти (Рабочая + Долгая)
         AnimatedVisibility(
-            visible = showTaskPanel && isTaskOrientedMode,
+            visible = showMemoryPanel && activeAgent != null,
             enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
             exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut()
         ) {
-            val taskStrategy = strategy as? ChatMemoryStrategy.TaskOriented
-            TaskSidePanel(
-                task = taskStrategy?.currentGoal,
-                progress = "", 
-                facts = emptyList(),
-                onClose = { showTaskPanel = false },
+            val wm = activeAgent?.workingMemory
+            MemorySidePanel(
+                task = wm?.currentTask,
+                progress = wm?.progress, 
+                facts = wm?.extractedFacts?.facts ?: emptyList(),
+                onClose = { showMemoryPanel = false },
                 onRefresh = onForceUpdateMemory
             )
         }
@@ -176,7 +180,7 @@ internal fun ChatContent(
 }
 
 @Composable
-private fun TaskSidePanel(
+private fun MemorySidePanel(
     task: String?,
     progress: String?,
     facts: List<String>,
@@ -198,26 +202,32 @@ private fun TaskSidePanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Рабочая память", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
+                Text("Состояние памяти", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
                 Row {
                     IconButton(onClick = onRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color(0xFF1565C0))
+                        Icon(Icons.Default.Refresh, contentDescription = "Принудительное обновление", tint = Color(0xFF1565C0))
                     }
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                        Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = Color.Gray)
                     }
                 }
             }
 
+            if (!progress.isNullOrBlank()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Прогресс выполнения: $progress", style = MaterialTheme.typography.labelMedium, color = Color(0xFF2E7D32))
+                }
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Текущая задача", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                Text("Рабочая (короткая) память", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
                 Surface(
                     color = Color(0xFFE3F2FD),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = task ?: "Задача еще не определена",
+                        text = task ?: "Активная задача не определена",
                         modifier = Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -225,9 +235,9 @@ private fun TaskSidePanel(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Ключевые факты", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                Text("Долгая память (ключевые факты)", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
                 if (facts.isEmpty()) {
-                    Text("Факты не найдены", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                    Text("Факты еще не извлечены", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
                 } else {
                     facts.forEach { fact ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -520,10 +530,13 @@ private fun ChatTopBar(
                 
                 if (isAgentSelected) {
                     Row(horizontalArrangement = Arrangement.End) {
-                        if (isTaskOrientedMode) {
-                            IconButton(onClick = onShowTask) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = "Task Memory", tint = Color(0xFF1565C0))
-                            }
+                        // Кнопка памяти теперь доступна для всех агентов
+                        IconButton(onClick = onShowTask) {
+                            Icon(
+                                Icons.Default.CheckCircle, 
+                                contentDescription = "Memory State", 
+                                tint = if (isTaskOrientedMode) Color(0xFF1565C0) else Color.Gray
+                            )
                         }
                         
                         when {
@@ -639,9 +652,28 @@ private fun ChatInputArea(
             OutlinedTextField(
                 value = input,
                 onValueChange = onInputChange,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onKeyEvent { keyEvent ->
+                        if (keyEvent.key == Key.Enter && keyEvent.type == KeyEventType.KeyDown) {
+                            if (input.isNotBlank()) {
+                                onSendMessage(input)
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    },
                 placeholder = { Text("Сообщение...") },
                 shape = RoundedCornerShape(24.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        if (input.isNotBlank()) {
+                            onSendMessage(input)
+                        }
+                    }
+                ),
                 trailingIcon = {
                     IconButton(onClick = onClearChat) {
                         Icon(
