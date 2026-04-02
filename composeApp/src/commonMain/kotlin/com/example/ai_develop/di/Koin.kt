@@ -8,6 +8,7 @@ import com.example.ai_develop.presentation.ChatInteractor
 import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
 import io.ktor.client.*
+import io.ktor.client.engine.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
@@ -21,6 +22,8 @@ import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.factoryOf
 
 expect val platformModule: Module
+
+expect fun HttpClientConfig<*>.configurePlatform()
 
 fun initKoin(appDeclaration: KoinAppDeclaration = {}) =
     startKoin {
@@ -40,6 +43,8 @@ val commonModule = module {
 
     single {
         HttpClient {
+            configurePlatform()
+            
             install(ContentNegotiation) {
                 json(get())
             }
@@ -47,9 +52,6 @@ val commonModule = module {
             install(Logging) {
                 logger = object : Logger {
                     override fun log(message: String) {
-                        // Ktor логирует сообщения, которые могут содержать кириллицу в UTF-8.
-                        // На Windows консоль часто использует другую кодировку.
-                        // println() в Kotlin/JVM пытается использовать системную кодировку.
                         println("[HTTP] $message")
                     }
                 }
