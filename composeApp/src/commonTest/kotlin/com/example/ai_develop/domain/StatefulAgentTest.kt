@@ -5,6 +5,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
+import kotlinx.coroutines.flow.Flow
 
 class StatefulAgentTest {
 
@@ -24,13 +25,19 @@ class StatefulAgentTest {
 
         override suspend fun saveAgentState(state: AgentState) { savedState = state }
         override suspend fun getAgentState(agentId: String) = AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
-        override suspend fun getProfile(agentId: String) = AgentProfile("TestStyle", "Global instructions", emptyList())
+        override suspend fun getProfile(agentId: String) = AgentProfile(name = "Test", style = "TestStyle", globalInstructions = "Global instructions")
         override suspend fun getInvariants(agentId: String, stage: AgentStage) = listOf(Invariant("1", "Test Rule", stage))
         override suspend fun saveInvariant(invariant: Invariant) {}
-        override fun observeAgentState(agentId: String) = flowOf(null)
+        override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
         override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
         override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+        
+        override suspend fun analyzeTask(
+            messages: List<ChatMessage>,
+            instruction: String,
+            provider: LLMProvider
+        ): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
     }
 
     @Test
@@ -39,17 +46,12 @@ class StatefulAgentTest {
         val useCase = ChatStreamingUseCase(repo)
         
         // В реальном использовании мы перехватываем системный промпт перед вызовом
-        // Для теста добавим метод-помощник в UseCase или просто проверим логику сборки
         val state = AgentState("default", AgentStage.PLANNING, null, AgentPlan(listOf(AgentStep("1", "Step 1"))))
-        val profile = AgentProfile("Style", "Instr", emptyList())
+        val profile = AgentProfile(style = "Style", globalInstructions = "Instr")
         val invariants = listOf(Invariant("1", "Stay polite", AgentStage.PLANNING))
 
-        // Здесь мы просто проверяем внутреннюю логику сборки промпта (имитируем приватный метод)
-        val prompt = """
-            PLANNING
-            Step 1
-            Stay polite
-        """.trimIndent()
+        // Имитируем логику промпта
+        val prompt = "PLANNING Step 1 Stay polite"
         
         assertTrue(prompt.contains("PLANNING"))
         assertTrue(prompt.contains("Step 1"))

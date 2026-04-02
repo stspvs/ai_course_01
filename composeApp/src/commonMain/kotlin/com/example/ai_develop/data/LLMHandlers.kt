@@ -50,7 +50,7 @@ internal class DeepSeekHandler(
     ): String {
         val apiMessages = mutableListOf<Message>()
         if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
-        messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
+        messages.forEach { msg -> apiMessages.add(Message(role = msg.role, content = msg.content)) }
         
         val validatedTemp = temperature.coerceIn(0.0, 2.0)
 
@@ -135,8 +135,8 @@ internal class YandexHandler(
         }
         
         messages.forEach { msg ->
-            if (msg.message.isNotBlank()) {
-                yandexMessages.add(YandexMessage(role = msg.source.role, text = msg.message))
+            if (msg.content.isNotBlank()) {
+                yandexMessages.add(YandexMessage(role = msg.role, text = msg.content))
             }
         }
         
@@ -235,7 +235,7 @@ internal class OpenRouterHandler(
     ): String {
         val apiMessages = mutableListOf<Message>()
         if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
-        messages.forEach { msg -> apiMessages.add(Message(role = msg.source.role, content = msg.message)) }
+        messages.forEach { msg -> apiMessages.add(Message(role = msg.role, content = msg.content)) }
         
         val maxTemp = if (provider.model.contains("deepseek", ignoreCase = true)) 2.0 else 1.0
         val validatedTemp = temperature.coerceIn(0.0, maxTemp)

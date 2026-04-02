@@ -18,7 +18,7 @@ class ExtractFactsUseCaseTest {
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider): Result<ChatFacts> {
             lastMessages = messages
             lastFacts = currentFacts
-            return Result.success(ChatFacts(mapOf("extracted" to "true")))
+            return Result.success(ChatFacts(listOf("extracted: true")))
         }
 
         override suspend fun summarize(
@@ -28,7 +28,7 @@ class ExtractFactsUseCaseTest {
             provider: LLMProvider
         ): Result<String> = Result.success("summary")
 
-        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult("", "", emptyMap()))
+        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
         override suspend fun getProfile(agentId: String): AgentProfile? = null
@@ -47,13 +47,13 @@ class ExtractFactsUseCaseTest {
             ChatMessage(id = "2", message = "M2", source = SourceType.USER),
             ChatMessage(id = "3", message = "M3", source = SourceType.USER)
         )
-        val currentFacts = ChatFacts(mapOf("old" to "fact"))
+        val currentFacts = ChatFacts(listOf("old: fact"))
         val provider = LLMProvider.DeepSeek()
         
         val result = useCase(messages, currentFacts, provider, windowSize = 2)
         
         assertTrue(result.isSuccess)
-        assertEquals("true", result.getOrNull()?.facts?.get("extracted"))
+        assertEquals("extracted: true", result.getOrNull()?.facts?.first())
         assertEquals(2, repo.lastMessages.size)
         assertEquals("M2", repo.lastMessages[0].message)
         assertEquals("M3", repo.lastMessages[1].message)

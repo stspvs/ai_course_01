@@ -77,7 +77,7 @@ class ChatMemoryManagerTest {
     @Test
     fun testWrapSystemPromptWithFacts() {
         val base = "You are an AI."
-        val facts = ChatFacts(mapOf("user_name" to "Stas"))
+        val facts = ChatFacts(listOf("user_name: Stas"))
         val strategy = ChatMemoryStrategy.StickyFacts(windowSize = 10, facts = facts)
         val agent = Agent(
             name = "Test", 

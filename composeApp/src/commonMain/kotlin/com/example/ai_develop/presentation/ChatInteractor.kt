@@ -182,7 +182,7 @@ class ChatInteractor(
             val updatedMessages = agent.messages.map { msg ->
                 if (msg.id == botMessageId) msg.copy(
                     message = content,
-                    tokenCount = estimateTokens(content)
+                    tokensUsed = estimateTokens(content)
                 ) else msg
             }
             agent.copy(messages = updatedMessages)

@@ -27,11 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ai_develop.domain.Agent
-import com.example.ai_develop.domain.ChatBranch
-import com.example.ai_develop.domain.ChatMemoryStrategy
-import com.example.ai_develop.domain.ChatMessage
-import com.example.ai_develop.presentation.LLMStateModel
+import com.example.ai_develop.domain.*
 
 @Composable
 internal fun ChatContent(
@@ -92,7 +88,7 @@ internal fun ChatContent(
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut()
             ) {
-                val facts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyMap()
+                val facts = (strategy as? ChatMemoryStrategy.StickyFacts)?.facts?.facts ?: emptyList()
                 FactsPanel(facts = facts)
             }
 
@@ -133,7 +129,7 @@ internal fun ChatContent(
             val messages = state.currentMessages
             val listState = rememberLazyListState()
             
-            LaunchedEffect(messages.size, messages.lastOrNull()?.message?.length) {
+            LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length) {
                 if (messages.isNotEmpty()) {
                     listState.scrollToItem(messages.size - 1)
                 }
@@ -169,9 +165,9 @@ internal fun ChatContent(
         ) {
             val taskStrategy = strategy as? ChatMemoryStrategy.TaskOriented
             TaskSidePanel(
-                task = taskStrategy?.currentTask,
-                progress = taskStrategy?.progress,
-                facts = taskStrategy?.facts?.facts ?: emptyMap(),
+                task = taskStrategy?.currentGoal,
+                progress = "", 
+                facts = emptyList(),
                 onClose = { showTaskPanel = false },
                 onRefresh = onForceUpdateMemory
             )
@@ -183,7 +179,7 @@ internal fun ChatContent(
 private fun TaskSidePanel(
     task: String?,
     progress: String?,
-    facts: Map<String, String>,
+    facts: List<String>,
     onClose: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -229,29 +225,13 @@ private fun TaskSidePanel(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Прогресс", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
-                Surface(
-                    color = Color(0xFFE8F5E9),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = progress ?: "В процессе анализа...",
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Ключевые факты", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
                 if (facts.isEmpty()) {
                     Text("Факты не найдены", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
                 } else {
-                    facts.forEach { (key, value) ->
+                    facts.forEach { fact ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                            Text(key, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
-                            Text(value, style = MaterialTheme.typography.bodySmall)
+                            Text(fact, style = MaterialTheme.typography.bodySmall)
                             HorizontalDivider(modifier = Modifier.padding(top = 4.dp), thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
                         }
                     }
@@ -262,7 +242,7 @@ private fun TaskSidePanel(
 }
 
 @Composable
-private fun FactsPanel(facts: Map<String, String>) {
+private fun FactsPanel(facts: List<String>) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         color = Color(0xFFFFF9C4),
@@ -280,12 +260,10 @@ private fun FactsPanel(facts: Map<String, String>) {
             if (facts.isEmpty()) {
                 Text("Факты еще не извлечены. Пообщайтесь с агентом!", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             } else {
-                facts.forEach { (key, value) ->
+                facts.forEach { fact ->
                     Row(modifier = Modifier.padding(vertical = 2.dp)) {
                         Text("• ", fontWeight = FontWeight.Bold)
-                        Text(key, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-                        Text(": ", style = MaterialTheme.typography.bodySmall)
-                        Text(value, style = MaterialTheme.typography.bodySmall)
+                        Text(fact, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -627,7 +605,7 @@ private fun ChatTopBar(
                     },
                     leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFF1976D2)) }
                 )
-                agents.filter { it.id != "general_chat_id" }.forEach { agent ->
+                agents.filter { it.id != GENERAL_CHAT_ID }.forEach { agent ->
                     DropdownMenuItem(
                         text = { Text(agent.name) },
                         onClick = {

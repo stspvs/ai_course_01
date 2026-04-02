@@ -29,9 +29,14 @@ data class Invariant(
 
 @Serializable
 data class AgentProfile(
-    val style: String,
-    val globalInstructions: String,
-    val constraints: List<String>
+    val name: String = "",
+    val about: String = "",
+    val style: String = "",
+    val globalInstructions: String = "",
+    val constraints: List<String> = emptyList(),
+    val preferences: Map<String, String> = emptyMap(),
+    val globalFacts: List<String> = emptyList(),
+    val memoryModelProvider: LLMProvider? = null
 )
 
 @Serializable

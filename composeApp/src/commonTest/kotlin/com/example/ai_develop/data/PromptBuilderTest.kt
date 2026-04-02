@@ -11,7 +11,7 @@ class PromptBuilderTest {
 
     @Test
     fun `buildFactsExtractionPrompt should contain current facts and new messages`() {
-        val currentFacts = ChatFacts(mapOf("name" to "Alice"))
+        val currentFacts = ChatFacts(listOf("name: Alice"))
         val messages = listOf(ChatMessage(message = "I like pizza", source = SourceType.USER))
         val json = Json { isLenient = true }
         

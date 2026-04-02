@@ -26,9 +26,9 @@ class StickyFactsStrategyDelegateTest {
 
     private class MockChatRepository : ChatRepository {
         override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider): Flow<Result<String>> = emptyFlow()
-        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts(facts = mapOf("Fact 1" to "Value 1")))
+        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts(facts = listOf("Fact 1: Value 1")))
         override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider): Result<String> = Result.success("summary")
-        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult("", "", emptyMap()))
+        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
         override suspend fun getProfile(agentId: String): AgentProfile? = null
@@ -42,7 +42,7 @@ class StickyFactsStrategyDelegateTest {
         var called = false
         override suspend fun invoke(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider, windowSize: Int): Result<ChatFacts> {
             called = true
-            return Result.success(ChatFacts(facts = mapOf("New Fact" to "New Value")))
+            return Result.success(ChatFacts(facts = listOf("New Fact: New Value")))
         }
     }
 
@@ -78,6 +78,6 @@ class StickyFactsStrategyDelegateTest {
 
         assertTrue(extractUseCase.called, "ExtractFactsUseCase should be called")
         val finalStrategy = updatedAgent?.memoryStrategy as? ChatMemoryStrategy.StickyFacts
-        assertEquals("New Value", finalStrategy?.facts?.facts?.get("New Fact"))
+        assertEquals("New Fact: New Value", finalStrategy?.facts?.facts?.first())
     }
 }

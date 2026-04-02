@@ -43,15 +43,14 @@ val commonModule = module {
             install(ContentNegotiation) {
                 json(get())
             }
-            if (BuildConfig.IS_DEBUG) {
-                install(Logging) {
-                    logger = object : Logger {
-                        override fun log(message: String) {
-                            println("HTTP Client: $message")
-                        }
+            // Включаем логирование всегда для отладки, так как BuildConfig.IS_DEBUG может быть false на некоторых платформах
+            install(Logging) {
+                logger = object : Logger {
+                    override fun log(message: String) {
+                        println("HTTP Client: $message")
                     }
-                    level = LogLevel.ALL
                 }
+                level = LogLevel.ALL
             }
         }
     }

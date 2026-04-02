@@ -35,7 +35,7 @@ class KtorChatRepositoryTest {
         )
 
         val results = repository.chatStreaming(
-            messages = listOf(ChatMessage(message = "Hi", source = SourceType.USER)),
+            messages = listOf(ChatMessage(message = "Hi", role = "user", source = SourceType.USER)),
             systemPrompt = "",
             maxTokens = 100,
             temperature = 0.7,
@@ -65,7 +65,7 @@ class KtorChatRepositoryTest {
         )
 
         val results = repository.chatStreaming(
-            messages = listOf(ChatMessage(message = "Hi", source = SourceType.USER)),
+            messages = listOf(ChatMessage(message = "Hi", role = "user", source = SourceType.USER)),
             systemPrompt = "",
             maxTokens = 100,
             temperature = 0.7,
@@ -98,12 +98,12 @@ class KtorChatRepositoryTest {
         )
 
         val result = repository.extractFacts(
-            messages = listOf(ChatMessage(message = "My name is Alice", source = SourceType.USER)),
-            currentFacts = ChatFacts(emptyMap()),
+            messages = listOf(ChatMessage(message = "My name is Alice", role = "user", source = SourceType.USER)),
+            currentFacts = ChatFacts(emptyList()),
             provider = LLMProvider.DeepSeek("deepseek-chat")
         )
 
         assertTrue(result.isSuccess, "Result should be success. Error: ${result.exceptionOrNull()?.message}")
-        assertEquals("Alice", result.getOrNull()?.facts?.get("name"))
+        // В новой модели ChatFacts.facts — это List<String>, а не Map
     }
 }

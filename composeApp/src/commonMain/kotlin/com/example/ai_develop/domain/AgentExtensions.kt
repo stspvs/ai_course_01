@@ -24,7 +24,9 @@ fun Agent.mergeWith(db: Agent): Agent {
     return db.copy(
         messages = allMessages,
         branches = finalBranches,
-        currentBranchId = this.currentBranchId ?: db.currentBranchId
+        currentBranchId = this.currentBranchId ?: db.currentBranchId,
+        agentProfile = this.agentProfile ?: db.agentProfile,
+        workingMemory = this.workingMemory
     )
 }
 
@@ -52,9 +54,14 @@ fun createChatMessage(
     parentId = parentId,
     branchId = branchId,
     message = message,
-    source = source,
-    tokenCount = estimateTokens(message),
-    timestamp = currentTimeMillis()
+    role = when(source) {
+        SourceType.USER -> "user"
+        SourceType.AI, SourceType.ASSISTANT -> "assistant"
+        SourceType.SYSTEM -> "system"
+    },
+    tokensUsed = estimateTokens(message),
+    timestamp = currentTimeMillis(),
+    source = source
 )
 
 fun estimateTokens(text: String): Int = (text.length / 4).coerceAtLeast(1)

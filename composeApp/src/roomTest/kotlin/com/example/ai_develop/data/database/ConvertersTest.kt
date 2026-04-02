@@ -27,7 +27,7 @@ class ConvertersTest {
 
     @Test
     fun testStickyFactsStrategyConversion() {
-        val strategy = ChatMemoryStrategy.StickyFacts(windowSize = 20, facts = ChatFacts(mapOf("key" to "value")))
+        val strategy = ChatMemoryStrategy.StickyFacts(windowSize = 20, facts = ChatFacts(listOf("key: value")))
         val string = converters.fromMemoryStrategy(strategy)
         val result = converters.toMemoryStrategy(string)
         assertEquals(strategy, result)

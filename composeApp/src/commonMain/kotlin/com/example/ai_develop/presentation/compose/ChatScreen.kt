@@ -1,3 +1,4 @@
+@file:OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 package com.example.ai_develop.presentation.compose
 
 import androidx.compose.foundation.layout.*
@@ -9,7 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.example.ai_develop.presentation.GENERAL_CHAT_ID
+import com.example.ai_develop.domain.GENERAL_CHAT_ID
 import com.example.ai_develop.presentation.LLMViewModel
 
 @Composable
@@ -65,7 +66,8 @@ fun ChatScreen(viewModel: LLMViewModel) {
                     onSelectAgent = { viewModel.selectAgent(it ?: GENERAL_CHAT_ID) },
                     onUpdateStrategy = { viewModel.updateMemoryStrategy(it) },
                     onCreateBranch = { fromId, name -> viewModel.createBranch(fromId, name) },
-                    onSwitchBranch = { viewModel.switchBranch(it) }
+                    onSwitchBranch = { viewModel.switchBranch(it) },
+                    onForceUpdateMemory = { viewModel.forceUpdateMemory() }
                 )
 
                 1 -> AgentsContent(

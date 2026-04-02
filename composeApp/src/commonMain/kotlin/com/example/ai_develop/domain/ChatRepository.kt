@@ -47,7 +47,6 @@ interface ChatRepository {
 
 @kotlinx.serialization.Serializable
 data class TaskAnalysisResult(
-    val task: String,
-    val progress: String,
-    val facts: Map<String, String>
+    val stage: AgentStage = AgentStage.PLANNING,
+    val plan: AgentPlan = AgentPlan()
 )

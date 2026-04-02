@@ -61,34 +61,55 @@ class ChatMemoryManager {
     }
 
     fun wrapSystemPrompt(agent: Agent): String {
-        var fullPrompt = agent.systemPrompt
+        val promptBuilder = StringBuilder(agent.systemPrompt)
         
-        // 3. Long-term Memory (UserProfile)
-        agent.userProfile?.let { profile ->
-            fullPrompt += "\n\nUSER PROFILE:\n"
-            if (profile.name.isNotEmpty()) fullPrompt += "- Name: ${profile.name}\n"
-            profile.preferences.forEach { (key, value) -> fullPrompt += "- $key: $value\n" }
-            profile.globalFacts.forEach { fullPrompt += "- $it\n" }
+        // 1. Agent Profile (Long-term Memory / Persona)
+        agent.agentProfile?.let { profile ->
+            promptBuilder.append("\n\n=== AGENT PROFILE (Context) ===\n")
+            if (profile.name.isNotEmpty()) promptBuilder.append("Agent Secondary Name/Role: ${profile.name}\n")
+            if (profile.about.isNotEmpty()) promptBuilder.append("Background/About: ${profile.about}\n")
+            
+            if (profile.preferences.isNotEmpty()) {
+                promptBuilder.append("Operational Preferences:\n")
+                profile.preferences.forEach { (key, value) -> promptBuilder.append("- $key: $value\n") }
+            }
+            if (profile.globalFacts.isNotEmpty()) {
+                promptBuilder.append("Known Global Facts:\n")
+                profile.globalFacts.forEach { promptBuilder.append("- $it\n") }
+            }
         }
 
-        // 2. Working Memory & Context
-        fullPrompt += when (val strategy = agent.memoryStrategy) {
-            is ChatMemoryStrategy.StickyFacts -> strategy.facts.toSystemPrompt()
+        // 2. Working Memory
+        val wm = agent.workingMemory
+        promptBuilder.append("\n=== WORKING MEMORY (Current Status) ===\n")
+        wm.currentTask?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT GOAL: $it\n") }
+        wm.progress?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT PROGRESS: $it\n") }
+        
+        val extractedFacts = wm.extractedFacts.facts
+        if (extractedFacts.isNotEmpty()) {
+            promptBuilder.append("\n=== RELEVANT CONTEXT (Extracted Facts) ===\n")
+            extractedFacts.forEach { promptBuilder.append("- $it\n") }
+        }
+
+        // 3. Temporary Memory (Сжатие контекста)
+        when (val strategy = agent.memoryStrategy) {
+            is ChatMemoryStrategy.StickyFacts -> {
+                val facts = strategy.facts.facts
+                if (facts.isNotEmpty()) {
+                    promptBuilder.append("\n=== TEMPORARY MEMORY (Active Facts) ===\n")
+                    facts.forEach { promptBuilder.append("- $it\n") }
+                }
+            }
             is ChatMemoryStrategy.Summarization -> {
                 strategy.summary?.let {
-                    "\n\nSUMMARY OF PREVIOUS CONVERSATION:\n$it"
-                } ?: ""
+                    if (it.isNotEmpty()) {
+                        promptBuilder.append("\n=== TEMPORARY MEMORY (Conversation Summary) ===\n$it")
+                    }
+                }
             }
-            is ChatMemoryStrategy.TaskOriented -> {
-                val taskInfo = mutableListOf<String>()
-                strategy.currentTask?.let { taskInfo.add("CURRENT TASK: $it") }
-                strategy.progress?.let { taskInfo.add("PROGRESS: $it") }
-                val facts = strategy.facts.toSystemPrompt()
-                "\n\n${taskInfo.joinToString("\n")}$facts"
-            }
-            else -> ""
+            else -> {}
         }
         
-        return fullPrompt
+        return promptBuilder.toString()
     }
 }

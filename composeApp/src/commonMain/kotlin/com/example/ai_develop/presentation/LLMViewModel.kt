@@ -1,3 +1,4 @@
+@file:OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 package com.example.ai_develop.presentation
 
 import androidx.lifecycle.ViewModel
@@ -10,7 +11,6 @@ import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-@OptIn(ExperimentalUuidApi::class)
 class LLMViewModel(
     private val repository: LocalChatRepository,
     private val interactor: ChatInteractor
@@ -170,9 +170,9 @@ class LLMViewModel(
         viewModelScope.launch { repository.saveAgentMetadata(updatedAgent) }
     }
 
-    fun updateAgentWithProfile(id: String, profile: UserProfile) {
+    fun updateAgentWithProfile(id: String, profile: AgentProfile) {
         val agent = _state.value.agents.find { it.id == id } ?: return
-        val updatedAgent = agent.copy(userProfile = profile)
+        val updatedAgent = agent.copy(agentProfile = profile)
         _state.update { currentState ->
             currentState.copy(agents = currentState.agents.map { if (it.id == id) updatedAgent else it })
         }

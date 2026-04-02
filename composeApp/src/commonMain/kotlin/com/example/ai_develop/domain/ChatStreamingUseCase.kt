@@ -28,11 +28,11 @@ open class ChatStreamingUseCase(
         provider: LLMProvider
     ): Flow<Result<String>> {
         val state = repository.getAgentState(agentId) ?: AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
-        val profile = repository.getProfile(agentId) ?: AgentProfile("Professional", "Follow instructions strictly.", emptyList())
+        val profile = repository.getProfile(agentId) ?: AgentProfile()
         val invariants = repository.getInvariants(agentId, state.currentStage)
         
         val systemPrompt = buildPrompt(state, profile, invariants)
-        val messages = listOf(ChatMessage(message = userMessage, source = SourceType.USER))
+        val messages = listOf(ChatMessage(message = userMessage, role = "user", source = SourceType.USER))
         
         var fullResponse = ""
         

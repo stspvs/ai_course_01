@@ -88,8 +88,8 @@ class KtorChatRepository(
             val prompt = PromptBuilder.buildFactsExtractionPrompt(currentFacts, messages, json)
 
             val factMessages = listOf(
-                ChatMessage(message = "You are a factual memory assistant. Output ONLY valid JSON.", source = SourceType.SYSTEM),
-                ChatMessage(message = prompt, source = SourceType.USER)
+                ChatMessage(message = "You are a factual memory assistant. Output ONLY valid JSON.", role = "system", source = SourceType.SYSTEM),
+                ChatMessage(message = prompt, role = "user", source = SourceType.USER)
             )
 
             val handler = getHandler(provider)
@@ -120,8 +120,8 @@ class KtorChatRepository(
                 
                 if (start != -1 && end != -1 && end > start) {
                     val jsonString = text.substring(start, end + 1)
-                    val newFactsMap = json.decodeFromString<Map<String, String>>(jsonString)
-                    Result.success(ChatFacts(newFactsMap))
+                    val newFactsList = json.decodeFromString<List<String>>(jsonString)
+                    Result.success(ChatFacts(newFactsList))
                 } else {
                     Result.failure(Exception("No JSON object found in response: $text"))
                 }
@@ -144,8 +144,8 @@ class KtorChatRepository(
             val prompt = PromptBuilder.buildSummarizationPrompt(previousSummary, messages, instruction)
 
             val summarizationMessages = listOf(
-                ChatMessage(message = "You are a helpful assistant that summarizes conversations.", source = SourceType.SYSTEM),
-                ChatMessage(message = prompt, source = SourceType.USER)
+                ChatMessage(message = "You are a helpful assistant that summarizes conversations.", role = "system", source = SourceType.SYSTEM),
+                ChatMessage(message = prompt, role = "user", source = SourceType.USER)
             )
 
             val handler = getHandler(provider)
@@ -186,12 +186,12 @@ class KtorChatRepository(
         provider: LLMProvider
     ): Result<TaskAnalysisResult> {
         return try {
-            val history = messages.joinToString("\n") { "${it.source.role}: ${it.message}" }
+            val history = messages.joinToString("\n") { "${it.role}: ${it.message}" }
             val fullPrompt = "$instruction\n\nCONVERSATION HISTORY:\n$history"
 
             val analysisMessages = listOf(
-                ChatMessage(message = "You are a task analysis assistant. Output ONLY valid JSON.", source = SourceType.SYSTEM),
-                ChatMessage(message = fullPrompt, source = SourceType.USER)
+                ChatMessage(message = "You are a task analysis assistant. Output ONLY valid JSON.", role = "system", source = SourceType.SYSTEM),
+                ChatMessage(message = fullPrompt, role = "user", source = SourceType.USER)
             )
 
             val handler = getHandler(provider)

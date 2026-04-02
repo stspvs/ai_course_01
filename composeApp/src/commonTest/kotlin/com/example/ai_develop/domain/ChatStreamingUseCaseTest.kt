@@ -37,7 +37,7 @@ class ChatStreamingUseCaseTest {
             messages: List<ChatMessage>,
             instruction: String,
             provider: LLMProvider
-        ): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult("", "", emptyMap()))
+        ): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
 
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null

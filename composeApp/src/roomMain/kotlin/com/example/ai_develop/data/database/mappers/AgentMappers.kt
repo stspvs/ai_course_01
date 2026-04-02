@@ -2,8 +2,7 @@ package com.example.ai_develop.data.database.mappers
 
 import com.example.ai_develop.data.database.AgentEntity
 import com.example.ai_develop.data.database.MessageEntity
-import com.example.ai_develop.domain.Agent
-import com.example.ai_develop.domain.ChatMessage
+import com.example.ai_develop.domain.*
 
 fun AgentEntity.toDomain(messages: List<ChatMessage>) = Agent(
     id = id,
@@ -18,7 +17,8 @@ fun AgentEntity.toDomain(messages: List<ChatMessage>) = Agent(
     memoryStrategy = memoryStrategy,
     branches = branches,
     currentBranchId = currentBranchId,
-    userProfile = userProfile
+    agentProfile = agentProfile,
+    workingMemory = workingMemory
 )
 
 fun Agent.toEntity() = AgentEntity(
@@ -33,7 +33,8 @@ fun Agent.toEntity() = AgentEntity(
     memoryStrategy = memoryStrategy,
     branches = branches,
     currentBranchId = currentBranchId,
-    userProfile = userProfile
+    agentProfile = agentProfile,
+    workingMemory = workingMemory
 )
 
 fun MessageEntity.toDomain() = ChatMessage(
@@ -41,10 +42,14 @@ fun MessageEntity.toDomain() = ChatMessage(
     parentId = parentId,
     branchId = branchId,
     message = message,
-    source = source,
-    tokenCount = tokenCount,
+    role = when(source) {
+        SourceType.USER -> "user"
+        SourceType.AI, SourceType.ASSISTANT -> "assistant"
+        else -> "system"
+    },
+    tokensUsed = tokenCount,
     timestamp = timestamp,
-    isSystemNotification = isSystemNotification
+    source = source
 )
 
 fun ChatMessage.toEntity(agentId: String) = MessageEntity(
@@ -54,7 +59,6 @@ fun ChatMessage.toEntity(agentId: String) = MessageEntity(
     branchId = branchId,
     message = message,
     source = source,
-    tokenCount = tokenCount,
-    timestamp = timestamp,
-    isSystemNotification = isSystemNotification
+    tokenCount = tokensUsed ?: 0,
+    timestamp = timestamp
 )

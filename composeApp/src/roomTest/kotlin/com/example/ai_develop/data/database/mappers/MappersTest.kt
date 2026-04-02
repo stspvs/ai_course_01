@@ -37,7 +37,7 @@ class MappersTest {
         val message = ChatMessage(
             message = "Hello",
             source = SourceType.USER,
-            tokenCount = 5
+            tokensUsed = 5
         )
         val agentId = "agent_123"
         
