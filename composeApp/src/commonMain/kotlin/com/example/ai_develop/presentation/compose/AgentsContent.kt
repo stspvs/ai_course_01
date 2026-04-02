@@ -23,7 +23,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.*
+import kotlinx.coroutines.delay
 
+@Suppress("UnusedBoxWithConstraintsScope")
 @Composable
 internal fun AgentsContent(
     state: LLMStateModel,
@@ -287,6 +289,20 @@ private fun AgentSettingsTab(
     var memoryStrategy by remember(agent.id) { mutableStateOf(agent.memoryStrategy) }
     var windowSize by remember(agent.id) { mutableStateOf(agent.memoryStrategy.windowSize) }
 
+    LaunchedEffect(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy) {
+        if (name != agent.name ||
+            systemPrompt != agent.systemPrompt ||
+            temperature != agent.temperature ||
+            provider != agent.provider ||
+            stopWord != agent.stopWord ||
+            maxTokens != agent.maxTokens ||
+            memoryStrategy != agent.memoryStrategy
+        ) {
+            delay(500)
+            onUpdateAgent(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy)
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -381,16 +397,9 @@ private fun AgentSettingsTab(
         )
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(
-                onClick = { onUpdateAgent(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy) },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Сохранить")
-            }
-            
             OutlinedButton(
                 onClick = onDuplicateAgent,
+                modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = null)
@@ -416,7 +425,10 @@ private fun AgentMemoryTab(
     var profile by remember(agent.id) { mutableStateOf(agent.agentProfile ?: AgentProfile()) }
 
     LaunchedEffect(profile) {
-        if (profile != agent.agentProfile) onUpdateProfile(profile)
+        if (profile != agent.agentProfile) {
+            delay(500)
+            onUpdateProfile(profile)
+        }
     }
 
     Column(

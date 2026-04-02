@@ -21,12 +21,17 @@ fun Agent.mergeWith(db: Agent): Agent {
     
     val finalBranches = mergedBranches + this.branches.filter { l -> db.branches.none { it.id == l.id } }
 
-    return db.copy(
+    // Важно: настройки (name, systemPrompt и т.д.) берем из текущего объекта (this), 
+    // так как они могли быть изменены в UI, а БД может прислать старое состояние
+    return this.copy(
         messages = allMessages,
         branches = finalBranches,
         currentBranchId = this.currentBranchId ?: db.currentBranchId,
         agentProfile = this.agentProfile ?: db.agentProfile,
-        workingMemory = this.workingMemory
+        workingMemory = this.workingMemory,
+        // Поля, которые приходят из БД (метаданные могут обновиться в БД и мы хотим их видеть)
+        // Но если мы редактируем их в UI, 'this' приоритетнее.
+        totalTokensUsed = db.totalTokensUsed
     )
 }
 

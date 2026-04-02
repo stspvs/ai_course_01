@@ -9,50 +9,77 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LLMViewModelTest {
-
     private val testDispatcher = StandardTestDispatcher()
+    
+    private class FakeRepository : LocalChatRepository {
+        val agentsFlow = MutableStateFlow<List<Agent>>(emptyList())
+        val savedAgents = mutableMapOf<String, Agent>()
 
-    private class MockLocalRepository : LocalChatRepository {
-        private val agentsFlow = MutableStateFlow<List<Agent>>(emptyList())
         override fun getAgents(): Flow<List<Agent>> = agentsFlow
-        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = flowOf(null)
+        
+        override fun getAgentWithMessages(agentId: String): Flow<Agent?> {
+             return MutableStateFlow(savedAgents[agentId])
+        }
+        
         override suspend fun saveAgent(agent: Agent) {
-            agentsFlow.value = listOf(agent)
+            savedAgents[agent.id] = agent
+            agentsFlow.value = savedAgents.values.toList()
         }
+
         override suspend fun saveAgentMetadata(agent: Agent) {
-            agentsFlow.value = listOf(agent)
+            val existing = savedAgents[agent.id]
+            savedAgents[agent.id] = agent.copy(messages = existing?.messages ?: agent.messages)
+            agentsFlow.value = savedAgents.values.toList()
         }
-        override suspend fun saveMessage(agentId: String, message: ChatMessage) {}
-        override suspend fun deleteAgent(agentId: String) {}
+
+        override suspend fun saveMessage(agentId: String, message: ChatMessage) {
+            val agent = savedAgents[agentId] ?: return
+            val updatedMessages = agent.messages + message
+            saveAgent(agent.copy(messages = updatedMessages))
+        }
+
+        override suspend fun deleteAgent(agentId: String) {
+            savedAgents.remove(agentId)
+            agentsFlow.value = savedAgents.values.toList()
+        }
     }
 
-    private class MockChatRepository : ChatRepository {
-        override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider): Flow<Result<String>> = flowOf()
-        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider): Result<ChatFacts> = Result.success(ChatFacts())
-        override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider): Result<String> = Result.success("summary")
-        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<TaskAnalysisResult> = Result.success(TaskAnalysisResult())
-        override suspend fun saveAgentState(state: AgentState) {}
-        override suspend fun getAgentState(agentId: String): AgentState? = null
-        override suspend fun getProfile(agentId: String): AgentProfile? = null
-        override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
-        override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
-        override suspend fun saveInvariant(invariant: Invariant) {}
-        override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
-    }
-
+    private lateinit var repository: FakeRepository
+    private lateinit var interactor: ChatInteractor
+    
     @BeforeTest
     fun setup() {
         Dispatchers.setMain(testDispatcher)
+        repository = FakeRepository()
+        
+        val fakeChatRepo = FakeChatRepo()
+        val chatStreamingUseCase = object : ChatStreamingUseCase(fakeChatRepo) {
+            override fun invoke(
+                messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int,
+                temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider
+            ) = flowOf(Result.success("test"))
+        }
+        
+        val strategyFactory = StrategyDelegateFactory(
+            extractFactsUseCase = ExtractFactsUseCase(fakeChatRepo),
+            summarizeChatUseCase = SummarizeChatUseCase(fakeChatRepo),
+            repository = fakeChatRepo
+        )
+        
+        interactor = ChatInteractor(
+            chatStreamingUseCase = chatStreamingUseCase,
+            repository = repository,
+            memoryManager = ChatMemoryManager(),
+            strategyFactory = strategyFactory
+        )
     }
 
     @AfterTest
@@ -61,17 +88,106 @@ class LLMViewModelTest {
     }
 
     @Test
-    fun `initial state should have general chat`() = runTest {
-        val repo = MockLocalRepository()
-        val chatRepo = MockChatRepository()
-        val interactor = ChatInteractor(
-            ChatStreamingUseCase(chatRepo),
-            repo,
-            ChatMemoryManager(),
-            StrategyDelegateFactory(ExtractFactsUseCase(chatRepo), SummarizeChatUseCase(chatRepo), chatRepo)
-        )
-        val viewModel = LLMViewModel(repo, interactor)
+    fun testUpdateAgentAppliedToStateAndRepository() = runTest {
+        val viewModel = LLMViewModel(repository, interactor)
+        advanceUntilIdle()
+
+        viewModel.createAgent()
+        advanceUntilIdle()
         
-        assertEquals(GENERAL_CHAT_ID, viewModel.state.value.selectedAgentId)
+        val createdAgentId = viewModel.state.value.agents.first { it.id != GENERAL_CHAT_ID }.id
+        viewModel.selectAgent(createdAgentId)
+        
+        val newName = "Updated Name"
+        val newPrompt = "Updated Prompt"
+        val newTemp = 0.5
+        val newProvider = LLMProvider.DeepSeek("custom-model")
+        val newStopWord = "stop"
+        val newMaxTokens = 1234
+        val newStrategy = ChatMemoryStrategy.Summarization(15)
+
+        viewModel.updateAgent(
+            id = createdAgentId,
+            name = newName,
+            systemPrompt = newPrompt,
+            temperature = newTemp,
+            provider = newProvider,
+            stopWord = newStopWord,
+            maxTokens = newMaxTokens,
+            memoryStrategy = newStrategy
+        )
+        
+        advanceUntilIdle()
+
+        val stateAgent = viewModel.state.value.selectedAgent
+        assertNotNull(stateAgent)
+        assertEquals(newName, stateAgent.name)
+        assertEquals(newPrompt, stateAgent.systemPrompt)
+        assertEquals(newTemp, stateAgent.temperature)
+        assertEquals(newProvider, stateAgent.provider)
+        assertEquals(newStopWord, stateAgent.stopWord)
+        assertEquals(newMaxTokens, stateAgent.maxTokens)
+        assertEquals(newStrategy, stateAgent.memoryStrategy)
+
+        val repoAgent = repository.savedAgents[createdAgentId]
+        assertNotNull(repoAgent)
+        assertEquals(newName, repoAgent.name)
+        assertEquals(newStrategy, repoAgent.memoryStrategy)
     }
+
+    @Test
+    fun testUpdateAgentWithProfileApplied() = runTest {
+        val viewModel = LLMViewModel(repository, interactor)
+        advanceUntilIdle()
+        
+        viewModel.createAgent()
+        advanceUntilIdle()
+        val agentId = viewModel.state.value.agents.first { it.id != GENERAL_CHAT_ID }.id
+        viewModel.selectAgent(agentId)
+
+        val profile = AgentProfile(
+            name = "Profile Name",
+            about = "About",
+            style = "Style",
+            constraints = listOf("Constraint 1")
+        )
+
+        viewModel.updateAgentWithProfile(agentId, profile)
+        advanceUntilIdle()
+
+        assertEquals(profile, viewModel.state.value.selectedAgent?.agentProfile)
+        assertEquals(profile, repository.savedAgents[agentId]?.agentProfile)
+    }
+
+    @Test
+    fun testMergeLogicDoesNotRevertSettings() = runTest {
+        val viewModel = LLMViewModel(repository, interactor)
+        advanceUntilIdle()
+        
+        viewModel.createAgent()
+        advanceUntilIdle()
+        val agentId = viewModel.state.value.agents.first { it.id != GENERAL_CHAT_ID }.id
+        
+        val currentAgent = viewModel.state.value.agents.find { it.id == agentId }!!
+        val updatedLocally = currentAgent.copy(name = "Local Name")
+        
+        val staleFromRepo = currentAgent.copy(name = "Stale Name")
+        val merged = updatedLocally.mergeWith(staleFromRepo)
+        
+        assertEquals("Local Name", merged.name, "Имя должно сохраниться локальное при слиянии с БД")
+    }
+}
+
+private class FakeChatRepo : ChatRepository {
+    override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider) = flowOf(Result.success(""))
+    override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
+    override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
+    override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(TaskAnalysisResult())
+    override suspend fun saveAgentState(state: AgentState) {}
+    override suspend fun getAgentState(agentId: String) = null
+    override suspend fun getProfile(agentId: String) = null
+    override suspend fun saveProfile(agentId: String, profile: AgentProfile) {}
+    override suspend fun getInvariants(agentId: String, stage: AgentStage) = emptyList<Invariant>()
+    override suspend fun saveInvariant(invariant: Invariant) {}
+    override fun observeAgentState(agentId: String) = flowOf(null)
 }

@@ -6,7 +6,11 @@ import androidx.room.RoomDatabase
 import androidx.room.RoomDatabaseConstructor
 import androidx.room.TypeConverters
 
-@Database(entities = [AgentEntity::class, MessageEntity::class], version = 6)
+@Database(
+    entities = [AgentEntity::class, MessageEntity::class], 
+    version = 7,
+    exportSchema = true
+)
 @TypeConverters(Converters::class)
 @ConstructedBy(AppDatabaseConstructor::class)
 abstract class AppDatabase : RoomDatabase() {

@@ -183,9 +183,6 @@ buildConfig {
     
     // Флаг дебага
     buildConfigField("boolean", "IS_DEBUG", "false")
-    sourceSets.getByName("androidDebug") {
-        buildConfigField("boolean", "IS_DEBUG", "true")
-    }
 
     buildConfigField("String", "DEEPSEEK_KEY", "\"${getSecret("DEEPSEEK_KEY")}\"")
     buildConfigField("String", "YANDEX_KEY", "\"${getSecret("YANDEX_KEY")}\"")
