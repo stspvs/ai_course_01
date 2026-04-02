@@ -3,6 +3,7 @@ package com.example.ai_develop.presentation.compose
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -90,6 +91,7 @@ private fun DesktopAgentsContent(
             if (selectedAgent != null) {
                 AgentDetails(
                     agent = selectedAgent,
+                    templates = templates,
                     onUpdateAgent = { n, p, t, pr, s, m, k -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k) },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
@@ -136,6 +138,7 @@ private fun MobileAgentsContent(
                 )
                 AgentDetails(
                     agent = selectedAgent,
+                    templates = templates,
                     onUpdateAgent = { n, p, t, pr, s, m, k -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k) },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
@@ -231,6 +234,7 @@ private fun AgentItem(
 @Composable
 private fun AgentDetails(
     agent: Agent,
+    templates: List<AgentTemplate>,
     onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     onUpdateProfile: (AgentProfile) -> Unit,
     onDeleteAgent: () -> Unit,
@@ -252,6 +256,7 @@ private fun AgentDetails(
             when (selectedTab) {
                 0 -> AgentSettingsTab(
                     agent = agent,
+                    templates = templates,
                     onUpdateAgent = onUpdateAgent,
                     onDeleteAgent = onDeleteAgent,
                     onDuplicateAgent = onDuplicateAgent
@@ -268,6 +273,7 @@ private fun AgentDetails(
 @Composable
 private fun AgentSettingsTab(
     agent: Agent,
+    templates: List<AgentTemplate>,
     onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     onDeleteAgent: () -> Unit,
     onDuplicateAgent: () -> Unit
@@ -285,6 +291,27 @@ private fun AgentSettingsTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (templates.isNotEmpty()) {
+            Text("Использовать шаблон:", style = MaterialTheme.typography.labelMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                templates.forEach { template ->
+                    SuggestionChip(
+                        onClick = {
+                            name = template.name
+                            systemPrompt = template.systemPrompt
+                            temperature = template.temperature
+                            maxTokens = template.maxTokens
+                        },
+                        label = { Text(template.name) },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+        }
+
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
