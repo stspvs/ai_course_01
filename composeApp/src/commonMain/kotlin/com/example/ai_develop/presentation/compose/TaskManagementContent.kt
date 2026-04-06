@@ -12,16 +12,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.ai_develop.domain.Agent
-import com.example.ai_develop.domain.TaskContext
+import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.TaskViewModel
 
 @Composable
@@ -108,6 +110,8 @@ fun TaskSettings(
 
         RoleSettingRow(
             label = "Архитектор-планировщик (PLANNING)",
+            role = ArchitectRole(),
+            task = task,
             agents = agents,
             selectedAgentId = task.architectAgentId,
             selectedColor = Color(task.architectColor),
@@ -117,6 +121,8 @@ fun TaskSettings(
         
         RoleSettingRow(
             label = "Исполнитель (EXECUTION)",
+            role = ExecutorRole(),
+            task = task,
             agents = agents,
             selectedAgentId = task.executorAgentId,
             selectedColor = Color(task.executorColor),
@@ -126,6 +132,8 @@ fun TaskSettings(
         
         RoleSettingRow(
             label = "Оценщик (VALIDATION)",
+            role = ValidatorRole(),
+            task = task,
             agents = agents,
             selectedAgentId = task.validatorAgentId,
             selectedColor = Color(task.validatorColor),
@@ -138,12 +146,17 @@ fun TaskSettings(
 @Composable
 fun RoleSettingRow(
     label: String,
+    role: TaskRole,
+    task: TaskContext,
     agents: List<Agent>,
     selectedAgentId: String?,
     selectedColor: Color,
     onAgentSelected: (String) -> Unit,
     onColorSelected: (Color) -> Unit
 ) {
+    val selectedAgent = agents.find { it.id == selectedAgentId }
+    var showDetails by remember(selectedAgentId) { mutableStateOf(false) }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -151,6 +164,33 @@ fun RoleSettingRow(
                 AgentDropdownSelector("", agents, selectedAgentId, onAgentSelected)
             }
             ColorPickerSimple(selectedColor, onColorSelected)
+            
+            if (selectedAgent != null) {
+                IconButton(onClick = { showDetails = !showDetails }) {
+                    Icon(
+                        if (showDetails) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Подробности"
+                    )
+                }
+            }
+        }
+
+        if (showDetails && selectedAgent != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Системный промпт агента:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(selectedAgent.systemPrompt, style = MaterialTheme.typography.bodySmall)
+                    
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    
+                    Text("Инструкция роли (${role.taskState}):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(role.getSystemInstruction(task), style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic)
+                }
+            }
         }
     }
 }

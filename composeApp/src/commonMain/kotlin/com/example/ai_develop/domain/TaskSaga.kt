@@ -3,7 +3,6 @@ package com.example.ai_develop.domain
 import com.example.ai_develop.data.database.LocalChatRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -25,12 +24,6 @@ class TaskSaga(
     private val json = Json { ignoreUnknownKeys = true }
     
     private var isStageRunning = false
-
-    @Serializable
-    data class SagaResponse(
-        val status: String,
-        val result: String
-    )
 
     init {
         scope.launch {
@@ -63,6 +56,15 @@ class TaskSaga(
 
     private fun getValidAgentId(): String? {
         return architect?.id ?: executor?.id ?: validator?.id
+    }
+
+    private fun getRoleForState(state: TaskState): TaskRole {
+        return when (state) {
+            TaskState.PLANNING -> ArchitectRole()
+            TaskState.EXECUTION -> ExecutorRole()
+            TaskState.VALIDATION -> ValidatorRole()
+            TaskState.DONE -> throw IllegalStateException("No role for DONE state")
+        }
     }
 
     fun start() {
@@ -120,17 +122,20 @@ class TaskSaga(
             return
         }
 
-        when (currentContext.state.taskState) {
-            TaskState.PLANNING -> runStage(architect, "PLANNING")
-            TaskState.EXECUTION -> runStage(executor, "EXECUTION")
-            TaskState.VALIDATION -> runStage(validator, "VALIDATION")
-            TaskState.DONE -> {}
+        val role = getRoleForState(currentContext.state.taskState)
+        val agent = when (currentContext.state.taskState) {
+            TaskState.PLANNING -> architect
+            TaskState.EXECUTION -> executor
+            TaskState.VALIDATION -> validator
+            TaskState.DONE -> null
         }
+        
+        runStage(agent, role)
     }
 
-    private fun runStage(agent: Agent?, stageName: String) {
+    private fun runStage(agent: Agent?, role: TaskRole) {
         if (agent == null) {
-            handleStageError(null, Exception("Агент для этапа $stageName не назначен"))
+            handleStageError(null, Exception("Агент для этапа ${role.taskState} не назначен"))
             return
         }
 
@@ -142,26 +147,13 @@ class TaskSaga(
                 val currentContext = _context.value
                 val allMessages = localRepository.getMessagesForTask(currentContext.taskId).first()
                 val sagaFilteredMessages = filterHistoryForStage(allMessages, currentContext.state.taskState)
-                val isPlanning = currentContext.state.taskState == TaskState.PLANNING
-
-                val finalHistory = if (isPlanning) {
-                    memoryManager.processMessages(sagaFilteredMessages, agent.memoryStrategy)
-                } else {
-                    sagaFilteredMessages
-                }
                 
-                val systemInstruction = "\n\nIMPORTANT: You are currently in the $stageName stage of the task: '${currentContext.title}'.\n" +
-                        "Your goal is to complete this stage and return a JSON response.\n" +
-                        "JSON format: {\"status\": \"SUCCESS\"/\"FAILED\", \"result\": \"description\"}"
-
-                val fullSystemPrompt = if (isPlanning) {
-                    memoryManager.wrapSystemPrompt(agent) + systemInstruction
-                } else {
-                    agent.systemPrompt + systemInstruction
-                }
+                val finalHistory = role.processHistory(sagaFilteredMessages, agent, memoryManager)
+                val systemInstruction = role.getSystemInstruction(currentContext)
+                val fullSystemPrompt = role.buildSystemPrompt(agent, systemInstruction, memoryManager)
                 
                 val contextMessages = mutableListOf<ChatMessage>()
-                if (isPlanning) {
+                if (role is ArchitectRole) {
                     memoryManager.getShortTermMemoryMessage(agent)?.let { contextMessages.add(it) }
                 }
                 contextMessages.addAll(finalHistory)
@@ -174,7 +166,7 @@ class TaskSaga(
                     maxTokens = agent.maxTokens,
                     temperature = agent.temperature,
                     stopWord = agent.stopWord,
-                    isJsonMode = true,
+                    isJsonMode = role.isJsonMode(),
                     provider = agent.provider
                 ).collect { result ->
                     result.onSuccess { chunk ->
@@ -186,6 +178,8 @@ class TaskSaga(
                 }
                 
                 if (fullResponse.isNotBlank() && !_context.value.isPaused) {
+                    val sagaResp = parseSagaResponse(fullResponse)
+                    
                     val chatMessage = ChatMessage(
                         message = fullResponse,
                         role = "assistant",
@@ -201,18 +195,12 @@ class TaskSaga(
                         taskState = currentContext.state.taskState
                     )
                     
-                    val sagaResp = parseSagaResponse(fullResponse)
-                    
                     isStageRunning = false
                     
-                    if (sagaResp != null) {
-                        if (sagaResp.status == "SUCCESS") {
-                            transitionToNext(agent.id, sagaResp.result)
-                        } else {
-                            transitionBack(agent.id, sagaResp.result)
-                        }
-                    } else {
-                        transitionBack(agent.id, "Invalid JSON response from agent.")
+                    when (val result = role.handleResponse(fullResponse, sagaResp)) {
+                        is RoleResult.Success -> transitionToNext(agent.id, result.result)
+                        is RoleResult.Failure -> transitionBack(agent.id, result.reason)
+                        RoleResult.Partial -> { /* Continue conversation */ }
                     }
                 } else {
                     isStageRunning = false
@@ -265,7 +253,7 @@ class TaskSaga(
 
     fun handleUserMessage(message: String) {
         if (_context.value.state.taskState != TaskState.PLANNING) return
-        val agentId = architect?.id ?: getValidAgentId() ?: return // Не сохраняем, если нет ни одного агента
+        val agentId = architect?.id ?: getValidAgentId() ?: return
         
         scope.launch {
             val chatMessage = ChatMessage(
