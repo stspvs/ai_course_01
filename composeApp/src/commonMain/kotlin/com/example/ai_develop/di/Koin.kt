@@ -11,6 +11,8 @@ import io.ktor.client.engine.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import org.koin.core.context.startKoin
 import org.koin.core.module.Module
@@ -68,6 +70,8 @@ val commonModule = module {
             openRouterKey = BuildConfig.OPENROUTER_KEY
         )
     }
+
+    single<CoroutineDispatcher> { Dispatchers.Default }
 
     singleOf(::ChatStreamingUseCase)
     singleOf(::ExtractFactsUseCase)

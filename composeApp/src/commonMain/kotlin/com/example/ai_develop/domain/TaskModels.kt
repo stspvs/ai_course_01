@@ -30,4 +30,14 @@ data class TaskContext(
     val architectColor: Long = 0xFF2196F3,
     val executorColor: Long = 0xFF4CAF50,
     val validatorColor: Long = 0xFF9C27B0
-)
+) {
+    val isReadyToRun: Boolean
+        get() = architectAgentId != null && executorAgentId != null && validatorAgentId != null
+
+    val missingAgents: List<String>
+        get() = buildList {
+            if (architectAgentId == null) add("Архитектор")
+            if (executorAgentId == null) add("Исполнитель")
+            if (validatorAgentId == null) add("Валидатор")
+        }
+}

@@ -51,6 +51,16 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                 Text("Этап: ${task.state.taskState}", color = getStageColor(task.state.taskState, task))
             }
             
+            if (!task.isReadyToRun) {
+                Badge(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text("Не назначены агенты", modifier = Modifier.padding(4.dp))
+                }
+            }
+
             Button(
                 onClick = { viewModel.togglePause(task.taskId) },
                 colors = ButtonDefaults.buttonColors(

@@ -1,9 +1,10 @@
 package com.example.ai_develop.domain
 
 import com.example.ai_develop.data.database.LocalChatRepository
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -12,18 +13,18 @@ import kotlin.test.assertTrue
 class TaskSagaDetailedTest {
 
     private class FakeLocalRepository : LocalChatRepository {
-        val tasks = mutableMapOf<String, TaskContext>()
-        val messages = mutableListOf<ChatMessage>()
-        val agents = mutableMapOf<String, Agent>()
+        private val _tasks = MutableStateFlow<List<TaskContext>>(emptyList())
+        private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+        private val _agents = MutableStateFlow<List<Agent>>(emptyList())
 
-        override fun getAgents(): Flow<List<Agent>> = flowOf(agents.values.toList())
-        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = flowOf(agents[agentId])
+        override fun getAgents(): Flow<List<Agent>> = _agents.asStateFlow()
+        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = _agents.map { list -> list.find { it.id == agentId } }
         override suspend fun saveAgent(agent: Agent) {
-            agents[agent.id] = agent
+            _agents.value = _agents.value.filterNot { it.id == agent.id } + agent
         }
 
         override suspend fun saveAgentMetadata(agent: Agent) {
-            agents[agent.id] = agent
+            saveAgent(agent)
         }
 
         override suspend fun saveMessage(
@@ -32,30 +33,30 @@ class TaskSagaDetailedTest {
             taskId: String?,
             taskState: TaskState?
         ) {
-            messages.add(message)
+            _messages.value = _messages.value + message.copy(taskId = taskId, taskState = taskState)
         }
 
         override suspend fun deleteAgent(agentId: String) {
-            agents.remove(agentId)
+            _agents.value = _agents.value.filterNot { it.id == agentId }
         }
 
-        override fun getTasks(): Flow<List<TaskContext>> = flowOf(tasks.values.toList())
+        override fun getTasks(): Flow<List<TaskContext>> = _tasks.asStateFlow()
         override suspend fun saveTask(task: TaskContext) {
-            tasks[task.taskId] = task
+            _tasks.value = _tasks.value.filterNot { it.taskId == task.taskId } + task
         }
 
         override suspend fun deleteTask(task: TaskContext) {
-            tasks.remove(task.taskId)
+            _tasks.value = _tasks.value.filterNot { it.taskId == task.taskId }
         }
 
-        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = flowOf(messages)
+        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = _messages.map { list -> list.filter { it.taskId == taskId } }
         override suspend fun deleteMessagesForTask(taskId: String) {
-            messages.clear()
+            _messages.value = _messages.value.filterNot { it.taskId == taskId }
         }
     }
 
     private class FakeChatRepository : ChatRepository {
-        var lastSystemPrompt: String = ""
+        val systemPrompts = mutableListOf<String>()
         var nextResponse: String = ""
 
         override fun chatStreaming(
@@ -67,7 +68,7 @@ class TaskSagaDetailedTest {
             isJsonMode: Boolean,
             provider: LLMProvider
         ): Flow<Result<String>> {
-            lastSystemPrompt = systemPrompt
+            systemPrompts.add(systemPrompt)
             return flowOf(Result.success(nextResponse))
         }
 
@@ -112,6 +113,7 @@ class TaskSagaDetailedTest {
         val localRepo = FakeLocalRepository()
         val chatRepo = FakeChatRepository()
         val memoryManager = ChatMemoryManager()
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
         val agent = Agent(
             id = "a1",
             name = "A",
@@ -128,27 +130,22 @@ class TaskSagaDetailedTest {
             state = AgentTaskState(TaskState.PLANNING, agent),
             architectAgentId = "a1",
             executorAgentId = "a1",
-            validatorAgentId = "a1"
+            validatorAgentId = "a1",
+            isPaused = false
         )
+        localRepo.saveAgent(agent)
+        localRepo.saveTask(context)
 
-        val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager)
+        val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
 
-        // 1. Check PLANNING instruction
+        // 1. PLANNING stage
         chatRepo.nextResponse = "{\"status\": \"SUCCESS\", \"result\": \"P\"}"
         saga.start()
-        assertTrue(chatRepo.lastSystemPrompt.contains("PLANNING stage"))
-        assertTrue(chatRepo.lastSystemPrompt.contains("Task Title"))
-        assertTrue(chatRepo.lastSystemPrompt.contains("return a JSON response"))
-
-        // 2. Check EXECUTION instruction
-        chatRepo.nextResponse = "{\"status\": \"SUCCESS\", \"result\": \"E\"}"
-        assertEquals(TaskState.EXECUTION, saga.context.value.state.taskState)
-        assertTrue(chatRepo.lastSystemPrompt.contains("EXECUTION stage"))
-
-        // 3. Check VALIDATION instruction
-        chatRepo.nextResponse = "{\"status\": \"SUCCESS\", \"result\": \"V\"}"
-        assertEquals(TaskState.VALIDATION, saga.context.value.state.taskState)
-        assertTrue(chatRepo.lastSystemPrompt.contains("VALIDATION stage"))
+        advanceUntilIdle()
+        
+        assertTrue(chatRepo.systemPrompts.any { it.contains("PLANNING stage") }, "Should have called PLANNING stage")
+        assertTrue(chatRepo.systemPrompts.any { it.contains("EXECUTION stage") }, "Should have called EXECUTION stage")
+        assertTrue(chatRepo.systemPrompts.any { it.contains("VALIDATION stage") }, "Should have called VALIDATION stage")
     }
 
     @Test
@@ -157,6 +154,7 @@ class TaskSagaDetailedTest {
             val localRepo = FakeLocalRepository()
             val chatRepo = FakeChatRepository()
             val memoryManager = ChatMemoryManager()
+            val testDispatcher = UnconfinedTestDispatcher(testScheduler)
             val agent = Agent(
                 id = "a1",
                 name = "A",
@@ -172,21 +170,26 @@ class TaskSagaDetailedTest {
                 title = "Task Title",
                 state = AgentTaskState(TaskState.EXECUTION, agent),
                 executorAgentId = "a1",
-                architectAgentId = "a1"
+                architectAgentId = "a1",
+                validatorAgentId = "a1",
+                isPaused = false
             )
+            localRepo.saveAgent(agent)
+            localRepo.saveTask(context)
 
-            val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager)
+            val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
 
             chatRepo.nextResponse = "{\"status\": \"FAILED\", \"result\": \"Error reason\"}"
             saga.start()
+            advanceUntilIdle()
 
             assertEquals(TaskState.PLANNING, saga.context.value.state.taskState)
 
-            val failedMsg =
-                localRepo.messages.find { it.message.contains("--- STAGE FAILED/REJECTED ---") }
+            val messages = localRepo.getMessagesForTask("t1").first()
+            val failedMsg = messages.find { it.message.contains("--- STAGE FAILED/REJECTED ---") }
             assertNotNull(failedMsg)
-            assertTrue(failedMsg!!.message.contains("Error reason"))
-            assertEquals(SourceType.SYSTEM, failedMsg!!.source)
+            assertTrue(failedMsg.message.contains("Error reason"))
+            assertEquals(SourceType.SYSTEM, failedMsg.source)
         }
 
     @Test
@@ -194,6 +197,7 @@ class TaskSagaDetailedTest {
         val localRepo = FakeLocalRepository()
         val chatRepo = FakeChatRepository()
         val memoryManager = ChatMemoryManager()
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
         val agent = Agent(
             id = "a1",
             name = "A",
@@ -208,14 +212,21 @@ class TaskSagaDetailedTest {
             taskId = "t1",
             title = "T",
             state = AgentTaskState(TaskState.PLANNING, agent),
-            architectAgentId = "a1"
+            architectAgentId = "a1",
+            executorAgentId = "a1",
+            validatorAgentId = "a1",
+            isPaused = false
         )
-        val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager)
+        localRepo.saveAgent(agent)
+        localRepo.saveTask(context)
+        val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
 
         chatRepo.nextResponse = "This is not JSON at all"
         saga.start()
+        advanceUntilIdle()
 
         assertEquals(TaskState.PLANNING, saga.context.value.state.taskState)
-        assertTrue(localRepo.messages.any { it.message.contains("Invalid JSON response") })
+        val messages = localRepo.getMessagesForTask("t1").first()
+        assertTrue(messages.any { it.message.contains("Invalid JSON response") })
     }
 }

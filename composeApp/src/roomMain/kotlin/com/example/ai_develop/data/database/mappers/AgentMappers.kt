@@ -49,7 +49,10 @@ fun MessageEntity.toDomain() = ChatMessage(
     },
     tokensUsed = tokenCount,
     timestamp = timestamp,
-    source = source
+    source = source,
+    isSystemNotification = isSystemNotification,
+    taskId = taskId,
+    taskState = taskState
 )
 
 fun ChatMessage.toEntity(agentId: String) = MessageEntity(
@@ -60,5 +63,8 @@ fun ChatMessage.toEntity(agentId: String) = MessageEntity(
     message = message,
     source = source,
     tokenCount = tokensUsed ?: 0,
-    timestamp = timestamp
+    timestamp = timestamp,
+    isSystemNotification = isSystemNotification,
+    taskId = taskId,
+    taskState = taskState
 )

@@ -18,7 +18,7 @@ class DatabaseChatRepositoryTest {
 
     @BeforeTest
     fun setup() {
-        db = AppDatabaseConstructor.initialize()
+        db = createTestDatabase()
         repository = DatabaseChatRepository(db)
     }
 
@@ -92,7 +92,7 @@ class DatabaseChatRepositoryTest {
     fun testMessageTaskStatePersistence() = runTest {
         val agentId = "agent_1"
         val taskId = "task_1"
-        val message = ChatMessage(message = "Task message", source = SourceType.USER)
+        val message = ChatMessage(message = "Task message", source = SourceType.USER, taskState = TaskState.EXECUTION)
         
         // Save an agent first to satisfy foreign key
         val agent = Agent(id = agentId, name = "Test", systemPrompt = "", temperature = 0.7, provider = LLMProvider.DeepSeek(), stopWord = "", maxTokens = 2000)

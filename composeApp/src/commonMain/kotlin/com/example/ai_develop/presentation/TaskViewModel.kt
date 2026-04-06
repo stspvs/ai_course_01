@@ -4,8 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -13,7 +14,8 @@ import kotlin.uuid.Uuid
 class TaskViewModel(
     private val chatRepository: ChatRepository,
     private val localRepository: LocalChatRepository,
-    private val memoryManager: ChatMemoryManager
+    private val memoryManager: ChatMemoryManager,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
     private val _tasks = MutableStateFlow<List<TaskContext>>(emptyList())
@@ -83,7 +85,7 @@ class TaskViewModel(
         val valr = agents.find { it.id == task.validatorAgentId }
         
         activeSaga?.stop()
-        activeSaga = TaskSaga(chatRepository, localRepository, arch, exec, valr, task, memoryManager)
+        activeSaga = TaskSaga(chatRepository, localRepository, arch, exec, valr, task, memoryManager, ioDispatcher)
         activeSaga?.start()
     }
 
