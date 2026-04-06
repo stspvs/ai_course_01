@@ -2,14 +2,14 @@ package com.example.ai_develop.data.database
 
 import com.example.ai_develop.data.database.mappers.toDomain
 import com.example.ai_develop.data.database.mappers.toEntity
-import com.example.ai_develop.domain.Agent
-import com.example.ai_develop.domain.ChatMessage
+import com.example.ai_develop.domain.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 
 class RoomLocalChatRepository(
-    private val agentDao: AgentDao
+    private val agentDao: AgentDao,
+    private val taskDao: TaskDao
 ) : LocalChatRepository {
 
     override fun getAgents(): Flow<List<Agent>> {
@@ -38,8 +38,9 @@ class RoomLocalChatRepository(
         agentDao.upsertAgent(agent.toEntity())
     }
 
-    override suspend fun saveMessage(agentId: String, message: ChatMessage) {
-        agentDao.insertMessage(message.toEntity(agentId))
+    override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) {
+        val entity = message.toEntity(agentId).copy(taskId = taskId, taskState = taskState)
+        agentDao.insertMessage(entity)
     }
 
     override suspend fun deleteAgent(agentId: String) {
@@ -47,5 +48,30 @@ class RoomLocalChatRepository(
         if (entity != null) {
             agentDao.deleteAgent(entity)
         }
+    }
+
+    // Task operations
+    override fun getTasks(): Flow<List<TaskContext>> {
+        return taskDao.getAllTasks().map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
+
+    override suspend fun saveTask(task: TaskContext) {
+        taskDao.upsertTask(task.toEntity())
+    }
+
+    override suspend fun deleteTask(task: TaskContext) {
+        taskDao.deleteTask(task.toEntity())
+    }
+
+    override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> {
+        return taskDao.getMessagesForTask(taskId).map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
+
+    override suspend fun deleteMessagesForTask(taskId: String) {
+        taskDao.deleteMessagesForTask(taskId)
     }
 }

@@ -20,8 +20,13 @@ class StickyFactsStrategyDelegateTest {
         override fun getAgentWithMessages(agentId: String) = flowOf(null)
         override suspend fun saveAgent(agent: Agent) {}
         override suspend fun saveAgentMetadata(agent: Agent) { savedMetadata = agent }
-        override suspend fun saveMessage(agentId: String, message: ChatMessage) {}
+        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) {}
         override suspend fun deleteAgent(agentId: String) {}
+        override fun getTasks(): Flow<List<TaskContext>> = emptyFlow()
+        override suspend fun saveTask(task: TaskContext) {}
+        override suspend fun deleteTask(task: TaskContext) {}
+        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = emptyFlow()
+        override suspend fun deleteMessagesForTask(taskId: String) {}
     }
 
     private class MockChatRepository : ChatRepository {

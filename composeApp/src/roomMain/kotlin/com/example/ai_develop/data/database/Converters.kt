@@ -49,4 +49,22 @@ class Converters {
 
     @TypeConverter
     fun toWorkingMemory(value: String): WorkingMemory = json.decodeFromString(value)
+
+    @TypeConverter
+    fun fromTaskState(state: TaskState): String = state.name
+
+    @TypeConverter
+    fun toTaskState(value: String): TaskState = TaskState.valueOf(value)
+
+    @TypeConverter
+    fun fromStringList(list: List<String>): String = json.encodeToString(list)
+
+    @TypeConverter
+    fun toStringList(value: String): List<String> = json.decodeFromString(value)
+
+    @TypeConverter
+    fun fromAgentTaskState(state: AgentTaskState): String = json.encodeToString(state)
+
+    @TypeConverter
+    fun toAgentTaskState(value: String): AgentTaskState = json.decodeFromString(value)
 }

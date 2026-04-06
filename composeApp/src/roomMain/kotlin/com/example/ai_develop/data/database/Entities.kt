@@ -33,7 +33,7 @@ data class AgentEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["agentId"])]
+    indices = [Index(value = ["agentId"]), Index(value = ["taskId"])]
 )
 data class MessageEntity(
     @PrimaryKey val id: String,
@@ -44,5 +44,26 @@ data class MessageEntity(
     val source: SourceType,
     val tokenCount: Int,
     val timestamp: Long = 0L,
-    val isSystemNotification: Boolean = false
+    val isSystemNotification: Boolean = false,
+    val taskId: String? = null,
+    val taskState: TaskState? = null
+)
+
+@Entity(tableName = "tasks")
+data class TaskEntity(
+    @PrimaryKey val taskId: String,
+    val title: String,
+    val state: AgentTaskState,
+    val isPaused: Boolean,
+    val step: Int,
+    val plan: List<String>,
+    val planDone: List<String>,
+    val currentPlanStep: String?,
+    val totalCount: Int,
+    val architectAgentId: String?,
+    val executorAgentId: String?,
+    val validatorAgentId: String?,
+    val architectColor: Long,
+    val executorColor: Long,
+    val validatorColor: Long
 )

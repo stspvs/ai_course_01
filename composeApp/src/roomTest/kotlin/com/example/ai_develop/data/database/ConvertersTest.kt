@@ -1,9 +1,6 @@
 package com.example.ai_develop.data.database
 
-import com.example.ai_develop.domain.ChatFacts
-import com.example.ai_develop.domain.ChatMemoryStrategy
-import com.example.ai_develop.domain.LLMProvider
-import com.example.ai_develop.domain.UserProfile
+import com.example.ai_develop.domain.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -40,5 +37,21 @@ class ConvertersTest {
         val string = converters.fromUserProfile(profile)
         val result = converters.toUserProfile(string)
         assertEquals(profile, result)
+    }
+
+    @Test
+    fun testTaskStateConversion() {
+        val state = TaskState.EXECUTION
+        val string = converters.fromTaskState(state)
+        val result = converters.toTaskState(string)
+        assertEquals(state, result)
+    }
+
+    @Test
+    fun testStringListConversion() {
+        val list = listOf("one", "two", "three")
+        val string = converters.fromStringList(list)
+        val result = converters.toStringList(string)
+        assertEquals(list, result)
     }
 }

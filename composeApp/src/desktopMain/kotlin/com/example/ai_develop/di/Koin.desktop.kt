@@ -17,6 +17,7 @@ actual val platformModule = module {
         getDatabaseBuilder().build()
     }
     single { get<AppDatabase>().agentDao() }
+    single { get<AppDatabase>().taskDao() }
     single<LocalChatRepository> { DatabaseChatRepository(get()) }
 }
 

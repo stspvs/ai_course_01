@@ -23,7 +23,9 @@ data class ChatMessage(
     val parentId: String? = null,
     val branchId: String? = null,
     val source: SourceType = SourceType.SYSTEM,
-    val isSystemNotification: Boolean = false
+    val isSystemNotification: Boolean = false,
+    val taskId: String? = null,
+    val taskState: TaskState? = null
 ) {
     val content: String get() = message
     val tokenCount: Int get() = tokensUsed ?: 0

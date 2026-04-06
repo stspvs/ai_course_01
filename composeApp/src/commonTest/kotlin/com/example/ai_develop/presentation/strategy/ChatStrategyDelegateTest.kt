@@ -3,6 +3,7 @@ package com.example.ai_develop.presentation.strategy
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -85,7 +86,12 @@ class ChatStrategyDelegateTest {
             savedAgents.add(agent)
         }
 
-        override suspend fun saveMessage(agentId: String, message: ChatMessage) {}
+        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) {}
         override suspend fun deleteAgent(agentId: String) {}
+        override fun getTasks(): Flow<List<TaskContext>> = emptyFlow()
+        override suspend fun saveTask(task: TaskContext) {}
+        override suspend fun deleteTask(task: TaskContext) {}
+        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = emptyFlow()
+        override suspend fun deleteMessagesForTask(taskId: String) {}
     }
 }

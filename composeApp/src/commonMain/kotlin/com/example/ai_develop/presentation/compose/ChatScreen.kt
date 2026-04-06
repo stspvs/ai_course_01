@@ -3,7 +3,9 @@ package com.example.ai_develop.presentation.compose
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,9 +14,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.GENERAL_CHAT_ID
 import com.example.ai_develop.presentation.LLMViewModel
+import com.example.ai_develop.presentation.TaskViewModel
+import org.koin.compose.viewmodel.koinViewModel
 
 @Composable
 fun ChatScreen(viewModel: LLMViewModel) {
+    val taskViewModel: TaskViewModel = koinViewModel()
     val state by viewModel.state.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
     var chatInput by remember { mutableStateOf("") }
@@ -41,6 +46,28 @@ fun ChatScreen(viewModel: LLMViewModel) {
                     onClick = { selectedTab = 1 },
                     icon = { Icon(Icons.Default.Person, contentDescription = "Агенты") },
                     label = { Text("Агенты") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color(0xFF4A148C),
+                        selectedTextColor = Color(0xFF4A148C),
+                        indicatorColor = Color(0xFFE1BEE7)
+                    )
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.List, contentDescription = "Задачи") },
+                    label = { Text("Задачи") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color(0xFF4A148C),
+                        selectedTextColor = Color(0xFF4A148C),
+                        indicatorColor = Color(0xFFE1BEE7)
+                    )
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    icon = { Icon(Icons.Default.Build, contentDescription = "Saga") },
+                    label = { Text("Saga Chat") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color(0xFF4A148C),
                         selectedTextColor = Color(0xFF4A148C),
@@ -84,6 +111,10 @@ fun ChatScreen(viewModel: LLMViewModel) {
                     onDuplicateAgent = { viewModel.duplicateAgent(it) },
                     onSelectAgent = { viewModel.selectAgent(it ?: GENERAL_CHAT_ID) }
                 )
+                
+                2 -> TaskManagementContent(taskViewModel)
+                
+                3 -> TaskChatContent(taskViewModel)
             }
         }
     }

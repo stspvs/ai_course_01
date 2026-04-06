@@ -4,8 +4,7 @@ import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
-import com.example.ai_develop.presentation.ChatInteractor
-import com.example.ai_develop.presentation.LLMViewModel
+import com.example.ai_develop.presentation.*
 import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
 import io.ktor.client.*
 import io.ktor.client.engine.*
@@ -80,4 +79,5 @@ val commonModule = module {
     factoryOf(::ChatInteractor)
 
     viewModelOf(::LLMViewModel)
+    viewModelOf(::TaskViewModel)
 }

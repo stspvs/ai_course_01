@@ -8,17 +8,18 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 
 class DatabaseChatRepository(private val db: AppDatabase) : LocalChatRepository {
-    private val dao = db.agentDao()
+    private val agentDao = db.agentDao()
+    private val taskDao = db.taskDao()
 
     override fun getAgents(): Flow<List<Agent>> {
-        return dao.getAllAgents().map { entities ->
+        return agentDao.getAllAgents().map { entities ->
             entities.map { it.toDomain(emptyList()) }
         }
     }
 
     override fun getAgentWithMessages(agentId: String): Flow<Agent?> {
-        val agentFlow = dao.getAgentByIdFlow(agentId)
-        val messagesFlow = dao.getMessagesForAgent(agentId)
+        val agentFlow = agentDao.getAgentByIdFlow(agentId)
+        val messagesFlow = agentDao.getMessagesForAgent(agentId)
         
         return agentFlow.combine(messagesFlow) { entity, messageEntities ->
             entity?.toDomain(messageEntities.map { it.toDomain() })
@@ -26,24 +27,50 @@ class DatabaseChatRepository(private val db: AppDatabase) : LocalChatRepository 
     }
 
     override suspend fun saveAgent(agent: Agent) {
-        dao.updateAgentWithMessages(
+        agentDao.updateAgentWithMessages(
             agent.toEntity(),
             agent.messages.map { it.toEntity(agent.id) }
         )
     }
 
     override suspend fun saveAgentMetadata(agent: Agent) {
-        dao.upsertAgent(agent.toEntity())
+        agentDao.upsertAgent(agent.toEntity())
     }
 
-    override suspend fun saveMessage(agentId: String, message: ChatMessage) {
-        dao.insertMessage(message.toEntity(agentId))
-        dao.getAgentById(agentId)?.let { agent ->
-            dao.updateTokens(agentId, agent.totalTokensUsed + message.tokenCount)
+    override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) {
+        val entity = message.toEntity(agentId).copy(taskId = taskId, taskState = taskState)
+        agentDao.insertMessage(entity)
+        agentDao.getAgentById(agentId)?.let { agent ->
+            agentDao.updateTokens(agentId, agent.totalTokensUsed + message.tokenCount)
         }
     }
 
     override suspend fun deleteAgent(agentId: String) {
-        dao.getAgentById(agentId)?.let { dao.deleteAgent(it) }
+        agentDao.getAgentById(agentId)?.let { agentDao.deleteAgent(it) }
+    }
+
+    // Task operations
+    override fun getTasks(): Flow<List<TaskContext>> {
+        return taskDao.getAllTasks().map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
+
+    override suspend fun saveTask(task: TaskContext) {
+        taskDao.upsertTask(task.toEntity())
+    }
+
+    override suspend fun deleteTask(task: TaskContext) {
+        taskDao.deleteTask(task.toEntity())
+    }
+
+    override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> {
+        return taskDao.getMessagesForTask(taskId).map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
+
+    override suspend fun deleteMessagesForTask(taskId: String) {
+        taskDao.deleteMessagesForTask(taskId)
     }
 }

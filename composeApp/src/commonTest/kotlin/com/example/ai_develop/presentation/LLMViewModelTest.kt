@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -40,7 +41,7 @@ class LLMViewModelTest {
             agentsFlow.value = savedAgents.values.toList()
         }
 
-        override suspend fun saveMessage(agentId: String, message: ChatMessage) {
+        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) {
             val agent = savedAgents[agentId] ?: return
             val updatedMessages = agent.messages + message
             saveAgent(agent.copy(messages = updatedMessages))
@@ -50,6 +51,12 @@ class LLMViewModelTest {
             savedAgents.remove(agentId)
             agentsFlow.value = savedAgents.values.toList()
         }
+
+        override fun getTasks(): Flow<List<TaskContext>> = emptyFlow()
+        override suspend fun saveTask(task: TaskContext) {}
+        override suspend fun deleteTask(task: TaskContext) {}
+        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = emptyFlow()
+        override suspend fun deleteMessagesForTask(taskId: String) {}
     }
 
     private lateinit var repository: FakeRepository
