@@ -3,9 +3,16 @@ import kotlin.Boolean;
 
 CREATE TABLE AgentStateEntity (
     agentId TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    systemPrompt TEXT NOT NULL DEFAULT 'You are a helpful assistant.',
+    temperature REAL NOT NULL DEFAULT 0.7,
+    maxTokens INTEGER NOT NULL DEFAULT 2000,
+    stopWord TEXT NOT NULL DEFAULT '',
     currentStage TEXT AS AgentStage NOT NULL DEFAULT 'PLANNING',
     currentStepId TEXT,
-    planJson TEXT NOT NULL -- JSON AgentPlan
+    planJson TEXT NOT NULL, -- JSON AgentPlan
+    memoryStrategyJson TEXT NOT NULL DEFAULT '', -- JSON ChatMemoryStrategy
+    workingMemoryJson TEXT NOT NULL DEFAULT '' -- JSON WorkingMemory
 );
 
 CREATE TABLE ProfileEntity (
@@ -37,8 +44,11 @@ CREATE TABLE AgentMessageEntity (
 
 -- Queries
 saveAgentState:
-INSERT OR REPLACE INTO AgentStateEntity(agentId, currentStage, currentStepId, planJson)
-VALUES (?, ?, ?, ?);
+INSERT OR REPLACE INTO AgentStateEntity(
+    agentId, name, systemPrompt, temperature, maxTokens, stopWord,
+    currentStage, currentStepId, planJson, memoryStrategyJson, workingMemoryJson
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getAgentState:
 SELECT * FROM AgentStateEntity WHERE agentId = ?;

@@ -37,7 +37,14 @@ data class UserProfile(
 @Serializable
 data class AgentState(
     val agentId: String,
-    val currentStage: AgentStage,
-    val currentStepId: String?,
-    val plan: AgentPlan
+    val name: String = "",
+    val systemPrompt: String = "You are a helpful assistant.",
+    val temperature: Double = 0.7,
+    val maxTokens: Int = 2000,
+    val stopWord: String = "",
+    val currentStage: AgentStage = AgentStage.PLANNING,
+    val currentStepId: String? = null,
+    val plan: AgentPlan = AgentPlan(),
+    val memoryStrategy: ChatMemoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
+    val workingMemory: WorkingMemory = WorkingMemory()
 )

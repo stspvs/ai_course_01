@@ -145,10 +145,9 @@ class TaskSaga(
         scope.launch {
             try {
                 val currentContext = _context.value
-                val allMessages = localRepository.getMessagesForTask(currentContext.taskId).first()
-                val sagaFilteredMessages = filterHistoryForStage(allMessages, currentContext.state.taskState)
                 
-                val finalHistory = role.processHistory(sagaFilteredMessages, agent, memoryManager)
+                // ЗАКОН: Сообщения берем только из объекта агента
+                val finalHistory = role.processHistory(agent, memoryManager)
                 val systemInstruction = role.getSystemInstruction(currentContext)
                 val fullSystemPrompt = role.buildSystemPrompt(agent, systemInstruction, memoryManager)
                 
@@ -180,13 +179,16 @@ class TaskSaga(
                 if (fullResponse.isNotBlank() && !_context.value.isPaused) {
                     val sagaResp = parseSagaResponse(fullResponse)
                     
+                    val lastMsgId = agent.messages.lastOrNull()?.id
+
                     val chatMessage = ChatMessage(
                         message = fullResponse,
                         role = "assistant",
                         source = SourceType.AI,
                         timestamp = System.currentTimeMillis(),
                         taskId = currentContext.taskId,
-                        taskState = currentContext.state.taskState
+                        taskState = currentContext.state.taskState,
+                        parentId = lastMsgId
                     )
                     localRepository.saveMessage(
                         agentId = agent.id,
@@ -218,6 +220,8 @@ class TaskSaga(
         pause()
         scope.launch {
             val agentId = agent?.id ?: getValidAgentId() ?: return@launch
+            val lastMsgId = agent?.messages?.lastOrNull()?.id
+
             val prefix = if (agent != null) "❌ Ошибка API (${agent.name}): " else "⚠️ "
             localRepository.saveMessage(
                 agentId = agentId,
@@ -228,7 +232,8 @@ class TaskSaga(
                     timestamp = System.currentTimeMillis(),
                     taskId = _context.value.taskId,
                     taskState = _context.value.state.taskState,
-                    isSystemNotification = true
+                    isSystemNotification = true,
+                    parentId = lastMsgId
                 ),
                 taskId = _context.value.taskId,
                 taskState = _context.value.state.taskState
@@ -236,36 +241,24 @@ class TaskSaga(
         }
     }
 
-    private fun filterHistoryForStage(messages: List<ChatMessage>, currentStage: TaskState): List<ChatMessage> {
-        val result = mutableListOf<ChatMessage>()
-        result.addAll(messages.filter { it.source == SourceType.USER })
-        val stagesToConsider = listOf(TaskState.PLANNING, TaskState.EXECUTION, TaskState.VALIDATION)
-        stagesToConsider.forEach { stage ->
-            val lastMsgFromStage = messages
-                .filter { it.taskState == stage && it.source != SourceType.USER }
-                .lastOrNull()
-            if (lastMsgFromStage != null) {
-                result.add(lastMsgFromStage)
-            }
-        }
-        return result.distinctBy { it.id }.sortedBy { it.timestamp }
-    }
-
     fun handleUserMessage(message: String) {
         if (_context.value.state.taskState != TaskState.PLANNING) return
-        val agentId = architect?.id ?: getValidAgentId() ?: return
+        val activeAgent = architect ?: return
         
         scope.launch {
+            val lastMessage = activeAgent.messages.lastOrNull()
+
             val chatMessage = ChatMessage(
                 message = message,
                 role = "user",
                 source = SourceType.USER,
                 timestamp = System.currentTimeMillis(),
                 taskId = _context.value.taskId,
-                taskState = TaskState.PLANNING
+                taskState = TaskState.PLANNING,
+                parentId = lastMessage?.id 
             )
             localRepository.saveMessage(
-                agentId = agentId,
+                agentId = activeAgent.id,
                 message = chatMessage,
                 taskId = _context.value.taskId,
                 taskState = TaskState.PLANNING
@@ -287,9 +280,18 @@ class TaskSaga(
         }
         
         scope.launch {
-            if (currentState == TaskState.PLANNING && nextState == TaskState.EXECUTION) {
-                compressPlanningContext(sourceAgentId)
+            val currentAgent = when(currentState) {
+                TaskState.PLANNING -> architect
+                TaskState.EXECUTION -> executor
+                TaskState.VALIDATION -> validator
+                else -> null
             }
+
+            if (currentState == TaskState.PLANNING && nextState == TaskState.EXECUTION) {
+                compressPlanningContext(currentAgent)
+            }
+
+            val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
 
             val notification = ChatMessage(
                 message = "--- STAGE SUCCESS ---\nResult: $result",
@@ -298,7 +300,8 @@ class TaskSaga(
                 timestamp = System.currentTimeMillis(),
                 taskId = _context.value.taskId,
                 taskState = currentState,
-                isSystemNotification = true
+                isSystemNotification = true,
+                parentId = lastMsgId
             )
             localRepository.saveMessage(
                 agentId = sourceAgentId,
@@ -316,19 +319,18 @@ class TaskSaga(
         }
     }
 
-    private suspend fun compressPlanningContext(agentId: String) {
-        val agent = architect ?: return
-        if (agent.memoryStrategy is ChatMemoryStrategy.Summarization) {
-            val messages = localRepository.getMessagesForTask(_context.value.taskId).first()
+    private suspend fun compressPlanningContext(agent: Agent?) {
+        val architectAgent = agent ?: return
+        if (architectAgent.memoryStrategy is ChatMemoryStrategy.Summarization) {
             val result = repository.summarize(
-                messages = messages,
+                messages = architectAgent.messages,
                 previousSummary = null,
-                instruction = agent.memoryStrategy.summaryPrompt,
-                provider = agent.provider
+                instruction = architectAgent.memoryStrategy.summaryPrompt,
+                provider = architectAgent.provider
             )
             result.onSuccess { summary ->
-                val updatedAgent = agent.copy(
-                    memoryStrategy = agent.memoryStrategy.copy(summary = summary)
+                val updatedAgent = architectAgent.copy(
+                    memoryStrategy = architectAgent.memoryStrategy.copy(summary = summary)
                 )
                 localRepository.saveAgentMetadata(updatedAgent)
             }
@@ -343,6 +345,14 @@ class TaskSaga(
             else -> currentState
         }
         scope.launch {
+            val currentAgent = when(currentState) {
+                TaskState.PLANNING -> architect
+                TaskState.EXECUTION -> executor
+                TaskState.VALIDATION -> validator
+                else -> null
+            }
+            val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
+
             val notification = ChatMessage(
                 message = "--- STAGE FAILED/REJECTED ---\nReason: $reason",
                 role = "system",
@@ -350,7 +360,8 @@ class TaskSaga(
                 timestamp = System.currentTimeMillis(),
                 taskId = _context.value.taskId,
                 taskState = currentState,
-                isSystemNotification = true
+                isSystemNotification = true,
+                parentId = lastMsgId
             )
             localRepository.saveMessage(
                 agentId = sourceAgentId,

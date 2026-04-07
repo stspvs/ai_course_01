@@ -21,17 +21,32 @@ interface TaskRole {
     
     fun isJsonMode(): Boolean
     
+    /**
+     * Возвращает историю сообщений для промпта, полагаясь исключительно на внутреннюю логику Агента.
+     * Никакой внешней фильтрации — только то, что прописано в стратегии памяти Агента.
+     */
     fun processHistory(
-        messages: List<ChatMessage>, 
         agent: Agent, 
         memoryManager: ChatMemoryManager
-    ): List<ChatMessage>
+    ): List<ChatMessage> {
+        return memoryManager.processMessages(
+            messages = agent.messages,
+            strategy = agent.memoryStrategy,
+            currentBranchId = agent.currentBranchId,
+            agentBranches = agent.branches
+        )
+    }
 
+    /**
+     * Формирует системный промпт, используя стандартный механизм оборачивания Агента.
+     */
     fun buildSystemPrompt(
         agent: Agent, 
         instruction: String, 
         memoryManager: ChatMemoryManager
-    ): String
+    ): String {
+        return memoryManager.wrapSystemPrompt(agent) + instruction
+    }
     
     fun handleResponse(response: String, sagaResponse: SagaResponse?): RoleResult
 }
@@ -52,22 +67,6 @@ class ArchitectRole : TaskRole {
         "Final JSON format: {\"status\": \"SUCCESS\", \"result\": \"Summary of the agreed plan\"}"
 
     override fun isJsonMode(): Boolean = false
-
-    override fun processHistory(
-        messages: List<ChatMessage>, 
-        agent: Agent, 
-        memoryManager: ChatMemoryManager
-    ): List<ChatMessage> {
-        return memoryManager.processMessages(messages, agent.memoryStrategy)
-    }
-
-    override fun buildSystemPrompt(
-        agent: Agent, 
-        instruction: String, 
-        memoryManager: ChatMemoryManager
-    ): String {
-        return memoryManager.wrapSystemPrompt(agent) + instruction
-    }
 
     override fun handleResponse(response: String, sagaResponse: SagaResponse?): RoleResult {
         return when {
@@ -90,18 +89,6 @@ class ExecutorRole : TaskRole {
 
     override fun isJsonMode(): Boolean = true
 
-    override fun processHistory(
-        messages: List<ChatMessage>, 
-        agent: Agent, 
-        memoryManager: ChatMemoryManager
-    ): List<ChatMessage> = messages
-
-    override fun buildSystemPrompt(
-        agent: Agent, 
-        instruction: String, 
-        memoryManager: ChatMemoryManager
-    ): String = agent.systemPrompt + instruction
-
     override fun handleResponse(response: String, sagaResponse: SagaResponse?): RoleResult {
         return when {
             sagaResponse?.status == "SUCCESS" -> RoleResult.Success(sagaResponse.result)
@@ -123,18 +110,6 @@ class ValidatorRole : TaskRole {
         "JSON format: {\"status\": \"SUCCESS\"/\"FAILED\", \"result\": \"detailed validation report\"}"
 
     override fun isJsonMode(): Boolean = true
-
-    override fun processHistory(
-        messages: List<ChatMessage>, 
-        agent: Agent, 
-        memoryManager: ChatMemoryManager
-    ): List<ChatMessage> = messages
-
-    override fun buildSystemPrompt(
-        agent: Agent, 
-        instruction: String, 
-        memoryManager: ChatMemoryManager
-    ): String = agent.systemPrompt + instruction
 
     override fun handleResponse(response: String, sagaResponse: SagaResponse?): RoleResult {
         return when {

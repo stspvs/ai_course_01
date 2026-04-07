@@ -6,7 +6,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.serialization.json.Json
 
 open class ChatStreamingUseCase(
-    private val repository: ChatRepository
+    private val repository: ChatRepository,
+    private val memoryManager: ChatMemoryManager
 ) {
     open operator fun invoke(
         messages: List<ChatMessage>,
@@ -22,57 +23,62 @@ open class ChatStreamingUseCase(
         )
     }
 
+    /**
+     * Выполняет стриминг чата для конкретного агента, строго соблюдая его внутреннюю стратегию памяти.
+     * Это «Закон»: вся логика формирования истории инкапсулирована в агенте и memoryManager.
+     */
+    open suspend fun invokeForAgent(
+        agent: Agent,
+        userMessageText: String,
+        isJsonMode: Boolean = false
+    ): Flow<Result<String>> {
+        val lastMessage = agent.messages.lastOrNull()
+        
+        val userMessage = ChatMessage(
+            message = userMessageText,
+            role = "user",
+            source = SourceType.USER,
+            parentId = lastMessage?.id,
+            timestamp = System.currentTimeMillis()
+        )
+
+        // Формируем историю согласно стратегии агента
+        val processedHistory = memoryManager.processMessages(
+            messages = agent.messages + userMessage,
+            strategy = agent.memoryStrategy,
+            currentBranchId = agent.currentBranchId,
+            agentBranches = agent.branches
+        )
+
+        // Добавляем системные вставки из памяти (summary, facts), если они есть
+        val finalMessages = mutableListOf<ChatMessage>()
+        memoryManager.getShortTermMemoryMessage(agent)?.let { finalMessages.add(it) }
+        finalMessages.addAll(processedHistory)
+
+        return repository.chatStreaming(
+            messages = finalMessages,
+            systemPrompt = memoryManager.wrapSystemPrompt(agent),
+            maxTokens = agent.maxTokens,
+            temperature = agent.temperature,
+            stopWord = agent.stopWord,
+            isJsonMode = isJsonMode,
+            provider = agent.provider
+        )
+    }
+
+    // Устаревший метод, который нарушал инкапсуляцию, заменяем или помечаем к удалению
+    @Deprecated("Use invokeForAgent to respect agent's memory strategy", ReplaceWith("invokeForAgent"))
     open suspend fun invokeWithState(
         agentId: String,
         userMessage: String,
         provider: LLMProvider
     ): Flow<Result<String>> {
-        val state = repository.getAgentState(agentId) ?: AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
-        val profile = repository.getProfile(agentId) ?: UserProfile()
-        val invariants = repository.getInvariants(agentId, state.currentStage)
+        // Оставляем для совместимости, но логика должна быть приведена к стандарту агента
+        val agent = repository.getAgentState(agentId)?.let { state ->
+             // Пытаемся восстановить минимальный объект агента для работы
+             Agent(id = agentId, name = "Agent", systemPrompt = "", temperature = 0.7, provider = provider, stopWord = "", maxTokens = 2000)
+        } ?: return invoke(emptyList(), "", 2000, 0.7, "", false, provider)
         
-        val systemPrompt = buildPrompt(state, profile, invariants)
-        val messages = listOf(ChatMessage(message = userMessage, role = "user", source = SourceType.USER))
-        
-        var fullResponse = ""
-        
-        return repository.chatStreaming(
-            messages = messages,
-            systemPrompt = systemPrompt,
-            maxTokens = 2000,
-            temperature = 0.7,
-            stopWord = "",
-            isJsonMode = false,
-            provider = provider
-        ).onEach { result ->
-            result.onSuccess { chunk -> fullResponse += chunk }
-        }.onCompletion {
-            // После завершения стриминга — проверяем инварианты
-            validateResponse(agentId, fullResponse, invariants)
-        }
-    }
-
-    private fun buildPrompt(state: AgentState, profile: UserProfile, invariants: List<Invariant>): String {
-        return """
-            USER PERSONALIZATION:
-            - Preferences (Style, Format): ${profile.preferences.ifEmpty { "Not specified" }}
-            - Constraints (What to avoid): ${profile.constraints.ifEmpty { "None" }}
-
-            AGENT STATE:
-            - Current Stage: ${state.currentStage}
-            - Current Plan: ${Json.encodeToString(AgentPlan.serializer(), state.plan)}
-            
-            ACTIVE INVARIANTS FOR THIS STAGE:
-            ${invariants.joinToString("\n") { "- ${it.rule}" }}
-            
-            INSTRUCTIONS:
-            If you are in PLANNING, output a structured plan.
-            If you are in EXECUTION, perform the next step of the plan.
-            Strictly follow the user personalization and active invariants.
-        """.trimIndent()
-    }
-
-    private suspend fun validateResponse(agentId: String, response: String, invariants: List<Invariant>) {
-        // Здесь будет логика вызова extractFacts или LLM-валидации
+        return invokeForAgent(agent, userMessage)
     }
 }

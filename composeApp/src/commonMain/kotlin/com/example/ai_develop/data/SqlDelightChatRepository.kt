@@ -19,9 +19,16 @@ class SqlDelightChatRepository(
     override suspend fun saveAgentState(state: AgentState) {
         db.agentDatabaseQueries.saveAgentState(
             agentId = state.agentId,
+            name = state.name,
+            systemPrompt = state.systemPrompt,
+            temperature = state.temperature,
+            maxTokens = state.maxTokens.toLong(),
+            stopWord = state.stopWord,
             currentStage = state.currentStage,
             currentStepId = state.currentStepId,
-            planJson = json.encodeToString(AgentPlan.serializer(), state.plan)
+            planJson = json.encodeToString(AgentPlan.serializer(), state.plan),
+            memoryStrategyJson = json.encodeToString(ChatMemoryStrategy.serializer(), state.memoryStrategy),
+            workingMemoryJson = json.encodeToString(WorkingMemory.serializer(), state.workingMemory)
         )
     }
 
@@ -29,9 +36,24 @@ class SqlDelightChatRepository(
         return db.agentDatabaseQueries.getAgentState(agentId).executeAsOneOrNull()?.let {
             AgentState(
                 agentId = it.agentId,
+                name = it.name,
+                systemPrompt = it.systemPrompt,
+                temperature = it.temperature,
+                maxTokens = it.maxTokens.toInt(),
+                stopWord = it.stopWord,
                 currentStage = it.currentStage,
                 currentStepId = it.currentStepId,
-                plan = json.decodeFromString(AgentPlan.serializer(), it.planJson)
+                plan = json.decodeFromString(AgentPlan.serializer(), it.planJson),
+                memoryStrategy = if (it.memoryStrategyJson.isNotEmpty()) {
+                    json.decodeFromString(ChatMemoryStrategy.serializer(), it.memoryStrategyJson)
+                } else {
+                    ChatMemoryStrategy.SlidingWindow(10)
+                },
+                workingMemory = if (it.workingMemoryJson.isNotEmpty()) {
+                    json.decodeFromString(WorkingMemory.serializer(), it.workingMemoryJson)
+                } else {
+                    WorkingMemory()
+                }
             )
         }
     }
@@ -44,9 +66,24 @@ class SqlDelightChatRepository(
                 entity?.let {
                     AgentState(
                         agentId = it.agentId,
+                        name = it.name,
+                        systemPrompt = it.systemPrompt,
+                        temperature = it.temperature,
+                        maxTokens = it.maxTokens.toInt(),
+                        stopWord = it.stopWord,
                         currentStage = it.currentStage,
                         currentStepId = it.currentStepId,
-                        plan = json.decodeFromString(AgentPlan.serializer(), it.planJson)
+                        plan = json.decodeFromString(AgentPlan.serializer(), it.planJson),
+                        memoryStrategy = if (it.memoryStrategyJson.isNotEmpty()) {
+                            json.decodeFromString(ChatMemoryStrategy.serializer(), it.memoryStrategyJson)
+                        } else {
+                            ChatMemoryStrategy.SlidingWindow(10)
+                        },
+                        workingMemory = if (it.workingMemoryJson.isNotEmpty()) {
+                            json.decodeFromString(WorkingMemory.serializer(), it.workingMemoryJson)
+                        } else {
+                            WorkingMemory()
+                        }
                     )
                 }
             }
