@@ -1,1 +1,1 @@
-ALTER TABLE AgentStateEntity ADD COLUMN name TEXT NOT NULL DEFAULT '';
+-- Migration to version 2 moved to 19.sqm to reach version 20

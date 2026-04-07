@@ -37,46 +37,47 @@ actual class DriverFactory {
         val newVersion = AgentDatabase.Schema.version
 
         if (currentVersion == 0L) {
-            // База только что создана или пуста. 
-            // Благодаря IF NOT EXISTS в .sq, это не упадет, если таблицы уже есть.
+            // Database is new or empty
             AgentDatabase.Schema.create(driver)
             driver.execute(null, "PRAGMA user_version = $newVersion;", 0)
         } else if (currentVersion < newVersion) {
-            // ДЕСТРУКТИВНАЯ МИГРАЦИЯ: Пытаемся удалить старую базу
-            driver.close()
-            
-            val deleted = if (dbFile.exists()) {
-                // Повторные попытки удаления (важно для Windows)
-                var success = false
-                for (i in 1..3) {
-                    if (dbFile.delete()) {
-                        success = true
-                        break
+            try {
+                // Try to migrate using .sqm files
+                AgentDatabase.Schema.migrate(driver, currentVersion, newVersion)
+                driver.execute(null, "PRAGMA user_version = $newVersion;", 0)
+            } catch (e: Exception) {
+                // If migration fails, attempt destructive migration (delete and recreate)
+                driver.close()
+                
+                var deleted = false
+                if (dbFile.exists()) {
+                    for (i in 1..5) {
+                        if (dbFile.delete()) {
+                            deleted = true
+                            break
+                        }
+                        Thread.sleep(200)
                     }
-                    Thread.sleep(100)
+                } else {
+                    deleted = true
                 }
-                success
-            } else {
-                true
-            }
 
-            driver = JdbcSqliteDriver(url)
-            if (deleted) {
-                AgentDatabase.Schema.create(driver)
-            } else {
-                // Если удалить не удалось, пробуем создать недостающие таблицы
-                // Новые колонки в существующих таблицах так не добавятся, 
-                // но приложение хотя бы запустится без ошибки "table already exists".
-                try {
+                driver = JdbcSqliteDriver(url)
+                if (deleted) {
                     AgentDatabase.Schema.create(driver)
-                } catch (e: Exception) {
-                    // Игнорируем ошибки создания, если таблицы уже есть
+                    driver.execute(null, "PRAGMA user_version = $newVersion;", 0)
+                } else {
+                    // Last resort: try to create tables if they don't exist
+                    // This won't add new columns to existing tables, but avoids "table already exists"
+                    try {
+                        AgentDatabase.Schema.create(driver)
+                        driver.execute(null, "PRAGMA user_version = $newVersion;", 0)
+                    } catch (ignore: Exception) {}
                 }
             }
-            driver.execute(null, "PRAGMA user_version = $newVersion;", 0)
         }
         
-        // Оптимизация
+        // Optimizations
         driver.execute(null, "PRAGMA journal_mode=WAL;", 0)
         driver.execute(null, "PRAGMA foreign_keys=ON;", 0)
         

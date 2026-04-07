@@ -69,7 +69,7 @@ kotlin {
             dependsOn(commonTest)
             dependsOn(roomMain)
         }
-        
+
         val androidMain by getting {
             dependsOn(roomMain)
             dependencies {
