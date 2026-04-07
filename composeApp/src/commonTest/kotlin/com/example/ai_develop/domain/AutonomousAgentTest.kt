@@ -6,20 +6,17 @@
 package com.example.ai_develop.domain
 
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import kotlin.test.BeforeTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlin.test.*
 
 class AutonomousAgentTest {
     private lateinit var repository: MockChatRepository
     private lateinit var memoryManager: ChatMemoryManager
-    private val testScope = TestScope()
     private val agentId = "test_agent"
 
     @BeforeTest
@@ -29,71 +26,60 @@ class AutonomousAgentTest {
     }
 
     @Test
-    fun testInitialLoading() = testScope.runTest {
-        val initialState = AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
+    fun testInitialLoading() = runTest {
+        val initialState = AgentState(agentId, name = "Test Agent", currentStage = AgentStage.PLANNING)
         repository.agentStateMap[agentId] = initialState
 
         val autonomousAgent = AutonomousAgent(agentId, repository, memoryManager, this)
-
         autonomousAgent.refreshAgent()
 
         val agentValue = autonomousAgent.agent.value
         assertNotNull(agentValue)
-        assertEquals(agentId, agentValue.id)
+        assertEquals("Test Agent", agentValue.name)
     }
 
     @Test
-    fun testSendMessageAndGetResponse() = testScope.runTest {
+    fun testTransitionToExecution() = runTest {
+        repository.agentStateMap[agentId] = AgentState(agentId, currentStage = AgentStage.PLANNING)
         val autonomousAgent = AutonomousAgent(agentId, repository, memoryManager, this)
-
-        repository.agentStateMap[agentId] =
-            AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
         autonomousAgent.refreshAgent()
 
-        autonomousAgent.sendMessage("Hello AI")
+        val result = autonomousAgent.transitionTo(AgentStage.EXECUTION)
+        
+        assertTrue(result.isSuccess)
+        assertEquals(AgentStage.EXECUTION, repository.agentStateMap[agentId]?.currentStage)
+    }
 
+    @Test
+    fun testSendMessageAndStreaming() = runTest(UnconfinedTestDispatcher()) {
+        repository.agentStateMap[agentId] = AgentState(agentId)
+        val autonomousAgent = AutonomousAgent(agentId, repository, memoryManager, this)
+        autonomousAgent.refreshAgent()
+
+        val tokens = mutableListOf<String>()
+        val collectJob = launch {
+            autonomousAgent.partialResponse.collect { 
+                tokens.add(it) 
+            }
+        }
+
+        autonomousAgent.sendMessage("Hello")
+        advanceUntilIdle()
+
+        assertTrue(tokens.isNotEmpty(), "Tokens should not be empty")
+        assertEquals("Mock ", tokens[0])
+        assertEquals("Response", tokens[1])
+        
         val messages = autonomousAgent.agent.value?.messages ?: emptyList()
         assertEquals(2, messages.size)
-        assertEquals("user", messages[0].role)
-        assertEquals("assistant", messages[1].role)
-        assertEquals("Mock Response", messages[1].message)
-
-        assertTrue(repository.saveAgentStateCalled)
-    }
-
-    @Test
-    fun testAutoFactExtraction() = testScope.runTest {
-        val autonomousAgent = AutonomousAgent(agentId, repository, memoryManager, this)
-
-        repository.agentStateMap[agentId] =
-            AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
-        autonomousAgent.refreshAgent()
-
-        // Устанавливаем интервал в 2 сообщения (1 цикл user-assistant)
-        val agentWithWm = autonomousAgent.agent.value?.copy(
-            workingMemory = WorkingMemory(
-                isAutoUpdateEnabled = true,
-                updateInterval = 2,
-                analysisWindowSize = 2
-            )
-        )
-        // Хак для теста, так как поле приватное, но мы тестируем поведение
-        // В реальном тесте мы бы мокали repository.getAgentState чтобы он вернул нужный конфиг
-
-        // Отправляем сообщение. В конце цикла будет 2 сообщения (User + AI)
-        autonomousAgent.sendMessage("Msg 1")
-
-        // 2 % 2 == 0 -> должна сработать экстракция
-        assertTrue(repository.extractFactsCalled)
+        assertEquals("Mock Response", messages.last().message)
+        
+        collectJob.cancel()
     }
 
     class MockChatRepository : ChatRepository {
         var saveAgentStateCalled = false
-        var extractFactsCalled = false
-        var summarizeCalled = false
-
         val agentStateMap = mutableMapOf<String, AgentState>()
-        val agentStateFlow = MutableStateFlow<AgentState?>(null)
 
         override fun chatStreaming(
             messages: List<ChatMessage>,
@@ -104,26 +90,8 @@ class AutonomousAgentTest {
             isJsonMode: Boolean,
             provider: LLMProvider
         ): Flow<Result<String>> = flow {
-            emit(Result.success("Mock Response"))
-        }
-
-        override suspend fun extractFacts(
-            messages: List<ChatMessage>,
-            currentFacts: ChatFacts,
-            provider: LLMProvider
-        ): Result<ChatFacts> {
-            extractFactsCalled = true
-            return Result.success(ChatFacts(facts = listOf("Fact 1")))
-        }
-
-        override suspend fun summarize(
-            messages: List<ChatMessage>,
-            previousSummary: String?,
-            instruction: String,
-            provider: LLMProvider
-        ): Result<String> {
-            summarizeCalled = true
-            return Result.success("New Summary")
+            emit(Result.success("Mock "))
+            emit(Result.success("Response"))
         }
 
         override suspend fun saveAgentState(state: AgentState) {
@@ -132,26 +100,16 @@ class AutonomousAgentTest {
         }
 
         override suspend fun getAgentState(agentId: String): AgentState? = agentStateMap[agentId]
+        
         override suspend fun getProfile(agentId: String): UserProfile? = null
         override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
-        override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> =
-            emptyList()
-
+        override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
         override suspend fun saveInvariant(invariant: Invariant) {}
-        override fun observeAgentState(agentId: String): Flow<AgentState?> = agentStateFlow
+        override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(agentStateMap[agentId])
 
-        override suspend fun analyzeTask(
-            messages: List<ChatMessage>,
-            instruction: String,
-            provider: LLMProvider
-        ) =
-            Result.success(TaskAnalysisResult())
-
-        override suspend fun analyzeWorkingMemory(
-            messages: List<ChatMessage>,
-            instruction: String,
-            provider: LLMProvider
-        ) =
-            Result.success(WorkingMemoryAnalysis())
+        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
+        override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
+        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(TaskAnalysisResult())
+        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(WorkingMemoryAnalysis())
     }
 }

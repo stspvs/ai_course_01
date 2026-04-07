@@ -2,6 +2,7 @@ package com.example.ai_develop.presentation
 
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -63,7 +64,7 @@ class TaskViewModelTest {
 
     private lateinit var localRepository: FakeLocalRepository
     private lateinit var chatRepository: FakeChatRepo
-    private lateinit var memoryManager: ChatMemoryManager
+    private lateinit var useCase: ChatStreamingUseCase
     private lateinit var viewModel: TaskViewModel
 
     @BeforeTest
@@ -71,8 +72,8 @@ class TaskViewModelTest {
         Dispatchers.setMain(testDispatcher)
         localRepository = FakeLocalRepository()
         chatRepository = FakeChatRepo()
-        memoryManager = ChatMemoryManager()
-        viewModel = TaskViewModel(chatRepository, localRepository, memoryManager)
+        useCase = ChatStreamingUseCase(chatRepository, ChatMemoryManager(), CoroutineScope(testDispatcher))
+        viewModel = TaskViewModel(chatRepository, localRepository, useCase, testDispatcher)
     }
 
     @AfterTest

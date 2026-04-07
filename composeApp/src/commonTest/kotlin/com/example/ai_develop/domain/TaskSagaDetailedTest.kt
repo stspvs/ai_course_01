@@ -208,10 +208,11 @@ class TaskSagaDetailedTest {
             maxTokens = 2000
         )
 
+        // Переключаем в EXECUTION, где JSON обязателен
         val context = TaskContext(
             taskId = "t1",
             title = "T",
-            state = AgentTaskState(TaskState.PLANNING, agent),
+            state = AgentTaskState(TaskState.EXECUTION, agent),
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
@@ -225,6 +226,7 @@ class TaskSagaDetailedTest {
         saga.start()
         advanceUntilIdle()
 
+        // Ожидаем откат к PLANNING
         assertEquals(TaskState.PLANNING, saga.context.value.state.taskState)
         val messages = localRepo.getMessagesForTask("t1").first()
         assertTrue(messages.any { it.message.contains("Invalid JSON response") })

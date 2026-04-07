@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.MainScope
 
 class ChatStreamingUseCaseTest {
 
@@ -54,7 +55,9 @@ class ChatStreamingUseCaseTest {
         override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
     }
 
-    private val useCase = ChatStreamingUseCase(repository)
+    private val memoryManager = ChatMemoryManager()
+    private val scope = MainScope()
+    private val useCase = ChatStreamingUseCase(repository, memoryManager, scope)
 
     @Test
     fun `invoke should return flow from repository`() = runTest {

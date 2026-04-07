@@ -4,14 +4,13 @@ package com.example.ai_develop.domain
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
 
 /**
- * Автономный агент с интегрированной машиной состояний (AgentStateMachine).
+ * Автономный агент — это "живой" объект в доменном слое.
+ * Он владеет состоянием, машиной состояний и логикой взаимодействия с LLM.
  */
 class AutonomousAgent(
     val agentId: String,
@@ -19,10 +18,16 @@ class AutonomousAgent(
     private val memoryManager: ChatMemoryManager,
     private val scope: CoroutineScope
 ) {
+    // Состояние агента (Snapshot для UI)
     private val _agent = MutableStateFlow<Agent?>(null)
     val agent: StateFlow<Agent?> = _agent.asStateFlow()
 
+    // Машина состояний для управления фазами (Planning, Execution...)
     private var stateMachine: AgentStateMachine? = null
+
+    // Поток входящих токенов для текущего ответа
+    private val _partialResponse = MutableSharedFlow<String>(replay = 10)
+    val partialResponse: SharedFlow<String> = _partialResponse.asSharedFlow()
 
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
@@ -36,6 +41,7 @@ class AutonomousAgent(
     private fun loadAndSubscribe() {
         stateSyncJob?.cancel()
         stateSyncJob = scope.launch {
+            // Подписываемся на изменения в БД, если агент обновился извне
             repository.observeAgentState(agentId).collect { state ->
                 if (_agent.value == null && state != null) {
                     refreshAgent()
@@ -51,6 +57,7 @@ class AutonomousAgent(
         // Инициализируем машину состояний текущим состоянием из БД
         stateMachine = AgentStateMachine(state)
 
+        // Воссоздаем объект Agent (Snapshot)
         val loadedAgent = Agent(
             id = state.agentId,
             name = state.name,
@@ -60,30 +67,35 @@ class AutonomousAgent(
             stopWord = state.stopWord,
             maxTokens = state.maxTokens,
             userProfile = profile,
-            memoryStrategy = state.memoryStrategy
+            memoryStrategy = state.memoryStrategy,
+            workingMemory = state.workingMemory,
+            messages = state.messages
         )
 
         _agent.value = loadedAgent
     }
 
     /**
-     * Пример использования машины состояний для смены этапа
+     * Смена этапа через машину состояний с сохранением в БД
      */
     suspend fun transitionTo(nextStage: AgentStage): Result<Unit> {
         val fsm = stateMachine
             ?: return Result.failure(IllegalStateException("State machine not initialized"))
 
         return fsm.transitionTo(nextStage).map { newState ->
-            // Обновляем состояние в БД
             repository.saveAgentState(newState)
-            // И локально (если нужно для UI)
-            val current = _agent.value
-            if (current != null) {
-                // Мы можем расширить модель Agent, чтобы она тоже содержала stage для UI
-            }
+            // Обновляем локальный snapshot
+            _agent.update { it?.copy(
+                memoryStrategy = newState.memoryStrategy,
+                workingMemory = newState.workingMemory
+            ) }
         }
     }
 
+    /**
+     * Основной метод отправки сообщения.
+     * Теперь агент сам решает, как формировать промпт и как обрабатывать ответ.
+     */
     suspend fun sendMessage(text: String) {
         val currentAgent = _agent.value ?: return
         val fsm = stateMachine ?: return
@@ -91,19 +103,17 @@ class AutonomousAgent(
         if (_isProcessing.value) return
         _isProcessing.value = true
 
-        // 1. Проверяем инварианты перед обработкой (если есть)
-        val invariants = repository.getInvariants(agentId, fsm.getCurrentState().currentStage)
-        // Здесь можно добавить логику проверки invariants через LLM или правила
-
+        // Создаем сообщение пользователя
         val userMessage = ChatMessage(
             id = Uuid.random().toString(),
             role = "user",
             message = text,
-            timestamp = 0L,
+            timestamp = System.currentTimeMillis(),
             source = SourceType.USER,
             parentId = currentAgent.messages.lastOrNull()?.id
         )
 
+        // Обновляем состояние (локально)
         val updatedAgent = currentAgent.copy(messages = currentAgent.messages + userMessage)
         _agent.value = updatedAgent
 
@@ -112,16 +122,17 @@ class AutonomousAgent(
 
     private suspend fun processLlmResponse(currentAgent: Agent) {
         val fsm = stateMachine ?: return
+        val currentState = fsm.getCurrentState()
 
-        // Модифицируем системный промпт в зависимости от ТЕКУЩЕЙ ФАЗЫ (Stage)
-        val stageContext = "\nCURRENT STAGE: ${fsm.getCurrentState().currentStage}\n"
+        // 1. Формируем контекст в зависимости от текущей стадии
+        val stageContext = "\n[SYSTEM INFO] CURRENT STAGE: ${currentState.currentStage}\n"
         val basePrompt = memoryManager.wrapSystemPrompt(currentAgent)
         val systemPrompt = basePrompt + stageContext
 
-        val shortTermMemory = memoryManager.getShortTermMemoryMessage(currentAgent)
+        // 2. Подготовка истории (Memory Strategy)
         val inputMessages = mutableListOf<ChatMessage>()
-        shortTermMemory?.let { inputMessages.add(it) }
-
+        memoryManager.getShortTermMemoryMessage(currentAgent)?.let { inputMessages.add(it) }
+        
         val history = memoryManager.processMessages(
             currentAgent.messages,
             currentAgent.memoryStrategy,
@@ -144,46 +155,39 @@ class AutonomousAgent(
             ).collect { result ->
                 result.onSuccess { chunk ->
                     responseBuilder.append(chunk)
+                    _partialResponse.emit(chunk) // Отправляем токен в UI
                 }.onFailure { throw it }
             }
 
+            // 3. Финализация ответа
             val aiMessage = ChatMessage(
                 id = Uuid.random().toString(),
                 role = "assistant",
                 message = responseBuilder.toString(),
-                timestamp = 0L,
-                source = SourceType.AI,
+                timestamp = System.currentTimeMillis(),
+                source = SourceType.ASSISTANT,
                 parentId = currentAgent.messages.lastOrNull()?.id
             )
 
             val finalAgent = currentAgent.copy(messages = currentAgent.messages + aiMessage)
             _agent.value = finalAgent
 
+            // 4. Синхронизация и фоновые задачи (Maintenance)
             syncWithRepository(finalAgent)
             performMaintenance(finalAgent)
 
         } catch (e: Exception) {
-            // Error handling
+            _partialResponse.emit("Error: ${e.message}")
         } finally {
             _isProcessing.value = false
         }
     }
 
     private suspend fun performMaintenance(agent: Agent) {
-        val fsm = stateMachine ?: return
-
-        // После выполнения шага в EXECUTION, мы можем автоматически проверить,
-        // нужно ли переходить в REVIEW
-        if (fsm.getCurrentState().currentStage == AgentStage.EXECUTION) {
-            // Анализируем: выполнен ли текущий шаг плана?
-            // Здесь может быть вызов repository.analyzeTask
-        }
-
-        // Извлечение фактов
+        // Логика извлечения фактов и анализа прогресса
         if (agent.workingMemory.isAutoUpdateEnabled &&
             agent.messages.size % agent.workingMemory.updateInterval == 0
         ) {
-
             repository.extractFacts(
                 messages = agent.messages.takeLast(agent.workingMemory.analysisWindowSize),
                 currentFacts = agent.workingMemory.extractedFacts,
@@ -196,14 +200,10 @@ class AutonomousAgent(
                 syncWithRepository(updated)
             }
         }
-
-        // Сжатие... (логика остается такой же)
     }
 
     private suspend fun syncWithRepository(agent: Agent) {
         val fsm = stateMachine ?: return
-
-        // Синхронизируем состояние машины с базой данных
         repository.saveAgentState(
             fsm.getCurrentState().copy(
                 name = agent.name,
@@ -211,7 +211,9 @@ class AutonomousAgent(
                 temperature = agent.temperature,
                 maxTokens = agent.maxTokens,
                 stopWord = agent.stopWord,
-                memoryStrategy = agent.memoryStrategy
+                memoryStrategy = agent.memoryStrategy,
+                workingMemory = agent.workingMemory,
+                messages = agent.messages
             )
         )
     }

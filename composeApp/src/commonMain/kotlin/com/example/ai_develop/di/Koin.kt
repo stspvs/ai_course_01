@@ -12,7 +12,9 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 import org.koin.core.context.startKoin
 import org.koin.core.module.Module
@@ -72,6 +74,7 @@ val commonModule = module {
     }
 
     single<CoroutineDispatcher> { Dispatchers.Default }
+    single { CoroutineScope(SupervisorJob() + get<CoroutineDispatcher>()) }
 
     singleOf(::ChatStreamingUseCase)
     singleOf(::ExtractFactsUseCase)

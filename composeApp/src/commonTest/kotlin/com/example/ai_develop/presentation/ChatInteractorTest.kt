@@ -3,6 +3,7 @@ package com.example.ai_develop.presentation
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -48,7 +49,7 @@ class ChatInteractorTest {
         override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
     }
 
-    private class MockUseCase(repo: ChatRepository) : ChatStreamingUseCase(repo) {
+    private class MockUseCase(repo: ChatRepository, scope: CoroutineScope) : ChatStreamingUseCase(repo, ChatMemoryManager(), scope) {
         override fun invoke(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider): Flow<Result<String>> {
             return flowOf(Result.success("Hello "), Result.success("world!"))
         }
@@ -58,7 +59,7 @@ class ChatInteractorTest {
     fun `sendMessage should update local state and call repository`() = runTest {
         val repo = MockLocalRepository()
         val chatRepo = MockChatRepository()
-        val useCase = MockUseCase(chatRepo)
+        val useCase = MockUseCase(chatRepo, this)
         val memoryManager = ChatMemoryManager()
         val updateWorkingMemoryUseCase = UpdateWorkingMemoryUseCase(chatRepo)
         val strategyFactory = StrategyDelegateFactory(

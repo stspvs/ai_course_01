@@ -34,6 +34,9 @@ data class UserProfile(
     val memoryModelProvider: LLMProvider? = null
 )
 
+/**
+ * Полное состояние агента, сохраняемое в БД.
+ */
 @Serializable
 data class AgentState(
     val agentId: String,
@@ -46,5 +49,9 @@ data class AgentState(
     val currentStepId: String? = null,
     val plan: AgentPlan = AgentPlan(),
     val memoryStrategy: ChatMemoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
-    val workingMemory: WorkingMemory = WorkingMemory()
+    val workingMemory: WorkingMemory = WorkingMemory(),
+    // Список сообщений может быть огромным, поэтому в AgentState 
+    // мы можем хранить только метаданные или последние N сообщений, 
+    // но для простоты на данном этапе оставим загрузку через репозиторий.
+    val messages: List<ChatMessage> = emptyList()
 )

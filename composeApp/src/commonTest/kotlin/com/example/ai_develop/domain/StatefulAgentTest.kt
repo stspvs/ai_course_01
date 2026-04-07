@@ -24,7 +24,12 @@ class StatefulAgentTest {
         ) = flowOf(Result.success("Mock response"))
 
         override suspend fun saveAgentState(state: AgentState) { savedState = state }
-        override suspend fun getAgentState(agentId: String) = AgentState(agentId, AgentStage.PLANNING, null, AgentPlan())
+        override suspend fun getAgentState(agentId: String) = AgentState(
+            agentId = agentId,
+            currentStage = AgentStage.PLANNING,
+            currentStepId = null,
+            plan = AgentPlan()
+        )
         override suspend fun getProfile(agentId: String) = UserProfile(preferences = "pref", constraints = "cons")
         override suspend fun getInvariants(agentId: String, stage: AgentStage) = listOf(Invariant("1", "Test Rule", stage))
         override suspend fun saveInvariant(invariant: Invariant) {}
@@ -49,8 +54,12 @@ class StatefulAgentTest {
     @Test
     fun `test system prompt contains invariants and plan`() = runTest {
         val repo = MockRepository()
-        // В реальном использовании мы перехватываем системный промпт перед вызовом
-        val state = AgentState("default", AgentStage.PLANNING, null, AgentPlan(listOf(AgentStep("1", "Step 1"))))
+        val state = AgentState(
+            agentId = "default",
+            currentStage = AgentStage.PLANNING,
+            currentStepId = null,
+            plan = AgentPlan(listOf(AgentStep("1", "Step 1")))
+        )
 
         // Имитируем логику промпта
         val prompt = "PLANNING Step 1 Stay polite"

@@ -9,7 +9,12 @@ class AgentStateMachineTest {
 
     @Test
     fun `test state transitions`() {
-        val initialState = AgentState("test", AgentStage.PLANNING, null, AgentPlan())
+        val initialState = AgentState(
+            agentId = "test",
+            currentStage = AgentStage.PLANNING,
+            currentStepId = null,
+            plan = AgentPlan()
+        )
         val fsm = AgentStateMachine(initialState)
 
         // Planning -> Execution (Valid)
@@ -30,7 +35,12 @@ class AgentStateMachineTest {
 
     @Test
     fun `test invariant violation rollback`() {
-        val initialState = AgentState("test", AgentStage.EXECUTION, "step-1", AgentPlan())
+        val initialState = AgentState(
+            agentId = "test",
+            currentStage = AgentStage.EXECUTION,
+            currentStepId = "step-1",
+            plan = AgentPlan()
+        )
         val fsm = AgentStateMachine(initialState)
 
         fsm.handleInvariantViolation("Constraint failed")
