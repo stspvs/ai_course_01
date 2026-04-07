@@ -20,7 +20,9 @@ data class AgentEntity(
     val branches: List<ChatBranch> = emptyList(),
     val currentBranchId: String? = null,
     val userProfile: UserProfile? = null,
-    val workingMemory: WorkingMemory = WorkingMemory()
+    val workingMemory: WorkingMemory = WorkingMemory(),
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(
@@ -46,7 +48,8 @@ data class MessageEntity(
     val timestamp: Long = 0L,
     val isSystemNotification: Boolean = false,
     val taskId: String? = null,
-    val taskState: TaskState? = null
+    val taskState: TaskState? = null,
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "tasks")
@@ -65,5 +68,6 @@ data class TaskEntity(
     val validatorAgentId: String?,
     val architectColor: Long,
     val executorColor: Long,
-    val validatorColor: Long
+    val validatorColor: Long,
+    val createdAt: Long = System.currentTimeMillis()
 )

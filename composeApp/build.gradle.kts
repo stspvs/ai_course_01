@@ -120,6 +120,8 @@ dependencies {
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspDesktop", libs.androidx.room.compiler)
     implementation(libs.kotlinx.coroutines.core.v1102)
+    // Добавляем зависимость для Room Runtime в основной состав, чтобы Migration был доступен
+    commonMainApi(libs.androidx.room.runtime)
 }
 
 android {

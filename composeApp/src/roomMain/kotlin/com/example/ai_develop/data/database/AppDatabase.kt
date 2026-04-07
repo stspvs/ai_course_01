@@ -5,10 +5,13 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.RoomDatabaseConstructor
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.execSQL
 
 @Database(
     entities = [AgentEntity::class, MessageEntity::class, TaskEntity::class], 
-    version = 11,
+    version = 20,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -22,6 +25,26 @@ abstract class AppDatabase : RoomDatabase() {
 @Suppress("NO_ACTUAL_FOR_EXPECT")
 expect object AppDatabaseConstructor : RoomDatabaseConstructor<AppDatabase> {
     override fun initialize(): AppDatabase
+}
+
+val MIGRATION_11_20 = object : Migration(11, 20) {
+    override fun migrate(connection: SQLiteConnection) {
+        // Add new columns to agents table
+        connection.execSQL("ALTER TABLE agents ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+        connection.execSQL("ALTER TABLE agents ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+        
+        // Add new column to messages table
+        connection.execSQL("ALTER TABLE messages ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+        
+        // Add new column to tasks table
+        connection.execSQL("ALTER TABLE tasks ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+        
+        // Update existing rows with current timestamp
+        val now = System.currentTimeMillis()
+        connection.execSQL("UPDATE agents SET createdAt = $now, updatedAt = $now")
+        connection.execSQL("UPDATE messages SET updatedAt = $now")
+        connection.execSQL("UPDATE tasks SET createdAt = $now")
+    }
 }
 
 internal const val DATABASE_NAME = "ai_agents.db"

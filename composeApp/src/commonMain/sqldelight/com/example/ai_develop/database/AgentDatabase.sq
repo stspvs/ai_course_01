@@ -1,7 +1,7 @@
 import com.example.ai_develop.domain.AgentStage;
 import kotlin.Boolean;
 
-CREATE TABLE AgentStateEntity (
+CREATE TABLE IF NOT EXISTS AgentStateEntity (
     agentId TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
     systemPrompt TEXT NOT NULL DEFAULT 'You are a helpful assistant.',
@@ -15,14 +15,14 @@ CREATE TABLE AgentStateEntity (
     workingMemoryJson TEXT NOT NULL DEFAULT '' -- JSON WorkingMemory
 );
 
-CREATE TABLE ProfileEntity (
+CREATE TABLE IF NOT EXISTS ProfileEntity (
     agentId TEXT NOT NULL PRIMARY KEY,
     preferences TEXT NOT NULL,
     constraints TEXT NOT NULL,
     memoryModelProviderJson TEXT -- JSON LLMProvider
 );
 
-CREATE TABLE InvariantEntity (
+CREATE TABLE IF NOT EXISTS InvariantEntity (
     id TEXT NOT NULL PRIMARY KEY,
     agentId TEXT NOT NULL,
     rule TEXT NOT NULL,
@@ -31,7 +31,7 @@ CREATE TABLE InvariantEntity (
     FOREIGN KEY(agentId) REFERENCES AgentStateEntity(agentId) ON DELETE CASCADE
 );
 
-CREATE TABLE AgentMessageEntity (
+CREATE TABLE IF NOT EXISTS AgentMessageEntity (
     id TEXT NOT NULL PRIMARY KEY,
     agentId TEXT NOT NULL,
     stage TEXT AS AgentStage NOT NULL,
