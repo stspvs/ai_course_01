@@ -2,10 +2,17 @@ package com.example.ai_develop.di
 
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
+import com.example.ai_develop.data.SqlDelightChatRepository
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.*
 import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
+import com.example.ai_develop.database.AgentDatabase
+import com.example.ai_develop.database.stageAdapter
+import com.example.ai_develop.database.booleanAdapter
+import com.example.aidevelop.database.AgentMessageEntity
+import com.example.aidevelop.database.AgentStateEntity
+import com.example.aidevelop.database.InvariantEntity
 import io.ktor.client.*
 import io.ktor.client.engine.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -23,6 +30,7 @@ import org.koin.dsl.module
 import org.koin.compose.viewmodel.dsl.viewModelOf
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.factoryOf
+import app.cash.sqldelight.db.SqlDriver
 
 expect val platformModule: Module
 
@@ -51,7 +59,6 @@ val commonModule = module {
             install(ContentNegotiation) {
                 json(get())
             }
-            // Включаем логирование всегда для отладки
             install(Logging) {
                 logger = object : Logger {
                     override fun log(message: String) {
@@ -63,13 +70,32 @@ val commonModule = module {
         }
     }
 
-    single<ChatRepository> {
+    // Создаем сетевой репозиторий
+    single<KtorChatRepository> {
         KtorChatRepository(
             httpClient = get(),
             deepSeekKey = BuildConfig.DEEPSEEK_KEY, 
             yandexKey = BuildConfig.YANDEX_KEY,
             yandexFolderId = BuildConfig.YANDEX_FOLDER_ID,
             openRouterKey = BuildConfig.OPENROUTER_KEY
+        )
+    }
+
+    // AgentDatabase (SqlDelight)
+    single {
+        AgentDatabase(
+            driver = get(),
+            AgentMessageEntityAdapter = AgentMessageEntity.Adapter(stageAdapter),
+            AgentStateEntityAdapter = AgentStateEntity.Adapter(stageAdapter),
+            InvariantEntityAdapter = InvariantEntity.Adapter(stageAdapter)
+        )
+    }
+
+    // Создаем основной репозиторий, который объединяет БД (SqlDelight) и Сеть
+    single<ChatRepository> {
+        SqlDelightChatRepository(
+            db = get(),
+            networkRepository = get<KtorChatRepository>()
         )
     }
 

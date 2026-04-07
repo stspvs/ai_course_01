@@ -79,15 +79,14 @@ class TaskViewModel(
     }
 
     fun sendUserMessage(taskId: String, text: String) {
-        val agent = activeAgent ?: return
+        if (text.isBlank()) return
+        
         viewModelScope.launch {
-            // Сохраняем сообщение пользователя через локальный репозиторий для UI
-            localRepository.saveMessage(
-                agentId = taskId, 
-                message = ChatMessage(message = text, source = SourceType.USER),
-                taskId = taskId,
-                taskState = activeSagaContext.value?.state?.taskState
-            )
+            // Если агент еще не инициализирован, создаем его
+            val agent = activeAgent ?: useCase.getOrCreateAgent(taskId).also { activeAgent = it }
+            
+            // Отправляем сообщение. Агент сам сохранит его в репозиторий, 
+            // а UI обновится через поток taskMessages (если репозитории синхронизированы)
             agent.sendMessage(text)
         }
     }

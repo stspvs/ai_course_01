@@ -4,6 +4,7 @@ import com.example.ai_develop.data.database.AppDatabase
 import com.example.ai_develop.data.database.DatabaseChatRepository
 import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.data.database.getDatabaseBuilder
+import com.example.ai_develop.database.DriverFactory
 import io.ktor.client.*
 import io.ktor.client.engine.*
 import io.ktor.client.engine.okhttp.*
@@ -11,6 +12,7 @@ import org.koin.dsl.module
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.*
+import app.cash.sqldelight.db.SqlDriver
 
 actual val platformModule = module {
     single<AppDatabase> {
@@ -19,6 +21,10 @@ actual val platformModule = module {
     single { get<AppDatabase>().agentDao() }
     single { get<AppDatabase>().taskDao() }
     single<LocalChatRepository> { DatabaseChatRepository(get()) }
+    
+    // SqlDelight Driver Factory and Driver
+    single { DriverFactory() }
+    single<SqlDriver> { get<DriverFactory>().createDriver() }
 }
 
 class TrustAllX509TrustManager : X509TrustManager {
