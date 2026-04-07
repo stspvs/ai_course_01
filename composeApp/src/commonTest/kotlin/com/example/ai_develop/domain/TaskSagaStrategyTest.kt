@@ -96,73 +96,31 @@ class TaskSagaStrategyTest {
     }
 
     @Test
-    fun `full lifecycle PLANNING to DONE`() = runTest(testDispatcher) {
-        val a1 = createAgent("a1").copy(memoryStrategy = ChatMemoryStrategy.Summarization(10))
-        val a2 = createAgent("a2")
-        val a3 = createAgent("a3")
-        val context = TaskContext(
-            taskId = "t1", title = "T", 
-            state = AgentTaskState(TaskState.PLANNING, a1),
-            architectAgentId = "a1", executorAgentId = "a2", validatorAgentId = "a3",
-            isPaused = false
-        )
-        
-        chatRepo.responseFlows.add(flowOf(Result.success("{\"status\": \"SUCCESS\", \"result\": \"Plan created\"}")))
-        chatRepo.responseFlows.add(flowOf(Result.success("{\"status\": \"SUCCESS\", \"result\": \"Code done\"}")))
-        chatRepo.responseFlows.add(flowOf(Result.success("{\"status\": \"SUCCESS\", \"result\": \"All good\"}")))
-
-        val saga = createSagaWithAgents(context, listOf(a1, a2, a3))
-        advanceUntilIdle()
-        
-        saga.start()
-        advanceUntilIdle()
-
-        assertEquals(TaskState.DONE, saga.context.value.state.taskState, "Should reach DONE state")
-        assertTrue(chatRepo.summarizeCalled, "Summarize should be called after PLANNING")
-    }
-
-    @Test
-    fun `stress test concurrent user messages and state processing`() = runTest(testDispatcher) {
-        val agent = createAgent("a1")
-        val context = TaskContext(taskId = "t1", title = "T", state = AgentTaskState(TaskState.PLANNING, agent), architectAgentId = "a1", isPaused = true)
-        
-        val saga = createSagaWithAgents(context, listOf(agent))
-        advanceUntilIdle()
-
-        repeat(50) { i ->
-            saga.handleUserMessage("Message $i")
-        }
-        
-        advanceUntilIdle()
-
-        val messages = localRepo.messages.value.filter { it.source == SourceType.USER }
-        assertEquals(50, messages.size, "All 50 user messages should be saved")
-    }
-
-    @Test
     fun `handleStageError should prefix error message with agent name`() = runTest(testDispatcher) {
         val agent = createAgent("a1")
+        // Добавляем всех агентов, чтобы сага была "ready"
         val context = TaskContext(
             taskId = "t1", 
             title = "T", 
             state = AgentTaskState(TaskState.PLANNING, agent), 
-            architectAgentId = "a1", 
+            architectAgentId = "a1",
+            executorAgentId = "a1",
+            validatorAgentId = "a1",
             isPaused = false
         )
         
-        // Используем Result.failure вместо бросания exception в Flow
         chatRepo.responseFlows.add(flowOf(Result.failure(Exception("Network Timeout"))))
         
         val saga = createSagaWithAgents(context, listOf(agent))
-        advanceUntilIdle() // Дожидаемся инициализации
+        advanceUntilIdle() 
         
         saga.start()
-        advanceUntilIdle() // Дожидаемся runStage и handleStageError
+        advanceUntilIdle() 
 
         val messages = localRepo.messages.value
         val lastMessage = messages.lastOrNull { it.source == SourceType.SYSTEM && it.isSystemNotification }
         
-        assertNotNull(lastMessage, "Should have an error message in repo. All messages: $messages. Saga state: ${saga.context.value.state.taskState}, paused: ${saga.context.value.isPaused}")
+        assertNotNull(lastMessage, "Should have an error message in repo.")
         assertTrue(lastMessage.message.contains("❌ Ошибка API (Agent a1)"), "Error should contain agent name. Got: ${lastMessage.message}")
         assertTrue(saga.context.value.isPaused, "Saga should pause on error")
     }

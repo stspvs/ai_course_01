@@ -100,7 +100,7 @@ class TaskSaga(
 
     fun resume() {
         scope.launch {
-            if (!_context.value.isReadyToRun && _context.value.state.taskState != TaskState.PLANNING) {
+            if (!_context.value.isReadyToRun) {
                 val missing = _context.value.missingAgents.joinToString(", ")
                 handleStageError(null, Exception("Не назначены агенты: $missing"))
                 return@launch
@@ -134,7 +134,7 @@ class TaskSaga(
         val currentContext = _context.value
         if (currentContext.isPaused || currentContext.state.taskState == TaskState.DONE) return
 
-        if (!currentContext.isReadyToRun && currentContext.state.taskState != TaskState.PLANNING) {
+        if (!currentContext.isReadyToRun) {
             pause()
             return
         }
