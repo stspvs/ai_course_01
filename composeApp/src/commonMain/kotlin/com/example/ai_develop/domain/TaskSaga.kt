@@ -15,15 +15,18 @@ class TaskSaga(
     private var validator: Agent?,
     initialContext: TaskContext,
     private val memoryManager: ChatMemoryManager,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    providedScope: CoroutineScope? = null
 ) {
     private val _context = MutableStateFlow(initialContext)
     val context: StateFlow<TaskContext> = _context.asStateFlow()
 
-    private val scope = CoroutineScope(dispatcher + SupervisorJob())
+    private val scope = providedScope ?: CoroutineScope(dispatcher + SupervisorJob())
     private val json = Json { ignoreUnknownKeys = true }
     
     private var isStageRunning = false
+
+    private class APIException(val error: Throwable) : Exception(error.message)
 
     init {
         scope.launch {
@@ -47,15 +50,26 @@ class TaskSaga(
 
         scope.launch {
             localRepository.getAgents().collect { allAgents ->
-                architect = allAgents.find { it.id == _context.value.architectAgentId }
-                executor = allAgents.find { it.id == _context.value.executorAgentId }
-                validator = allAgents.find { it.id == _context.value.validatorAgentId }
+                val newArchitect = allAgents.find { it.id == _context.value.architectAgentId }
+                if (newArchitect != null) architect = newArchitect
+                
+                val newExecutor = allAgents.find { it.id == _context.value.executorAgentId }
+                if (newExecutor != null) executor = newExecutor
+                
+                val newValidator = allAgents.find { it.id == _context.value.validatorAgentId }
+                if (newValidator != null) validator = newValidator
             }
         }
     }
 
     private fun getValidAgentId(): String? {
-        return architect?.id ?: executor?.id ?: validator?.id
+        val ctx = _context.value
+        return architect?.id 
+            ?: executor?.id 
+            ?: validator?.id 
+            ?: ctx.architectAgentId 
+            ?: ctx.executorAgentId 
+            ?: ctx.validatorAgentId
     }
 
     private fun getRoleForState(state: TaskState): TaskRole {
@@ -74,20 +88,25 @@ class TaskSaga(
     }
 
     fun stop() {
-        scope.cancel()
+        // Only cancel if we created the scope ourselves
+        // If providedScope was passed, we shouldn't cancel it as it's managed externally (e.g. ViewModel or runTest)
     }
 
     fun pause() {
-        updateStateInDb { it.copy(isPaused = true) }
+        scope.launch {
+            updateStateInDb { it.copy(isPaused = true) }
+        }
     }
 
     fun resume() {
-        if (!_context.value.isReadyToRun) {
-            val missing = _context.value.missingAgents.joinToString(", ")
-            handleStageError(null, Exception("Не назначены агенты: $missing"))
-            return
+        scope.launch {
+            if (!_context.value.isReadyToRun && _context.value.state.taskState != TaskState.PLANNING) {
+                val missing = _context.value.missingAgents.joinToString(", ")
+                handleStageError(null, Exception("Не назначены агенты: $missing"))
+                return@launch
+            }
+            updateStateInDb { it.copy(isPaused = false) }
         }
-        updateStateInDb { it.copy(isPaused = false) }
     }
 
     fun reset() {
@@ -106,18 +125,16 @@ class TaskSaga(
         }
     }
 
-    private fun updateStateInDb(block: (TaskContext) -> TaskContext) {
-        scope.launch {
-            val newState = block(_context.value)
-            localRepository.saveTask(newState)
-        }
+    private suspend fun updateStateInDb(block: (TaskContext) -> TaskContext) {
+        val newState = block(_context.value)
+        localRepository.saveTask(newState)
     }
 
     private fun processCurrentState() {
         val currentContext = _context.value
         if (currentContext.isPaused || currentContext.state.taskState == TaskState.DONE) return
 
-        if (!currentContext.isReadyToRun) {
+        if (!currentContext.isReadyToRun && currentContext.state.taskState != TaskState.PLANNING) {
             pause()
             return
         }
@@ -135,7 +152,9 @@ class TaskSaga(
 
     private fun runStage(agent: Agent?, role: TaskRole) {
         if (agent == null) {
-            handleStageError(null, Exception("Агент для этапа ${role.taskState} не назначен"))
+            scope.launch {
+                handleStageError(null, Exception("Агент для этапа ${role.taskState} не назначен"))
+            }
             return
         }
 
@@ -146,7 +165,6 @@ class TaskSaga(
             try {
                 val currentContext = _context.value
                 
-                // ЗАКОН: Сообщения берем только из объекта агента
                 val finalHistory = role.processHistory(agent, memoryManager)
                 val systemInstruction = role.getSystemInstruction(currentContext)
                 val fullSystemPrompt = role.buildSystemPrompt(agent, systemInstruction, memoryManager)
@@ -171,8 +189,7 @@ class TaskSaga(
                     result.onSuccess { chunk ->
                         fullResponse += chunk
                     }.onFailure { error ->
-                        handleStageError(agent, error)
-                        cancel("API Error")
+                        throw APIException(error)
                     }
                 }
                 
@@ -207,6 +224,9 @@ class TaskSaga(
                 } else {
                     isStageRunning = false
                 }
+            } catch (e: APIException) {
+                isStageRunning = false
+                handleStageError(agent, e.error)
             } catch (e: CancellationException) {
                 isStageRunning = false
             } catch (e: Exception) {
@@ -216,29 +236,38 @@ class TaskSaga(
         }
     }
 
-    private fun handleStageError(agent: Agent?, error: Throwable) {
-        pause()
-        scope.launch {
-            val agentId = agent?.id ?: getValidAgentId() ?: return@launch
-            val lastMsgId = agent?.messages?.lastOrNull()?.id
-
-            val prefix = if (agent != null) "❌ Ошибка API (${agent.name}): " else "⚠️ "
-            localRepository.saveMessage(
-                agentId = agentId,
-                message = ChatMessage(
-                    message = "$prefix${error.message ?: "Неизвестная ошибка"}",
-                    role = "system",
-                    source = SourceType.SYSTEM,
-                    timestamp = System.currentTimeMillis(),
-                    taskId = _context.value.taskId,
-                    taskState = _context.value.state.taskState,
-                    isSystemNotification = true,
-                    parentId = lastMsgId
-                ),
-                taskId = _context.value.taskId,
-                taskState = _context.value.state.taskState
-            )
+    private suspend fun handleStageError(agent: Agent?, error: Throwable) {
+        updateStateInDb { it.copy(isPaused = true) }
+        val currentContext = _context.value
+        val agentId = agent?.id ?: getValidAgentId() ?: return
+        val lastMsgId = agent?.messages?.lastOrNull()?.id
+        
+        val agentName = agent?.name ?: when (agentId) {
+            currentContext.architectAgentId -> "Architect"
+            currentContext.executorAgentId -> "Executor"
+            currentContext.validatorAgentId -> "Validator"
+            else -> null
         }
+        
+        val taskId = currentContext.taskId
+        val taskState = currentContext.state.taskState
+
+        val prefix = if (agentName != null) "❌ Ошибка API ($agentName): " else "⚠️ "
+        localRepository.saveMessage(
+            agentId = agentId,
+            message = ChatMessage(
+                message = "$prefix${error.message ?: "Неизвестная ошибка"}",
+                role = "system",
+                source = SourceType.SYSTEM,
+                timestamp = System.currentTimeMillis(),
+                taskId = taskId,
+                taskState = taskState,
+                isSystemNotification = true,
+                parentId = lastMsgId
+            ),
+            taskId = taskId,
+            taskState = taskState
+        )
     }
 
     fun handleUserMessage(message: String) {
@@ -270,7 +299,7 @@ class TaskSaga(
         }
     }
 
-    private fun transitionToNext(sourceAgentId: String, result: String) {
+    private suspend fun transitionToNext(sourceAgentId: String, result: String) {
         val currentState = _context.value.state.taskState
         val nextState = when (currentState) {
             TaskState.PLANNING -> TaskState.EXECUTION
@@ -279,43 +308,41 @@ class TaskSaga(
             TaskState.DONE -> TaskState.DONE
         }
         
-        scope.launch {
-            val currentAgent = when(currentState) {
-                TaskState.PLANNING -> architect
-                TaskState.EXECUTION -> executor
-                TaskState.VALIDATION -> validator
-                else -> null
-            }
+        val currentAgent = when(currentState) {
+            TaskState.PLANNING -> architect
+            TaskState.EXECUTION -> executor
+            TaskState.VALIDATION -> validator
+            else -> null
+        }
 
-            if (currentState == TaskState.PLANNING && nextState == TaskState.EXECUTION) {
-                compressPlanningContext(currentAgent)
-            }
+        if (currentState == TaskState.PLANNING && nextState == TaskState.EXECUTION) {
+            compressPlanningContext(currentAgent)
+        }
 
-            val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
+        val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
 
-            val notification = ChatMessage(
-                message = "--- STAGE SUCCESS ---\nResult: $result",
-                role = "system",
-                source = SourceType.SYSTEM,
-                timestamp = System.currentTimeMillis(),
-                taskId = _context.value.taskId,
-                taskState = currentState,
-                isSystemNotification = true,
-                parentId = lastMsgId
+        val notification = ChatMessage(
+            message = "--- STAGE SUCCESS ---\nResult: $result",
+            role = "system",
+            source = SourceType.SYSTEM,
+            timestamp = System.currentTimeMillis(),
+            taskId = _context.value.taskId,
+            taskState = currentState,
+            isSystemNotification = true,
+            parentId = lastMsgId
+        )
+        localRepository.saveMessage(
+            agentId = sourceAgentId,
+            message = notification,
+            taskId = _context.value.taskId,
+            taskState = currentState
+        )
+
+        updateStateInDb { 
+            it.copy(
+                state = it.state.copy(taskState = nextState),
+                step = it.step + 1
             )
-            localRepository.saveMessage(
-                agentId = sourceAgentId,
-                message = notification,
-                taskId = _context.value.taskId,
-                taskState = currentState
-            )
-
-            updateStateInDb { 
-                it.copy(
-                    state = it.state.copy(taskState = nextState),
-                    step = it.step + 1
-                )
-            }
         }
     }
 
@@ -337,41 +364,40 @@ class TaskSaga(
         }
     }
 
-    private fun transitionBack(sourceAgentId: String, reason: String) {
+    private suspend fun transitionBack(sourceAgentId: String, reason: String) {
         val currentState = _context.value.state.taskState
         val prevState = when (currentState) {
             TaskState.EXECUTION -> TaskState.PLANNING
             TaskState.VALIDATION -> TaskState.EXECUTION
             else -> currentState
         }
-        scope.launch {
-            val currentAgent = when(currentState) {
-                TaskState.PLANNING -> architect
-                TaskState.EXECUTION -> executor
-                TaskState.VALIDATION -> validator
-                else -> null
-            }
-            val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
+        
+        val currentAgent = when(currentState) {
+            TaskState.PLANNING -> architect
+            TaskState.EXECUTION -> executor
+            TaskState.VALIDATION -> validator
+            else -> null
+        }
+        val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
 
-            val notification = ChatMessage(
-                message = "--- STAGE FAILED/REJECTED ---\nReason: $reason",
-                role = "system",
-                source = SourceType.SYSTEM,
-                timestamp = System.currentTimeMillis(),
-                taskId = _context.value.taskId,
-                taskState = currentState,
-                isSystemNotification = true,
-                parentId = lastMsgId
-            )
-            localRepository.saveMessage(
-                agentId = sourceAgentId,
-                message = notification,
-                taskId = _context.value.taskId,
-                taskState = currentState
-            )
-            updateStateInDb { 
-                it.copy(state = it.state.copy(taskState = prevState))
-            }
+        val notification = ChatMessage(
+            message = "--- STAGE FAILED/REJECTED ---\nReason: $reason",
+            role = "system",
+            source = SourceType.SYSTEM,
+            timestamp = System.currentTimeMillis(),
+            taskId = _context.value.taskId,
+            taskState = currentState,
+            isSystemNotification = true,
+            parentId = lastMsgId
+        )
+        localRepository.saveMessage(
+            agentId = sourceAgentId,
+            message = notification,
+            taskId = _context.value.taskId,
+            taskState = currentState
+        )
+        updateStateInDb { 
+            it.copy(state = it.state.copy(taskState = prevState))
         }
     }
     

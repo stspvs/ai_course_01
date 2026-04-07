@@ -85,6 +85,11 @@ kotlin {
         val androidUnitTest by getting {
             dependsOn(androidMain)
             dependsOn(roomTest)
+            dependencies {
+                implementation(libs.androidx.test.junit)
+                // Добавим androidx.test.core напрямую, если нужно для ApplicationProvider
+                implementation("androidx.test:core:1.6.1")
+            }
         }
         
         val desktopMain by getting {
