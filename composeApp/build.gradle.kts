@@ -13,7 +13,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(11)
+    jvmToolchain(17) // ОБНОВЛЕНО: Robolectric требует Java 17 для новых SDK
 
     androidTarget()
     
@@ -87,7 +87,7 @@ kotlin {
             dependsOn(roomTest)
             dependencies {
                 implementation(libs.androidx.test.junit)
-                // Добавим androidx.test.core напрямую, если нужно для ApplicationProvider
+                implementation(libs.robolectric)
                 implementation("androidx.test:core:1.6.1")
             }
         }
@@ -125,7 +125,6 @@ dependencies {
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspDesktop", libs.androidx.room.compiler)
     implementation(libs.kotlinx.coroutines.core.v1102)
-    // Добавляем зависимость для Room Runtime в основной состав, чтобы Migration был доступен
     commonMainApi(libs.androidx.room.runtime)
 }
 
@@ -151,8 +150,13 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17 // ОБНОВЛЕНО
+        targetCompatibility = JavaVersion.VERSION_17 // ОБНОВЛЕНО
+    }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
     }
 }
 
@@ -188,7 +192,6 @@ fun getSecret(name: String): String {
 buildConfig {
     packageName("com.example.ai_develop")
     
-    // Флаг дебага
     buildConfigField("boolean", "IS_DEBUG", "true")
 
     buildConfigField("String", "DEEPSEEK_KEY", "\"${getSecret("DEEPSEEK_KEY")}\"")

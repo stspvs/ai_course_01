@@ -23,6 +23,7 @@ ksp = "2.1.0-1.0.29"
 androidx-room = "2.7.0-alpha11"
 sqlite = "2.5.0-alpha11"
 sqldelight = "2.0.2"
+robolectric = "4.14.1"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -66,6 +67,8 @@ sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sq
 sqldelight-coroutine-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
+
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

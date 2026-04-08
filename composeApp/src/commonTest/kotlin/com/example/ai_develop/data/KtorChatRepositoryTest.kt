@@ -1,109 +1,320 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.ChatFacts
-import com.example.ai_develop.domain.ChatMessage
-import com.example.ai_develop.domain.LLMProvider
-import com.example.ai_develop.domain.SourceType
+import com.example.ai_develop.domain.*
 import io.ktor.client.*
 import io.ktor.client.engine.mock.*
 import io.ktor.http.*
 import io.ktor.utils.io.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlin.test.*
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class KtorChatRepositoryTest {
 
-    @Test
-    fun testChatStreamingSuccess() = runTest {
-        val mockEngine = MockEngine { request ->
+    private val testDispatcher = StandardTestDispatcher()
+    private val provider = LLMProvider.DeepSeek("deepseek-chat")
+    private val json = Json { 
+        ignoreUnknownKeys = true 
+        encodeDefaults = true
+    }
+
+    private fun createMockClient(
+        response: String,
+        status: HttpStatusCode = HttpStatusCode.OK,
+        contentType: ContentType = ContentType.Application.Json
+    ): HttpClient {
+        val mockEngine = MockEngine { _ ->
             respond(
-                content = ByteReadChannel("data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\ndata: [DONE]"),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, "text/event-stream")
+                content = ByteReadChannel(response),
+                status = status,
+                headers = headersOf(HttpHeaders.ContentType, contentType.toString())
             )
         }
-        val httpClient = HttpClient(mockEngine)
-        val repository = KtorChatRepository(
-            httpClient = httpClient,
-            deepSeekKey = "key",
-            yandexKey = "key",
-            yandexFolderId = "id",
-            openRouterKey = "key"
-        )
+        return HttpClient(mockEngine)
+    }
 
-        val results = repository.chatStreaming(
-            messages = listOf(ChatMessage(message = "Hi", role = "user", source = SourceType.USER)),
-            systemPrompt = "",
+    private fun createRepository(httpClient: HttpClient): KtorChatRepository {
+        return KtorChatRepository(
+            httpClient = httpClient,
+            deepSeekKey = "test_key",
+            yandexKey = "test_key",
+            yandexFolderId = "test_id",
+            openRouterKey = "test_key"
+        )
+    }
+
+    // --- 1. Unit Tests ---
+
+    @Test
+    fun chatStreaming_success() = runTest(testDispatcher) {
+        // Given
+        val chunks = listOf("Hello", " world", "!")
+        val sseData = chunks.joinToString("\n") { 
+            "data: {\"choices\":[{\"delta\":{\"content\":\"$it\"}}]}" 
+        } + "\ndata: [DONE]"
+        
+        val client = createMockClient(sseData, contentType = ContentType.Text.EventStream)
+        val repository = createRepository(client)
+
+        // When
+        val flow = repository.chatStreaming(
+            messages = emptyList(),
+            systemPrompt = "Prompt",
             maxTokens = 100,
             temperature = 0.7,
             stopWord = "",
             isJsonMode = false,
-            provider = LLMProvider.DeepSeek("deepseek-chat")
-        ).toList()
+            provider = provider
+        )
+        val results = flow.toList()
 
-        assertTrue(results.any { it.isSuccess && it.getOrNull() == "Hello" })
+        // Then
+        assertEquals(3, results.size)
+        assertEquals("Hello", results[0].getOrNull())
+        assertEquals(" world", results[1].getOrNull())
+        assertEquals("!", results[2].getOrNull())
+        assertTrue(results.all { it.isSuccess })
     }
 
     @Test
-    fun testChatStreamingError() = runTest {
-        val mockEngine = MockEngine { request ->
-            respond(
-                content = ByteReadChannel("Internal Server Error"),
-                status = HttpStatusCode.InternalServerError
-            )
-        }
-        val httpClient = HttpClient(mockEngine)
-        val repository = KtorChatRepository(
-            httpClient = httpClient,
-            deepSeekKey = "key",
-            yandexKey = "key",
-            yandexFolderId = "id",
-            openRouterKey = "key"
-        )
+    fun chatStreaming_httpError() = runTest(testDispatcher) {
+        // Given
+        val client = createMockClient("Internal Server Error", HttpStatusCode.InternalServerError)
+        val repository = createRepository(client)
 
+        // When
         val results = repository.chatStreaming(
-            messages = listOf(ChatMessage(message = "Hi", role = "user", source = SourceType.USER)),
-            systemPrompt = "",
+            messages = emptyList(),
+            systemPrompt = "Prompt",
             maxTokens = 100,
             temperature = 0.7,
             stopWord = "",
             isJsonMode = false,
-            provider = LLMProvider.DeepSeek("deepseek-chat")
+            provider = provider
         ).toList()
 
+        // Then
         assertTrue(results.any { it.isFailure })
-        val error = results.first { it.isFailure }.exceptionOrNull()
-        assertTrue(error?.message?.contains("500") == true)
+        val exception = results.first { it.isFailure }.exceptionOrNull()
+        assertTrue(exception?.message?.contains("500") == true)
     }
 
     @Test
-    fun testExtractFactsSuccess() = runTest {
-        val mockEngine = MockEngine { request ->
-            respond(
-                content = ByteReadChannel("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"[\\\"Fact 1\\\"]\"}}]}"),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, "application/json")
-            )
+    fun extractFacts_success() = runTest(testDispatcher) {
+        // Given
+        val facts = listOf("fact1", "fact2")
+        val content = json.encodeToString(facts)
+        val mockResponse = """
+            {"choices":[{"message":{"role":"assistant","content":${Json.encodeToString(content)}}}]}
+        """.trimIndent()
+        
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
+
+        // When
+        val result = repository.extractFacts(emptyList(), ChatFacts(), provider)
+
+        // Then
+        assertTrue(result.isSuccess, "Error: ${result.exceptionOrNull()}")
+        assertEquals(facts, result.getOrNull()?.facts)
+    }
+
+    @Test
+    fun extractFacts_invalidJson() = runTest(testDispatcher) {
+        // Given
+        val mockResponse = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Not a JSON array\"}}]}"
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
+
+        // When
+        val result = repository.extractFacts(emptyList(), ChatFacts(), provider)
+
+        // Then
+        assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun summarize_success() = runTest(testDispatcher) {
+        // Given
+        val mockResponse = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Summary text\"}}]}"
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
+
+        // When
+        val result = repository.summarize(emptyList(), null, "Instruct", provider)
+
+        // Then
+        assertEquals("Summary text", result.getOrNull())
+    }
+
+    @Test
+    fun analyzeTask_success() = runTest(testDispatcher) {
+        // Given
+        val expected = TaskAnalysisResult(AgentStage.PLANNING, AgentPlan(listOf(AgentStep("1", "Step 1"))))
+        val content = json.encodeToString(expected)
+        val mockResponse = """
+            {"choices":[{"message":{"role":"assistant","content":${Json.encodeToString(content)}}}]}
+        """.trimIndent()
+        
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
+
+        // When
+        val result = repository.analyzeTask(emptyList(), "Instruct", provider)
+
+        // Then
+        assertTrue(result.isSuccess, "Error: ${result.exceptionOrNull()}")
+        assertEquals(AgentStage.PLANNING, result.getOrNull()?.stage)
+    }
+
+    @Test
+    fun analyzeWorkingMemory_success() = runTest(testDispatcher) {
+        // Given
+        val expected = WorkingMemoryAnalysis(currentTask = "Test Task", progress = "In progress")
+        val content = json.encodeToString(expected)
+        val mockResponse = """
+            {"choices":[{"message":{"role":"assistant","content":${Json.encodeToString(content)}}}]}
+        """.trimIndent()
+        
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
+
+        // When
+        val result = repository.analyzeWorkingMemory(emptyList(), "Instruct", provider)
+
+        // Then
+        assertTrue(result.isSuccess, "Error: ${result.exceptionOrNull()}")
+        assertEquals("Test Task", result.getOrNull()?.currentTask)
+    }
+
+    // --- 2. Stress Tests ---
+
+    @Test
+    fun chatStreaming_stress() = runTest(testDispatcher) {
+        // Given
+        val sseData = "data: {\"choices\":[{\"delta\":{\"content\":\"chunk\"}}]}\ndata: [DONE]"
+        val client = createMockClient(sseData, contentType = ContentType.Text.EventStream)
+        val repository = createRepository(client)
+
+        // When
+        coroutineScope {
+            val jobs = List(50) {
+                async {
+                    repository.chatStreaming(
+                        messages = emptyList(),
+                        systemPrompt = "Prompt",
+                        maxTokens = 10,
+                        temperature = 0.7,
+                        stopWord = "",
+                        isJsonMode = false,
+                        provider = provider
+                    ).toList()
+                }
+            }
+            val allResults = jobs.awaitAll()
+            
+            // Then
+            assertEquals(50, allResults.size)
+            allResults.forEach { results ->
+                assertTrue(results.any { it.isSuccess })
+            }
         }
-        val httpClient = HttpClient(mockEngine)
-        val repository = KtorChatRepository(
-            httpClient = httpClient,
-            deepSeekKey = "key",
-            yandexKey = "key",
-            yandexFolderId = "id",
-            openRouterKey = "key"
-        )
+    }
 
-        val result = repository.extractFacts(
-            messages = listOf(ChatMessage(message = "My name is Alice", role = "user", source = SourceType.USER)),
-            currentFacts = ChatFacts(emptyList()),
-            provider = LLMProvider.DeepSeek("deepseek-chat")
-        )
+    @Test
+    fun extractFacts_stress() = runTest(testDispatcher) {
+        val facts = listOf("fact")
+        val content = json.encodeToString(facts)
+        val mockResponse = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":${Json.encodeToString(content)}}}]}"
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
 
-        assertTrue(result.isSuccess, "Result should be success. Error: ${result.exceptionOrNull()?.message}")
-        assertEquals(listOf("Fact 1"), result.getOrNull()?.facts)
+        coroutineScope {
+            val jobs = List(100) {
+                async { repository.extractFacts(emptyList(), ChatFacts(), provider) }
+            }
+            val results = jobs.awaitAll()
+            assertEquals(100, results.size)
+            assertTrue(results.all { it.isSuccess })
+        }
+    }
+
+    // --- 3. Concurrency & Cancellation ---
+
+    @Test
+    fun chatStreaming_cancellation() = runTest(testDispatcher) {
+        // Given
+        val sseData = "data: {\"choices\":[{\"delta\":{\"content\":\"Slow...\"}}]}"
+        val mockEngine = MockEngine {
+            delay(1000) 
+            respond(sseData, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+        }
+        val repository = createRepository(HttpClient(mockEngine))
+
+        // When
+        val job = launch {
+            repository.chatStreaming(
+                messages = emptyList(),
+                systemPrompt = "Prompt",
+                maxTokens = 10,
+                temperature = 0.7,
+                stopWord = "",
+                isJsonMode = false,
+                provider = provider
+            ).collect { }
+        }
+        
+        advanceUntilIdle() // Ensure it starts
+        job.cancelAndJoin()
+
+        // Then
+        assertTrue(job.isCancelled)
+    }
+
+    // --- 4. Edge Cases ---
+
+    @Test
+    fun chatStreaming_timeout() = runTest(testDispatcher) {
+        // Given
+        val mockEngine = MockEngine { _ ->
+            throw Exception("Timeout")
+        }
+        val repository = createRepository(HttpClient(mockEngine))
+
+        // When
+        val results = repository.chatStreaming(
+            messages = emptyList(),
+            systemPrompt = "Prompt",
+            maxTokens = 10,
+            temperature = 0.7,
+            stopWord = "",
+            isJsonMode = false,
+            provider = provider
+        ).toList()
+
+        // Then
+        assertTrue(results.any { it.isFailure })
+        assertEquals("Timeout", results.first { it.isFailure }.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun largeData_test() = runTest(testDispatcher) {
+        // Given
+        val largeMessages = List(1000) { ChatMessage(message = "Message $it", role = "user", source = SourceType.USER) }
+        val mockResponse = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"OK\"}}]}"
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
+
+        // When
+        val result = repository.summarize(largeMessages, null, "Summarize", provider)
+
+        // Then
+        assertTrue(result.isSuccess)
     }
 }
