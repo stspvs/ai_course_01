@@ -113,6 +113,10 @@ class AutonomousAgentTest {
             emit(agentStateMap[agentId])
         }
 
+        override suspend fun deleteAgent(agentId: String) {
+            agentStateMap.remove(agentId)
+        }
+
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
         override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
         override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(TaskAnalysisResult())

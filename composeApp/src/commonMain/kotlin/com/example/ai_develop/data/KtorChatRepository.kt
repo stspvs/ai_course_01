@@ -310,10 +310,11 @@ class KtorChatRepository(
     }
 
     override suspend fun saveAgentState(state: AgentState) {}
+    override suspend fun deleteAgent(agentId: String) {}
+    override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
+    override suspend fun saveInvariant(invariant: Invariant) {}
     override suspend fun getAgentState(agentId: String): AgentState? = null
     override suspend fun getProfile(agentId: String): UserProfile? = null
-    override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
     override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
-    override suspend fun saveInvariant(invariant: Invariant) {}
     override fun observeAgentState(agentId: String): Flow<AgentState?> = flow { emit(null) }
 }

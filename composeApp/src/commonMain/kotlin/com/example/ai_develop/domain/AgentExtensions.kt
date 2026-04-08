@@ -16,6 +16,18 @@ fun Agent.assistantMessagesCount(): Int {
     return messages.count { it.source == SourceType.ASSISTANT }
 }
 
+fun List<Agent>.updateAgent(
+    agentId: String,
+    update: (Agent) -> Agent
+): List<Agent> {
+    val index = indexOfFirst { it.id == agentId }
+    if (index == -1) return this
+
+    return toMutableList().apply {
+        set(index, update(get(index)))
+    }
+}
+
 fun Agent.mergeWith(db: Agent): Agent {
     val dbIds = db.messages.map { it.id }.toSet()
     val pendingMessages = this.messages.filter { it.id !in dbIds }

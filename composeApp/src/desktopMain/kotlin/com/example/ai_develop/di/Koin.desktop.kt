@@ -5,6 +5,11 @@ import com.example.ai_develop.domain.AgentRepository
 import com.example.ai_develop.domain.MessageRepository
 import com.example.ai_develop.domain.TaskRepository
 import com.example.ai_develop.database.DriverFactory
+import com.example.ai_develop.database.AgentDatabase
+import com.example.ai_develop.database.stageAdapter
+import com.example.aidevelop.database.AgentMessageEntity
+import com.example.aidevelop.database.AgentStateEntity
+import com.example.aidevelop.database.InvariantEntity
 import io.ktor.client.*
 import io.ktor.client.engine.*
 import io.ktor.client.engine.okhttp.*
@@ -36,6 +41,21 @@ actual val platformModule = module {
     // SqlDelight Driver Factory and Driver
     single { DriverFactory() }
     single<SqlDriver> { get<DriverFactory>().createDriver() }
+
+    single<AgentDatabase> {
+        AgentDatabase(
+            driver = get(),
+            AgentMessageEntityAdapter = AgentMessageEntity.Adapter(
+                stageAdapter = stageAdapter
+            ),
+            AgentStateEntityAdapter = AgentStateEntity.Adapter(
+                currentStageAdapter = stageAdapter
+            ),
+            InvariantEntityAdapter = InvariantEntity.Adapter(
+                stageAdapter = stageAdapter
+            )
+        )
+    }
 }
 
 class TrustAllX509TrustManager : X509TrustManager {
@@ -61,7 +81,7 @@ actual fun HttpClientConfig<*>.configurePlatform() {
         if (isProxyAvailable("127.0.0.1", 8888)) {
             proxy = ProxyBuilder.http("http://127.0.0.1:8888")
             
-            // Если используем прокси (Fiddler), отключаем проверку SSL для OkHttp, 
+            // Если используем прокси (Fiddler), отключаем проверку SSL для OkHttp,
             // так как Fiddler подменяет сертификаты для расшифровки трафика
             if (this is OkHttpConfig) {
                 config {

@@ -12,7 +12,7 @@ import kotlin.uuid.Uuid
  * Автономный агент — координатор состояния и жизненного цикла.
  * Делегирует исполнение AgentEngine.
  */
-class AutonomousAgent(
+open class AutonomousAgent(
     val agentId: String,
     private val repository: ChatRepository,
     private val engine: AgentEngine,
@@ -22,7 +22,7 @@ class AutonomousAgent(
     private val scope = CoroutineScope(externalScope.coroutineContext.minusKey(Job) + job)
 
     private val _agent = MutableStateFlow<Agent?>(null)
-    val agent: StateFlow<Agent?> = _agent.asStateFlow()
+    open val agent: StateFlow<Agent?> = _agent.asStateFlow()
 
     private val _stateMachine = MutableStateFlow<AgentStateMachine?>(null)
 
@@ -30,7 +30,7 @@ class AutonomousAgent(
     val partialResponse: SharedFlow<String> = _partialResponse.asSharedFlow()
 
     private val _isProcessing = MutableStateFlow(false)
-    val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+    open val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
     private val processingMutex = Mutex()
     private var stateSyncJob: Job? = null
@@ -49,7 +49,7 @@ class AutonomousAgent(
         }
     }
 
-    suspend fun refreshAgent() {
+    open suspend fun refreshAgent() {
         val state = repository.getAgentState(agentId) ?: AgentState(
             agentId = agentId,
             name = if (agentId == GENERAL_CHAT_ID) "Общий чат" else "Новый агент"

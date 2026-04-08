@@ -42,6 +42,7 @@ interface ChatRepository {
     // Новые методы для Stateful Agent
     suspend fun saveAgentState(state: AgentState)
     suspend fun getAgentState(agentId: String): AgentState?
+    suspend fun deleteAgent(agentId: String) {}
     
     suspend fun getProfile(agentId: String): UserProfile?
     suspend fun saveProfile(agentId: String, profile: UserProfile)
@@ -50,6 +51,11 @@ interface ChatRepository {
     suspend fun saveInvariant(invariant: Invariant)
     
     fun observeAgentState(agentId: String): Flow<AgentState?>
+    
+    /**
+     * Возвращает список всех сохраненных состояний агентов.
+     */
+    fun observeAllAgents(): Flow<List<AgentState>> = kotlinx.coroutines.flow.flowOf(emptyList())
 }
 
 @Serializable

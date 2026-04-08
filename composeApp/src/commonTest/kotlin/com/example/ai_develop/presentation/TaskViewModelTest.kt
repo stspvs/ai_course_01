@@ -69,6 +69,7 @@ class TaskViewModelTest {
         override suspend fun getInvariants(agentId: String, stage: AgentStage) = emptyList<Invariant>()
         override suspend fun saveInvariant(invariant: Invariant) {}
         override fun observeAgentState(agentId: String) = flowOf(null)
+        override suspend fun deleteAgent(agentId: String) {}
     }
 
     private lateinit var taskRepo: FakeTaskRepository
@@ -96,7 +97,7 @@ class TaskViewModelTest {
             resetTaskUseCase = ResetTaskUseCase(messageRepo),
             getMessagesUseCase = GetMessagesUseCase(messageRepo),
             chatStreamingUseCase = chatStreamingUseCase,
-            agentRepository = agentRepo,
+            getAgentsUseCase = GetAgentsUseCase(agentRepo),
             agentFactory = agentFactory
         )
     }

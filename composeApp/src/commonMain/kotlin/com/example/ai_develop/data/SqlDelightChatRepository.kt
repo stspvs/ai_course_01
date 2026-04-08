@@ -58,6 +58,10 @@ class SqlDelightChatRepository(
         }
     }
 
+    override suspend fun deleteAgent(agentId: String) {
+        db.agentDatabaseQueries.deleteAgent(agentId)
+    }
+
     override fun observeAgentState(agentId: String): Flow<AgentState?> {
         return db.agentDatabaseQueries.getAgentState(agentId)
             .asFlow()

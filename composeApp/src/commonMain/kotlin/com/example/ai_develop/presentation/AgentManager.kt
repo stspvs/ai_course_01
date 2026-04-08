@@ -5,7 +5,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalUuidApi::class)
-class AgentManager {
+open class AgentManager {
     val templates = listOf(
         AgentTemplate(
             name = "Переводчик",

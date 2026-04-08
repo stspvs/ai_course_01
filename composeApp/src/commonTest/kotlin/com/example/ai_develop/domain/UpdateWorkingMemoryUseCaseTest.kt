@@ -1,5 +1,7 @@
 package com.example.ai_develop.domain
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.koin.test.KoinTest
@@ -21,11 +23,12 @@ class UpdateWorkingMemoryUseCaseTest : KoinTest {
 
         override suspend fun saveAgentState(state: AgentState) {}
         override suspend fun getAgentState(agentId: String): AgentState? = null
+        override suspend fun deleteAgent(agentId: String) {}
         override suspend fun getProfile(agentId: String): UserProfile? = null
         override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> = emptyList()
         override suspend fun saveInvariant(invariant: Invariant) {}
-        override fun observeAgentState(agentId: String) = flowOf(null)
+        override fun observeAgentState(agentId: String): Flow<AgentState?> = emptyFlow()
     }
 
     @Test
@@ -38,8 +41,5 @@ class UpdateWorkingMemoryUseCaseTest : KoinTest {
 
         assertTrue(result.isSuccess)
         assertEquals("Новая задача", result.getOrNull()?.currentTask)
-        // Note: The actual implementation of UpdateWorkingMemoryUseCase.update maps result.plan.steps to currentTask
-        // But in this test we are testing the mock behavior. 
-        // Let's re-read UpdateWorkingMemoryUseCase.kt
     }
 }

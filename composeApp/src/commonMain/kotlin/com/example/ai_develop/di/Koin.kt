@@ -2,12 +2,31 @@ package com.example.ai_develop.di
 
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
+import com.example.ai_develop.data.SqlDelightChatRepository
 import com.example.ai_develop.data.database.DatabaseAgentRepository
 import com.example.ai_develop.data.database.DatabaseChatRepository
 import com.example.ai_develop.data.database.DatabaseMessageRepository
 import com.example.ai_develop.data.database.DatabaseTaskRepository
 import com.example.ai_develop.data.database.LocalChatRepository
-import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.AgentManagementUseCase
+import com.example.ai_develop.domain.AgentRepository
+import com.example.ai_develop.domain.ChatMemoryManager
+import com.example.ai_develop.domain.ChatRepository
+import com.example.ai_develop.domain.ChatStreamingUseCase
+import com.example.ai_develop.domain.CreateTaskUseCase
+import com.example.ai_develop.domain.DefaultAgentFactory
+import com.example.ai_develop.domain.DeleteTaskUseCase
+import com.example.ai_develop.domain.ExtractFactsUseCase
+import com.example.ai_develop.domain.GetAgentsUseCase
+import com.example.ai_develop.domain.GetMessagesUseCase
+import com.example.ai_develop.domain.GetTasksUseCase
+import com.example.ai_develop.domain.MessageRepository
+import com.example.ai_develop.domain.ResetTaskUseCase
+import com.example.ai_develop.domain.SummarizeChatUseCase
+import com.example.ai_develop.domain.TaskRepository
+import com.example.ai_develop.domain.UpdateTaskUseCase
+import com.example.ai_develop.domain.UpdateWorkingMemoryUseCase
+import com.example.ai_develop.presentation.AgentManager
 import com.example.ai_develop.presentation.ChatInteractor
 import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.TaskViewModel
@@ -28,6 +47,7 @@ import org.koin.core.context.startKoin
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.viewModelOf
+import org.koin.core.qualifier.named
 import org.koin.dsl.KoinAppDeclaration
 import org.koin.dsl.module
 
@@ -70,8 +90,9 @@ val commonModule = module {
         }
     }
 
-    // Сетевой репозиторий
-    single<ChatRepository> {
+
+// Сетевой репозиторий
+    single<ChatRepository>(named("network")) {
         KtorChatRepository(
             httpClient = get(),
             deepSeekKey = BuildConfig.DEEPSEEK_KEY,
@@ -81,6 +102,13 @@ val commonModule = module {
         )
     }
 
+// Основной репозиторий
+    single<ChatRepository> {
+        SqlDelightChatRepository(
+            db = get(),
+            networkRepository = get(named("network"))
+        )
+    }
     // Room Database provided in platformModule
 
     // Database Repositories
@@ -105,6 +133,7 @@ val commonModule = module {
     singleOf(::ChatMemoryManager)
     singleOf(::DefaultAgentFactory)
     singleOf(::StrategyDelegateFactory)
+    singleOf(::AgentManager)
 
     // Use Cases
     singleOf(::GetTasksUseCase)
@@ -119,6 +148,9 @@ val commonModule = module {
     singleOf(::SummarizeChatUseCase)
     singleOf(::ExtractFactsUseCase)
     singleOf(::UpdateWorkingMemoryUseCase)
+
+    // Agent Management UseCase Facade
+    singleOf(::AgentManagementUseCase)
 
     // Interactor
     singleOf(::ChatInteractor)

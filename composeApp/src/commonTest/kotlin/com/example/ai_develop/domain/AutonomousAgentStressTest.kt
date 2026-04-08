@@ -155,6 +155,10 @@ class AutonomousAgentStressTest {
         
         override fun observeAgentState(id: String): Flow<AgentState?> = 
             _agentUpdates.filter { it.agentId == id }.onStart { agentStateMap[id]?.let { emit(it) } }
+
+        override suspend fun deleteAgent(agentId: String) {
+            agentStateMap.remove(agentId)
+        }
         
         override suspend fun extractFacts(m: List<ChatMessage>, cf: ChatFacts, p: LLMProvider) = Result.success(extractedFactsToReturn)
         override suspend fun getProfile(id: String) = null

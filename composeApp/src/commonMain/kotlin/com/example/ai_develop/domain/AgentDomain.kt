@@ -35,6 +35,28 @@ data class UserProfile(
 )
 
 /**
+ * Параметры для обновления данных агента.
+ */
+data class UpdateAgentParams(
+    val id: String,
+    val name: String,
+    val systemPrompt: String,
+    val temperature: Double,
+    val provider: LLMProvider,
+    val stopWord: String,
+    val maxTokens: Int,
+    val memoryStrategy: ChatMemoryStrategy
+)
+
+/**
+ * Состояние обновления памяти/агента.
+ */
+data class MemoryUpdateState(
+    val isLoading: Boolean = false,
+    val agentUpdate: Pair<String, (Agent) -> Agent>? = null
+)
+
+/**
  * Полное состояние агента, сохраняемое в БД.
  */
 @Serializable
@@ -50,8 +72,7 @@ data class AgentState(
     val plan: AgentPlan = AgentPlan(),
     val memoryStrategy: ChatMemoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
     val workingMemory: WorkingMemory = WorkingMemory(),
-    // Список сообщений может быть огромным, поэтому в AgentState 
-    // мы можем хранить только метаданные или последние N сообщений, 
-    // но для простоты на данном этапе оставим загрузку через репозиторий.
-    val messages: List<ChatMessage> = emptyList()
+    val messages: List<ChatMessage> = emptyList(),
+    val branches: List<ChatBranch> = emptyList(),
+    val currentBranchId: String? = null
 )
