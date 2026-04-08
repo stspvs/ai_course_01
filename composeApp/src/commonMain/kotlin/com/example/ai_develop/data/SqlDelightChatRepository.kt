@@ -1,8 +1,10 @@
 package com.example.ai_develop.data
 
 import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
 import app.cash.sqldelight.coroutines.mapToOneOrNull
 import com.example.ai_develop.database.AgentDatabase
+import com.example.aidevelop.database.AgentStateEntity
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -34,27 +36,7 @@ class SqlDelightChatRepository(
 
     override suspend fun getAgentState(agentId: String): AgentState? {
         return db.agentDatabaseQueries.getAgentState(agentId).executeAsOneOrNull()?.let {
-            AgentState(
-                agentId = it.agentId,
-                name = it.name,
-                systemPrompt = it.systemPrompt,
-                temperature = it.temperature,
-                maxTokens = it.maxTokens.toInt(),
-                stopWord = it.stopWord,
-                currentStage = it.currentStage,
-                currentStepId = it.currentStepId,
-                plan = json.decodeFromString(AgentPlan.serializer(), it.planJson),
-                memoryStrategy = if (it.memoryStrategyJson.isNotEmpty()) {
-                    json.decodeFromString(ChatMemoryStrategy.serializer(), it.memoryStrategyJson)
-                } else {
-                    ChatMemoryStrategy.SlidingWindow(10)
-                },
-                workingMemory = if (it.workingMemoryJson.isNotEmpty()) {
-                    json.decodeFromString(WorkingMemory.serializer(), it.workingMemoryJson)
-                } else {
-                    WorkingMemory()
-                }
-            )
+            mapToDomain(it)
         }
     }
 
@@ -67,30 +49,57 @@ class SqlDelightChatRepository(
             .asFlow()
             .mapToOneOrNull(Dispatchers.Default)
             .map { entity ->
-                entity?.let {
-                    AgentState(
-                        agentId = it.agentId,
-                        name = it.name,
-                        systemPrompt = it.systemPrompt,
-                        temperature = it.temperature,
-                        maxTokens = it.maxTokens.toInt(),
-                        stopWord = it.stopWord,
-                        currentStage = it.currentStage,
-                        currentStepId = it.currentStepId,
-                        plan = json.decodeFromString(AgentPlan.serializer(), it.planJson),
-                        memoryStrategy = if (it.memoryStrategyJson.isNotEmpty()) {
-                            json.decodeFromString(ChatMemoryStrategy.serializer(), it.memoryStrategyJson)
-                        } else {
-                            ChatMemoryStrategy.SlidingWindow(10)
-                        },
-                        workingMemory = if (it.workingMemoryJson.isNotEmpty()) {
-                            json.decodeFromString(WorkingMemory.serializer(), it.workingMemoryJson)
-                        } else {
-                            WorkingMemory()
-                        }
-                    )
-                }
+                entity?.let { mapToDomain(it) }
             }
+    }
+
+    override fun observeAllAgents(): Flow<List<AgentState>> {
+        return db.agentDatabaseQueries.getAllAgents()
+            .asFlow()
+            .mapToList(Dispatchers.Default)
+            .map { list ->
+                list.map { mapToDomain(it) }
+            }
+    }
+
+    private fun mapToDomain(it: AgentStateEntity): AgentState {
+        return AgentState(
+            agentId = it.agentId,
+            name = it.name,
+            systemPrompt = it.systemPrompt,
+            temperature = it.temperature,
+            maxTokens = it.maxTokens.toInt(),
+            stopWord = it.stopWord,
+            currentStage = it.currentStage,
+            currentStepId = it.currentStepId,
+            plan = if (it.planJson.isNotEmpty()) {
+                try {
+                    json.decodeFromString(AgentPlan.serializer(), it.planJson)
+                } catch (e: Exception) {
+                    AgentPlan()
+                }
+            } else {
+                AgentPlan()
+            },
+            memoryStrategy = if (it.memoryStrategyJson.isNotEmpty()) {
+                try {
+                    json.decodeFromString(ChatMemoryStrategy.serializer(), it.memoryStrategyJson)
+                } catch (e: Exception) {
+                    ChatMemoryStrategy.SlidingWindow(10)
+                }
+            } else {
+                ChatMemoryStrategy.SlidingWindow(10)
+            },
+            workingMemory = if (it.workingMemoryJson.isNotEmpty()) {
+                try {
+                    json.decodeFromString(WorkingMemory.serializer(), it.workingMemoryJson)
+                } catch (e: Exception) {
+                    WorkingMemory()
+                }
+            } else {
+                WorkingMemory()
+            }
+        )
     }
 
     override suspend fun getProfile(agentId: String): UserProfile? {
@@ -99,7 +108,11 @@ class SqlDelightChatRepository(
                 preferences = it.preferences,
                 constraints = it.constraints,
                 memoryModelProvider = it.memoryModelProviderJson?.let { jsonStr ->
-                    json.decodeFromString<LLMProvider>(jsonStr)
+                    try {
+                        json.decodeFromString<LLMProvider>(jsonStr)
+                    } catch (e: Exception) {
+                        null
+                    }
                 }
             )
         }
@@ -123,7 +136,7 @@ class SqlDelightChatRepository(
     override suspend fun saveInvariant(invariant: Invariant) {
         db.agentDatabaseQueries.insertInvariant(
             id = invariant.id,
-            agentId = "default", // Или передавать конкретный ID
+            agentId = "default",
             rule = invariant.rule,
             stage = invariant.stage,
             isActive = invariant.isActive

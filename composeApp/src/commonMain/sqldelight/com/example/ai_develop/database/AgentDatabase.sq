@@ -53,6 +53,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 getAgentState:
 SELECT * FROM AgentStateEntity WHERE agentId = ?;
 
+getAllAgents:
+SELECT * FROM AgentStateEntity;
+
 saveProfile:
 INSERT OR REPLACE INTO ProfileEntity(agentId, preferences, constraints, memoryModelProviderJson)
 VALUES (?, ?, ?, ?);

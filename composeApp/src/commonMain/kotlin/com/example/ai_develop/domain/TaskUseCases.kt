@@ -1,6 +1,7 @@
 package com.example.ai_develop.domain
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 class GetTasksUseCase(private val repository: TaskRepository) {
     operator fun invoke(): Flow<List<TaskContext>> = repository.getTasks()
@@ -26,6 +27,23 @@ class GetMessagesUseCase(private val repository: MessageRepository) {
     operator fun invoke(taskId: String): Flow<List<ChatMessage>> = repository.getMessagesForTask(taskId)
 }
 
-class GetAgentsUseCase(private val repository: AgentRepository) {
-    operator fun invoke(): Flow<List<Agent>> = repository.getAgents()
+class GetAgentsUseCase(private val repository: ChatRepository) {
+    operator fun invoke(): Flow<List<Agent>> {
+        return repository.observeAllAgents().map { states ->
+            states.map { state ->
+                Agent(
+                    id = state.agentId,
+                    name = state.name,
+                    systemPrompt = state.systemPrompt,
+                    temperature = state.temperature,
+                    provider = LLMProvider.Yandex(), // Можно расширить в AgentState
+                    stopWord = state.stopWord,
+                    maxTokens = state.maxTokens,
+                    memoryStrategy = state.memoryStrategy,
+                    workingMemory = state.workingMemory,
+                    messages = emptyList() // Сообщения подгружаются отдельно при необходимости
+                )
+            }
+        }
+    }
 }
