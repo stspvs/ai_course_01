@@ -98,9 +98,7 @@ class ChatInteractor(
         scope.launch {
             try {
                 strategyFactory.getDelegate(agent.memoryStrategy).forceUpdate(
-                    scope = scope,
                     agent = agent,
-                    repository = repository,
                     onAgentUpdated = { updated -> 
                         onAgentUpdate(agent.id) { updated }
                         scope.launch { repository.saveAgentMetadata(updated) }
@@ -241,9 +239,7 @@ class ChatInteractor(
             
             repository.getAgentWithMessages(agentId).firstOrNull()?.let { latestAgent ->
                 strategyFactory.getDelegate(latestAgent.memoryStrategy).onMessageReceived(
-                    scope = scope,
                     agent = latestAgent,
-                    repository = repository,
                     onAgentUpdated = { updated -> 
                         onAgentUpdate(agentId) { updated }
                         scope.launch { repository.saveAgentMetadata(updated) }

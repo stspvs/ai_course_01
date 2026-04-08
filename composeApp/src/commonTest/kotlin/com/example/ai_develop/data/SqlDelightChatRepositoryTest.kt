@@ -13,9 +13,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.*
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -27,7 +24,7 @@ class SqlDelightChatRepositoryTest {
     private lateinit var networkRepository: FakeNetworkRepository
     private lateinit var repository: SqlDelightChatRepository
 
-    @Before
+    @BeforeTest
     fun setup() {
         Dispatchers.setMain(testDispatcher)
         
@@ -47,7 +44,7 @@ class SqlDelightChatRepositoryTest {
         repository = SqlDelightChatRepository(db, networkRepository)
     }
 
-    @After
+    @AfterTest
     fun tearDown() {
         driver.close()
         Dispatchers.resetMain()

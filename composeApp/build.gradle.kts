@@ -72,6 +72,9 @@ kotlin {
             dependsOn(commonTest)
             dependencies {
                 implementation(libs.sqldelight.sqlite.driver)
+                implementation(libs.junit.jupiter.api)
+                runtimeOnly(libs.junit.jupiter.engine)
+                implementation(libs.mockk)
             }
         }
     }
@@ -108,6 +111,10 @@ compose.desktop {
 
 tasks.withType<JavaExec> {
     standardInput = System.`in`
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }
 
 val localProperties = Properties()

@@ -65,8 +65,7 @@ class ChatInteractorTest {
         val strategyFactory = StrategyDelegateFactory(
             ExtractFactsUseCase(chatRepo),
             SummarizeChatUseCase(chatRepo),
-            updateWorkingMemoryUseCase,
-            chatRepo
+            updateWorkingMemoryUseCase
         )
         
         val interactor = ChatInteractor(useCase, repo, memoryManager, strategyFactory)

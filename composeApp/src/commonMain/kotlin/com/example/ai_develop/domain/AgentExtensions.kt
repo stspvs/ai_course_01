@@ -12,6 +12,10 @@ import kotlin.uuid.Uuid
 val Agent.memoryProvider: LLMProvider
     get() = userProfile?.memoryModelProvider ?: provider
 
+fun Agent.assistantMessagesCount(): Int {
+    return messages.count { it.source == SourceType.ASSISTANT }
+}
+
 fun Agent.mergeWith(db: Agent): Agent {
     val dbIds = db.messages.map { it.id }.toSet()
     val pendingMessages = this.messages.filter { it.id !in dbIds }

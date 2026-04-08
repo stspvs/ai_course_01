@@ -111,6 +111,18 @@ data class Agent(
     val workingMemory: WorkingMemory = WorkingMemory()
 )
 
+data class AgentUpdate(
+    val workingMemory: WorkingMemory? = null,
+    val memoryStrategy: ChatMemoryStrategy? = null
+)
+
+fun Agent.applyUpdate(update: AgentUpdate): Agent {
+    return copy(
+        workingMemory = update.workingMemory ?: workingMemory,
+        memoryStrategy = update.memoryStrategy ?: memoryStrategy
+    )
+}
+
 @Serializable
 data class AgentTemplate(
     val name: String,

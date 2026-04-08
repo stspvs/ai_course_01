@@ -1,69 +1,74 @@
 package com.example.ai_develop.presentation.strategy
 
-import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
-import kotlinx.coroutines.CoroutineScope
 
-interface StrategyDelegate {
+sealed interface StrategyDelegate {
     suspend fun onMessageReceived(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     )
     
     suspend fun forceUpdate(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     )
+}
+
+abstract class BaseStrategyDelegate : StrategyDelegate {
+
+    protected suspend fun updateAgent(
+        agent: Agent,
+        onAgentUpdated: (Agent) -> Unit,
+        block: suspend (Agent) -> AgentUpdate
+    ) {
+        val update = block(agent)
+        val updatedAgent = agent.applyUpdate(update)
+        if (updatedAgent != agent) {
+            onAgentUpdated(updatedAgent)
+        }
+    }
+
+    protected suspend fun updateWorkingMemory(
+        agent: Agent,
+        useCase: UpdateWorkingMemoryUseCase
+    ): Result<WorkingMemory> {
+        return useCase.update(agent)
+    }
 }
 
 class DefaultStrategyDelegate(
     private val updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCase,
     private val extractFactsUseCase: ExtractFactsUseCase
-) : StrategyDelegate {
+) : BaseStrategyDelegate() {
     override suspend fun onMessageReceived(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
-        // По умолчанию просто обновляем рабочую память каждые 5 сообщений
-        val assistantMessagesCount = agent.messages.count { it.source == SourceType.ASSISTANT }
-        if (assistantMessagesCount > 0 && assistantMessagesCount % 5 == 0) {
-            forceUpdate(scope, agent, repository, onAgentUpdated)
+        if (agent.assistantMessagesCount() > 0 && agent.assistantMessagesCount() % 5 == 0) {
+            forceUpdate(agent, onAgentUpdated)
         }
     }
 
     override suspend fun forceUpdate(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
-        // Обновляем и рабочую память (задачу), и факты (долгую память)
-        val wmResult = updateWorkingMemoryUseCase.update(agent)
-        val factsResult = extractFactsUseCase(
-            messages = agent.messages, 
-            currentFacts = agent.workingMemory.extractedFacts, 
-            provider = agent.memoryProvider, 
-            windowSize = 20
-        )
-        
-        var updatedAgent = agent
-        wmResult.onSuccess { newWm ->
-            updatedAgent = updatedAgent.copy(workingMemory = newWm)
-        }
-        factsResult.onSuccess { newFacts ->
-            updatedAgent = updatedAgent.copy(
-                workingMemory = updatedAgent.workingMemory.copy(extractedFacts = newFacts)
+        updateAgent(agent, onAgentUpdated) { current ->
+            val wmResult = updateWorkingMemory(current, updateWorkingMemoryUseCase)
+            val factsResult = extractFactsUseCase(
+                messages = current.messages, 
+                currentFacts = current.workingMemory.extractedFacts, 
+                provider = current.memoryProvider, 
+                windowSize = 20
             )
-        }
-        
-        if (updatedAgent != agent) {
-            onAgentUpdated(updatedAgent)
+            
+            var newWM = current.workingMemory
+            wmResult.onSuccess { newWM = it }
+            factsResult.onSuccess { newFacts ->
+                newWM = newWM.copy(extractedFacts = newFacts)
+            }
+            
+            AgentUpdate(workingMemory = newWM)
         }
     }
 }
@@ -71,98 +76,90 @@ class DefaultStrategyDelegate(
 class SummarizationStrategyDelegate(
     private val summarizeChatUseCase: SummarizeChatUseCase,
     private val updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCase
-) : StrategyDelegate {
+) : BaseStrategyDelegate() {
     override suspend fun onMessageReceived(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
         val strategy = agent.memoryStrategy as? ChatMemoryStrategy.Summarization ?: return
-        val assistantMessagesCount = agent.messages.count { it.source == SourceType.ASSISTANT }
-        
-        if (assistantMessagesCount >= strategy.windowSize) {
-            forceUpdate(scope, agent, repository, onAgentUpdated)
+        if (agent.assistantMessagesCount() >= strategy.windowSize) {
+            forceUpdate(agent, onAgentUpdated)
         }
     }
 
     override suspend fun forceUpdate(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
-        val strategy = agent.memoryStrategy as? ChatMemoryStrategy.Summarization ?: return
-        
-        val summaryResult = summarizeChatUseCase(
-            messages = agent.messages,
-            previousSummary = strategy.summary,
-            instruction = strategy.summaryPrompt,
-            provider = agent.memoryProvider
-        )
-        
-        val wmResult = updateWorkingMemoryUseCase.update(agent)
-        
-        var updatedAgent = agent
-        summaryResult.onSuccess { newSummary ->
-            val updatedStrategy = strategy.copy(summary = newSummary)
-            updatedAgent = updatedAgent.copy(memoryStrategy = updatedStrategy)
+        updateAgent(agent, onAgentUpdated) { current ->
+            val strategy = current.memoryStrategy as? ChatMemoryStrategy.Summarization ?: return@updateAgent AgentUpdate()
+            
+            val summaryResult = summarizeChatUseCase(
+                messages = current.messages,
+                previousSummary = strategy.summary,
+                instruction = strategy.summaryPrompt,
+                provider = current.memoryProvider
+            )
+            
+            val wmResult = updateWorkingMemory(current, updateWorkingMemoryUseCase)
+            
+            var newStrategy: ChatMemoryStrategy? = null
+            summaryResult.onSuccess { newSummary ->
+                newStrategy = strategy.copy(summary = newSummary)
+            }
+            
+            var newWM: WorkingMemory? = null
+            wmResult.onSuccess { newWM = it }
+            
+            AgentUpdate(workingMemory = newWM, memoryStrategy = newStrategy)
         }
-        wmResult.onSuccess { newWm ->
-            updatedAgent = updatedAgent.copy(workingMemory = newWm)
-        }
-        
-        onAgentUpdated(updatedAgent)
     }
 }
 
 class StickyFactsStrategyDelegate(
     private val extractFactsUseCase: ExtractFactsUseCase,
     private val updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCase
-) : StrategyDelegate {
+) : BaseStrategyDelegate() {
     override suspend fun onMessageReceived(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
         val strategy = agent.memoryStrategy as? ChatMemoryStrategy.StickyFacts ?: return
-        val assistantMessagesCount = agent.messages.count { it.source == SourceType.ASSISTANT }
-        
-        if (assistantMessagesCount > 0 && assistantMessagesCount % strategy.updateInterval == 0) {
-            forceUpdate(scope, agent, repository, onAgentUpdated)
+        if (agent.assistantMessagesCount() > 0 && agent.assistantMessagesCount() % strategy.updateInterval == 0) {
+            forceUpdate(agent, onAgentUpdated)
         }
     }
 
     override suspend fun forceUpdate(
-        scope: CoroutineScope,
         agent: Agent,
-        repository: LocalChatRepository,
         onAgentUpdated: (Agent) -> Unit
     ) {
-        val strategy = agent.memoryStrategy as? ChatMemoryStrategy.StickyFacts ?: return
-        
-        val factsResult = extractFactsUseCase(
-            messages = agent.messages,
-            currentFacts = strategy.facts,
-            provider = agent.memoryProvider,
-            windowSize = strategy.windowSize
-        )
-        
-        val wmResult = updateWorkingMemoryUseCase.update(agent)
-        
-        var updatedAgent = agent
-        factsResult.onSuccess { newFacts ->
-            val updatedStrategy = strategy.copy(facts = newFacts)
-            updatedAgent = updatedAgent.copy(
-                memoryStrategy = updatedStrategy,
-                workingMemory = updatedAgent.workingMemory.copy(extractedFacts = newFacts)
+        updateAgent(agent, onAgentUpdated) { current ->
+            val strategy = current.memoryStrategy as? ChatMemoryStrategy.StickyFacts ?: return@updateAgent AgentUpdate()
+            
+            val factsResult = extractFactsUseCase(
+                messages = current.messages,
+                currentFacts = strategy.facts,
+                provider = current.memoryProvider,
+                windowSize = strategy.windowSize
             )
+            
+            val wmResult = updateWorkingMemory(current, updateWorkingMemoryUseCase)
+            
+            var newStrategy: ChatMemoryStrategy? = null
+            var newWM = current.workingMemory
+            
+            factsResult.onSuccess { newFacts ->
+                newStrategy = strategy.copy(facts = newFacts)
+                newWM = newWM.copy(extractedFacts = newFacts)
+            }
+            
+            wmResult.onSuccess { 
+                // Сохраняем извлеченные факты при обновлении WM
+                newWM = it.copy(extractedFacts = newWM.extractedFacts)
+            }
+            
+            AgentUpdate(workingMemory = newWM, memoryStrategy = newStrategy)
         }
-        wmResult.onSuccess { newWm ->
-            updatedAgent = updatedAgent.copy(workingMemory = newWm)
-        }
-        
-        onAgentUpdated(updatedAgent)
     }
 }
