@@ -55,6 +55,7 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.test)
                 implementation(libs.ktor.client.mock)
                 implementation(libs.koin.test)
+                implementation("app.cash.turbine:turbine:1.2.1")
             }
         }
         
@@ -69,6 +70,9 @@ kotlin {
 
         val desktopTest by getting {
             dependsOn(commonTest)
+            dependencies {
+                implementation(libs.sqldelight.sqlite.driver)
+            }
         }
     }
 }
