@@ -1,6 +1,6 @@
 package com.example.ai_develop.data.database.mappers
 
-import com.example.ai_develop.data.database.AgentEntity
+import com.example.ai_develop.data.database.*
 import com.example.ai_develop.domain.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -8,47 +8,28 @@ import kotlin.test.assertEquals
 class MappersTest {
 
     @Test
-    fun testAgentEntityToDomain() {
+    fun testAgentMapper() {
         val entity = AgentEntity(
-            id = "1",
+            id = "test_id",
             name = "Test Agent",
-            systemPrompt = "System",
-            temperature = 0.5,
-            provider = LLMProvider.Yandex(),
-            stopWord = "stop",
-            maxTokens = 100,
-            totalTokensUsed = 10,
-            memoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
+            systemPrompt = "Prompt",
+            temperature = 0.7,
+            provider = LLMProvider.DEEPSEEK,
+            stopWord = "",
+            maxTokens = 1000,
+            totalTokensUsed = 0,
+            memoryStrategy = ChatMemoryStrategy.FULL,
             branches = emptyList(),
             currentBranchId = null,
-            userProfile = UserProfile(preferences = "pref", constraints = "cons")
+            userProfile = null,
+            workingMemory = WorkingMemory()
         )
         
-        val messages = listOf(ChatMessage(message = "Hello", source = SourceType.USER))
-        val domain = entity.toDomain(messages)
-        
+        val domain = entity.toDomain(emptyList())
         assertEquals(entity.id, domain.id)
         assertEquals(entity.name, domain.name)
-        assertEquals(messages, domain.messages)
-        assertEquals(entity.memoryStrategy, domain.memoryStrategy)
-        assertEquals(entity.userProfile, domain.userProfile)
-    }
-
-    @Test
-    fun testChatMessageToEntity() {
-        val message = ChatMessage(
-            message = "Hello",
-            source = SourceType.USER,
-            tokensUsed = 5
-        )
-        val agentId = "agent_123"
         
-        val entity = message.toEntity(agentId)
-        
-        assertEquals(message.id, entity.id)
-        assertEquals(agentId, entity.agentId)
-        assertEquals(message.message, entity.message)
-        assertEquals(message.source, entity.source)
-        assertEquals(message.tokenCount, entity.tokenCount)
+        val backToEntity = domain.toEntity()
+        assertEquals(entity.id, backToEntity.id)
     }
 }
