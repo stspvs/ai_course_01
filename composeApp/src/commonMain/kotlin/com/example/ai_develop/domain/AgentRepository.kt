@@ -1,0 +1,11 @@
+package com.example.ai_develop.domain
+
+import kotlinx.coroutines.flow.Flow
+
+interface AgentRepository {
+    fun getAgents(): Flow<List<Agent>>
+    fun getAgentWithMessages(agentId: String): Flow<Agent?>
+    suspend fun saveAgent(agent: Agent): Result<Unit>
+    suspend fun saveAgentMetadata(agent: Agent): Result<Unit>
+    suspend fun deleteAgent(agentId: String): Result<Unit>
+}

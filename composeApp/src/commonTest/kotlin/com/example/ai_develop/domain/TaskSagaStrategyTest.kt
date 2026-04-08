@@ -12,21 +12,37 @@ class TaskSagaStrategyTest {
     private class FakeLocalRepository : LocalChatRepository {
         val tasks = MutableStateFlow<Map<String, TaskContext>>(emptyMap())
         val messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-        val agents = MutableStateFlow<List<Agent>>(emptyList())
+        val agents = MutableStateFlow<List<Agent>>(emptyMap<String, Agent>().values.toList())
 
-        override fun getAgents(): Flow<List<Agent>> = agents.asStateFlow()
-        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = agents.map { it.find { a -> a.id == agentId } }
-        override suspend fun saveAgent(agent: Agent) { agents.value = agents.value.filterNot { it.id == agent.id } + agent }
-        override suspend fun saveAgentMetadata(agent: Agent) { saveAgent(agent) }
-        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) {
-            messages.value = messages.value + message.copy(taskId = taskId, taskState = taskState)
+        override fun getAgents(): Flow<List<Agent>> = flowOf(agents.value)
+        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = flow { emit(agents.value.find { it.id == agentId }) }
+        override suspend fun saveAgent(agent: Agent): Result<Unit> { 
+            agents.value = agents.value.filterNot { it.id == agent.id } + agent 
+            return Result.success(Unit)
         }
-        override suspend fun deleteAgent(agentId: String) { agents.value = agents.value.filterNot { it.id == agentId } }
+        override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> = saveAgent(agent)
+        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?): Result<Unit> {
+            messages.value = messages.value + message.copy(taskId = taskId, taskState = taskState)
+            return Result.success(Unit)
+        }
+        override suspend fun deleteAgent(agentId: String): Result<Unit> { 
+            agents.value = agents.value.filterNot { it.id == agentId }
+            return Result.success(Unit)
+        }
         override fun getTasks(): Flow<List<TaskContext>> = tasks.map { it.values.toList() }
-        override suspend fun saveTask(task: TaskContext) { tasks.value = tasks.value + (task.taskId to task) }
-        override suspend fun deleteTask(task: TaskContext) { tasks.value = tasks.value - task.taskId }
+        override suspend fun saveTask(task: TaskContext): Result<Unit> { 
+            tasks.value = tasks.value + (task.taskId to task) 
+            return Result.success(Unit)
+        }
+        override suspend fun deleteTask(task: TaskContext): Result<Unit> { 
+            tasks.value = tasks.value - task.taskId 
+            return Result.success(Unit)
+        }
         override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = messages.map { it.filter { m -> m.taskId == taskId } }
-        override suspend fun deleteMessagesForTask(taskId: String) { messages.value = messages.value.filterNot { it.taskId == taskId } }
+        override suspend fun deleteMessagesForTask(taskId: String): Result<Unit> { 
+            messages.value = messages.value.filterNot { it.taskId == taskId } 
+            return Result.success(Unit)
+        }
     }
 
     private class FakeChatRepository : ChatRepository {

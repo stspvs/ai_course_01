@@ -8,6 +8,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,17 +22,21 @@ class ChatInteractorTest {
         var savedMetadata: Agent? = null
         override fun getAgents() = emptyFlow<List<Agent>>()
         override fun getAgentWithMessages(agentId: String) = flowOf(null)
-        override suspend fun saveAgent(agent: Agent) {}
-        override suspend fun saveAgentMetadata(agent: Agent) { savedMetadata = agent }
-        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) { 
-            savedMessages.add(message) 
+        override suspend fun saveAgent(agent: Agent): Result<Unit> = Result.success(Unit)
+        override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> { 
+            savedMetadata = agent 
+            return Result.success(Unit)
         }
-        override suspend fun deleteAgent(agentId: String) {}
+        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?): Result<Unit> { 
+            savedMessages.add(message) 
+            return Result.success(Unit)
+        }
+        override suspend fun deleteAgent(agentId: String): Result<Unit> = Result.success(Unit)
         override fun getTasks(): Flow<List<TaskContext>> = emptyFlow()
-        override suspend fun saveTask(task: TaskContext) {}
-        override suspend fun deleteTask(task: TaskContext) {}
+        override suspend fun saveTask(task: TaskContext): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteTask(task: TaskContext): Result<Unit> = Result.success(Unit)
         override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = emptyFlow()
-        override suspend fun deleteMessagesForTask(taskId: String) {}
+        override suspend fun deleteMessagesForTask(taskId: String): Result<Unit> = Result.success(Unit)
     }
 
     private class MockChatRepository : ChatRepository {

@@ -20,6 +20,9 @@ interface AgentDao {
     @Delete
     suspend fun deleteAgent(agentEntity: AgentEntity)
 
+    @Query("DELETE FROM agents WHERE id = :id")
+    suspend fun deleteAgentById(id: String)
+
     @Query("SELECT * FROM messages WHERE agentId = :agentId ORDER BY timestamp ASC")
     fun getMessagesForAgent(agentId: String): Flow<List<MessageEntity>>
 
@@ -36,6 +39,14 @@ interface AgentDao {
         messages.forEach { insertMessage(it) }
     }
 
-    @Query("UPDATE agents SET totalTokensUsed = :tokens WHERE id = :agentId")
-    suspend fun updateTokens(agentId: String, tokens: Int)
+    @Query("UPDATE agents SET totalTokensUsed = totalTokensUsed + :tokens WHERE id = :agentId")
+    suspend fun incrementTokens(agentId: String, tokens: Int)
+
+    @Transaction
+    suspend fun insertMessageAndIncrementTokens(message: MessageEntity, tokens: Int) {
+        insertMessage(message)
+        if (tokens > 0) {
+            incrementTokens(message.agentId, tokens)
+        }
+    }
 }

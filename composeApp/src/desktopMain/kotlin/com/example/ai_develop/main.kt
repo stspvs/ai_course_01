@@ -9,8 +9,6 @@ import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.compose.App
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.get
 
 fun main(args: Array<String>) {
     // Инициализируем зависимости через Koin
@@ -23,7 +21,7 @@ fun main(args: Array<String>) {
         val useCase: ChatStreamingUseCase = koin.get()
         val repository: ChatRepository = koin.get()
         val scope = CoroutineScope(SupervisorJob())
-        
+
         val cliManager = CliAgentManager(useCase, repository, scope)
         // start() теперь блокирующая и сама читает System.in
         cliManager.start()

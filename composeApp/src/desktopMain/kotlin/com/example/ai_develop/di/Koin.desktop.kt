@@ -1,9 +1,9 @@
 package com.example.ai_develop.di
 
-import com.example.ai_develop.data.database.AppDatabase
-import com.example.ai_develop.data.database.DatabaseChatRepository
-import com.example.ai_develop.data.database.LocalChatRepository
-import com.example.ai_develop.data.database.getDatabaseBuilder
+import com.example.ai_develop.data.database.*
+import com.example.ai_develop.domain.AgentRepository
+import com.example.ai_develop.domain.MessageRepository
+import com.example.ai_develop.domain.TaskRepository
 import com.example.ai_develop.database.DriverFactory
 import io.ktor.client.*
 import io.ktor.client.engine.*
@@ -18,9 +18,20 @@ actual val platformModule = module {
     single<AppDatabase> {
         getDatabaseBuilder().build()
     }
-    single { get<AppDatabase>().agentDao() }
-    single { get<AppDatabase>().taskDao() }
-    single<LocalChatRepository> { DatabaseChatRepository(get()) }
+    
+    single<AgentRepository> { DatabaseAgentRepository(get()) }
+    single<TaskRepository> { DatabaseTaskRepository(get()) }
+    single<MessageRepository> { DatabaseMessageRepository(get()) }
+    
+    single<DatabaseChatRepository> { 
+        DatabaseChatRepository(
+            agentRepository = get(),
+            taskRepository = get(),
+            messageRepository = get()
+        ) 
+    }
+    
+    single<LocalChatRepository> { get<DatabaseChatRepository>() }
     
     // SqlDelight Driver Factory and Driver
     single { DriverFactory() }
@@ -63,7 +74,5 @@ actual fun HttpClientConfig<*>.configurePlatform() {
                 }
             }
         }
-        // Если Fiddler не запущен, прокси не устанавливается, и приложение 
-        // работает напрямую с интернетом через стандартные настройки.
     }
 }

@@ -19,22 +19,26 @@ class TaskSagaTest {
 
         override fun getAgents(): Flow<List<Agent>> = _agents.asStateFlow()
         override fun getAgentWithMessages(agentId: String): Flow<Agent?> = flowOf(null)
-        override suspend fun saveAgent(agent: Agent) { 
+        override suspend fun saveAgent(agent: Agent): Result<Unit> { 
             _agents.value = _agents.value.filterNot { it.id == agent.id } + agent 
+            return Result.success(Unit)
         }
-        override suspend fun saveAgentMetadata(agent: Agent) { saveAgent(agent) }
-        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?) {
+        override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> { return saveAgent(agent) }
+        override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?): Result<Unit> {
             _messages.value = _messages.value + message.copy(taskId = taskId, taskState = taskState)
+            return Result.success(Unit)
         }
-        override suspend fun deleteAgent(agentId: String) {}
+        override suspend fun deleteAgent(agentId: String): Result<Unit> = Result.success(Unit)
         override fun getTasks(): Flow<List<TaskContext>> = _tasks.asStateFlow()
-        override suspend fun saveTask(task: TaskContext) {
+        override suspend fun saveTask(task: TaskContext): Result<Unit> {
             _tasks.value = _tasks.value.filterNot { it.taskId == task.taskId } + task
+            return Result.success(Unit)
         }
-        override suspend fun deleteTask(task: TaskContext) {}
+        override suspend fun deleteTask(task: TaskContext): Result<Unit> = Result.success(Unit)
         override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = _messages.map { list -> list.filter { it.taskId == taskId } }
-        override suspend fun deleteMessagesForTask(taskId: String) {
+        override suspend fun deleteMessagesForTask(taskId: String): Result<Unit> {
             _messages.value = _messages.value.filterNot { it.taskId == taskId }
+            return Result.success(Unit)
         }
     }
 

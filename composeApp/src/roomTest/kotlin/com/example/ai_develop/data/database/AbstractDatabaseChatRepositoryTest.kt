@@ -17,7 +17,10 @@ abstract class AbstractDatabaseChatRepositoryTest {
     @BeforeTest
     fun setup() {
         db = createTestDatabase()
-        repository = DatabaseChatRepository(db)
+        val agentRepo = DatabaseAgentRepository(db)
+        val taskRepo = DatabaseTaskRepository(db)
+        val messageRepo = DatabaseMessageRepository(db)
+        repository = DatabaseChatRepository(agentRepo, taskRepo, messageRepo)
     }
 
     @AfterTest

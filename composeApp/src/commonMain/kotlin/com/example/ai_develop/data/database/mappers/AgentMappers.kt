@@ -21,6 +21,8 @@ fun AgentEntity.toDomain(messages: List<ChatMessage>) = Agent(
     workingMemory = workingMemory
 )
 
+fun List<AgentEntity>.toAgentDomain() = map { it.toDomain(emptyList()) }
+
 fun Agent.toEntity() = AgentEntity(
     id = id,
     name = name,
@@ -54,6 +56,8 @@ fun MessageEntity.toDomain() = ChatMessage(
     taskId = taskId,
     taskState = taskState
 )
+
+fun List<MessageEntity>.toMessageDomain() = map { it.toDomain() }
 
 fun ChatMessage.toEntity(agentId: String) = MessageEntity(
     id = id,

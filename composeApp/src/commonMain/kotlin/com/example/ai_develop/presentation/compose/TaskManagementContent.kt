@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.TaskViewModel
+import com.example.ai_develop.presentation.TaskEvent
 
 @Composable
 fun TaskManagementContent(viewModel: TaskViewModel) {
@@ -41,23 +42,23 @@ fun TaskManagementContent(viewModel: TaskViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Задачи", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = { viewModel.createTask("Новая задача") }) {
+                IconButton(onClick = { viewModel.onEvent(TaskEvent.CreateTask("Новая задача")) }) {
                     Icon(Icons.Default.Add, contentDescription = "Создать задачу")
                 }
             }
             LazyColumn {
-                items(tasks) { task ->
+                items(tasks, key = { it.taskId }) { task ->
                     val isSelected = task.taskId == selectedTaskId
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { viewModel.selectTask(task.taskId) }
+                            .clickable { viewModel.onEvent(TaskEvent.SelectTask(task.taskId)) }
                             .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(task.title, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { viewModel.deleteTask(task) }) {
+                        IconButton(onClick = { viewModel.onEvent(TaskEvent.DeleteTask(task)) }) {
                             Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                         }
                     }
@@ -73,7 +74,7 @@ fun TaskManagementContent(viewModel: TaskViewModel) {
             TaskSettings(
                 task = selectedTask,
                 agents = agents,
-                onUpdate = { viewModel.updateTask(it) }
+                onUpdate = { viewModel.onEvent(TaskEvent.UpdateTask(it)) }
             )
         } else {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

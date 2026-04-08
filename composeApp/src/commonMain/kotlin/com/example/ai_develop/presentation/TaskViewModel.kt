@@ -3,113 +3,181 @@ package com.example.ai_develop.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.domain.*
-import kotlinx.coroutines.*
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-@OptIn(ExperimentalUuidApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+data class TaskUiState(
+    val isLoading: Boolean = false,
+    val error: Throwable? = null,
+    val isSending: Boolean = false
+)
+
+sealed interface TaskEffect {
+    data class ShowError(val message: String) : TaskEffect
+}
+
+sealed interface TaskEvent {
+    data class SendMessage(val taskId: String, val text: String) : TaskEvent
+    data class SelectTask(val taskId: String?) : TaskEvent
+    data class CreateTask(val title: String) : TaskEvent
+    data class UpdateTask(val task: TaskContext) : TaskEvent
+    data class DeleteTask(val task: TaskContext) : TaskEvent
+    data class TogglePause(val taskId: String) : TaskEvent
+    data class ResetTask(val taskId: String) : TaskEvent
+}
+
+@OptIn(ExperimentalUuidApi::class, ExperimentalCoroutinesApi::class)
 class TaskViewModel(
-    private val repository: ChatRepository,
-    private val localRepository: com.example.ai_develop.data.database.LocalChatRepository,
-    private val useCase: ChatStreamingUseCase,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default
+    private val getTasksUseCase: GetTasksUseCase,
+    private val createTaskUseCase: CreateTaskUseCase,
+    private val updateTaskUseCase: UpdateTaskUseCase,
+    private val deleteTaskUseCase: DeleteTaskUseCase,
+    private val resetTaskUseCase: ResetTaskUseCase,
+    private val getMessagesUseCase: GetMessagesUseCase,
+    private val chatStreamingUseCase: ChatStreamingUseCase,
+    private val getAgentsUseCase: GetAgentsUseCase,
+    private val agentFactory: DefaultAgentFactory
 ) : ViewModel() {
 
-    val tasks: StateFlow<List<TaskContext>> = localRepository.getTasks()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val _uiState = MutableStateFlow(TaskUiState())
+    val uiState: StateFlow<TaskUiState> = _uiState.asStateFlow()
+
+    private val _effects = MutableSharedFlow<TaskEffect>()
+    val effects = _effects.asSharedFlow()
 
     private val _selectedTaskId = MutableStateFlow<String?>(null)
     val selectedTaskId: StateFlow<String?> = _selectedTaskId.asStateFlow()
 
-    val agents: StateFlow<List<Agent>> = localRepository.getAgents()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val sharing = SharingStarted.WhileSubscribed(5000)
 
-    // Автономный агент для текущей задачи
-    private var activeAgent: AutonomousAgent? = null
+    val tasks: StateFlow<List<TaskContext>> = getTasksUseCase()
+        .stateIn(viewModelScope, sharing, emptyList())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val activeSagaContext: StateFlow<TaskContext?> = _selectedTaskId.flatMapLatest { id ->
-        if (id == null) flowOf(null)
-        else tasks.map { list -> list.find { it.taskId == id } }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, null)
+    val agents: StateFlow<List<Agent>> = getAgentsUseCase()
+        .stateIn(viewModelScope, sharing, emptyList())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val taskMessages: StateFlow<List<ChatMessage>> = _selectedTaskId.flatMapLatest { id ->
-        if (id == null) flowOf(emptyList())
-        else localRepository.getMessagesForTask(id)
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val activeAgent: StateFlow<AutonomousAgent?> = _selectedTaskId
+        .mapLatest { id ->
+            id?.let { chatStreamingUseCase.getOrCreateAgent(it) }
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+    val activeSagaContext: StateFlow<TaskContext?> = combine(_selectedTaskId, tasks) { id, tasks ->
+        tasks.find { it.taskId == id }
+    }.stateIn(viewModelScope, sharing, null)
+
+    val taskMessages: StateFlow<List<ChatMessage>> = _selectedTaskId
+        .filterNotNull()
+        .flatMapLatest { id -> getMessagesUseCase(id) }
+        .stateIn(viewModelScope, sharing, emptyList())
+
+    fun onEvent(event: TaskEvent) {
+        when (event) {
+            is TaskEvent.SendMessage -> sendUserMessage(event.taskId, event.text)
+            is TaskEvent.SelectTask -> selectTask(event.taskId)
+            is TaskEvent.CreateTask -> createTask(event.title)
+            is TaskEvent.UpdateTask -> updateTask(event.task)
+            is TaskEvent.DeleteTask -> deleteTask(event.task)
+            is TaskEvent.TogglePause -> togglePause(event.taskId)
+            is TaskEvent.ResetTask -> resetTask(event.taskId)
+        }
+    }
 
     fun selectTask(taskId: String?) {
         _selectedTaskId.value = taskId
-        if (taskId != null) {
-            activeAgent = useCase.getOrCreateAgent(taskId)
-        } else {
-            activeAgent = null
-        }
     }
 
     fun createTask(title: String) {
-        val taskId = Uuid.random().toString()
         viewModelScope.launch {
-            val newTask = TaskContext(
-                taskId = taskId,
-                title = title,
-                state = AgentTaskState(TaskState.PLANNING, createDefaultAgent()),
-                isPaused = true
-            )
-            localRepository.saveTask(newTask)
-            selectTask(taskId)
-        }
-    }
-
-    fun deleteTask(task: TaskContext) {
-        viewModelScope.launch {
-            if (_selectedTaskId.value == task.taskId) {
-                selectTask(null)
+            try {
+                val taskId = Uuid.random().toString()
+                val newTask = TaskContext(
+                    taskId = taskId,
+                    title = title,
+                    state = AgentTaskState(TaskState.PLANNING, agentFactory.create()),
+                    isPaused = true
+                )
+                createTaskUseCase(newTask).getOrThrow()
+                selectTask(taskId)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+                _effects.emit(TaskEffect.ShowError(e.message ?: "Unknown error"))
             }
-            localRepository.deleteTask(task)
         }
     }
 
     fun updateTask(task: TaskContext) {
         viewModelScope.launch {
-            localRepository.saveTask(task)
+            try {
+                updateTaskUseCase(task).getOrThrow()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+            }
+        }
+    }
+
+    fun deleteTask(task: TaskContext) {
+        viewModelScope.launch {
+            try {
+                if (_selectedTaskId.value == task.taskId) {
+                    selectTask(null)
+                }
+                deleteTaskUseCase(task).getOrThrow()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+                _effects.emit(TaskEffect.ShowError(e.message ?: "Unknown error"))
+            }
         }
     }
 
     fun sendUserMessage(taskId: String, text: String) {
-        if (text.isBlank()) return
-        
+        val cleanText = text.takeIf { it.isNotBlank() } ?: return
         viewModelScope.launch {
-            // Если агент еще не инициализирован, создаем его
-            val agent = activeAgent ?: useCase.getOrCreateAgent(taskId).also { activeAgent = it }
-            
-            // Отправляем сообщение. Агент сам сохранит его в репозиторий, 
-            // а UI обновится через поток taskMessages (если репозитории синхронизированы)
-            agent.sendMessage(text)
+            _uiState.update { it.copy(isSending = true, error = null) }
+            try {
+                val agent = chatStreamingUseCase.getOrCreateAgent(taskId)
+                agent.sendMessage(cleanText)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+                _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send message"))
+            } finally {
+                _uiState.update { it.copy(isSending = false) }
+            }
         }
     }
 
     fun togglePause(taskId: String) {
-        val currentTask = activeSagaContext.value ?: return
-        updateTask(currentTask.copy(isPaused = !currentTask.isPaused))
+        viewModelScope.launch {
+            try {
+                val task = tasks.map { it.find { t -> t.taskId == taskId } }
+                    .filterNotNull()
+                    .first()
+                updateTaskUseCase(task.copy(isPaused = !task.isPaused)).getOrThrow()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+            }
+        }
     }
 
     fun resetTask(taskId: String) {
         viewModelScope.launch {
-            localRepository.deleteMessagesForTask(taskId)
-            val currentTask = activeSagaContext.value ?: return@launch
-            updateTask(currentTask.copy(state = currentTask.state.copy(taskState = TaskState.PLANNING), isPaused = true))
+            try {
+                resetTaskUseCase(taskId).getOrThrow()
+                val task = tasks.map { it.find { t -> t.taskId == taskId } }
+                    .filterNotNull()
+                    .first()
+                updateTaskUseCase(
+                    task.copy(
+                        state = task.state.copy(taskState = TaskState.PLANNING),
+                        isPaused = true
+                    )
+                ).getOrThrow()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+            }
         }
     }
-
-    private fun createDefaultAgent() = Agent(
-        name = "Default",
-        systemPrompt = "You are a helpful assistant.",
-        temperature = 0.7,
-        provider = LLMProvider.Yandex(),
-        stopWord = "",
-        maxTokens = 2000
-    )
 }

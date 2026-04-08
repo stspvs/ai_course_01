@@ -21,6 +21,8 @@ fun TaskEntity.toDomain() = TaskContext(
     validatorColor = validatorColor
 )
 
+fun List<TaskEntity>.toDomain() = map { it.toDomain() }
+
 fun TaskContext.toEntity() = TaskEntity(
     taskId = taskId,
     title = title,
