@@ -94,6 +94,7 @@ private fun DesktopAgentsContent(
                 AgentDetails(
                     agent = selectedAgent,
                     templates = templates,
+                    canDelete = selectedAgent.id != GENERAL_CHAT_ID,
                     onUpdateAgent = { n, p, t, pr, s, m, k -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k) },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
@@ -141,6 +142,7 @@ private fun MobileAgentsContent(
                 AgentDetails(
                     agent = selectedAgent,
                     templates = templates,
+                    canDelete = selectedAgent.id != GENERAL_CHAT_ID,
                     onUpdateAgent = { n, p, t, pr, s, m, k -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k) },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
@@ -237,6 +239,7 @@ private fun AgentItem(
 private fun AgentDetails(
     agent: Agent,
     templates: List<AgentTemplate>,
+    canDelete: Boolean,
     onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     onUpdateProfile: (UserProfile) -> Unit,
     onDeleteAgent: () -> Unit,
@@ -259,6 +262,7 @@ private fun AgentDetails(
                 0 -> AgentSettingsTab(
                     agent = agent,
                     templates = templates,
+                    canDelete = canDelete,
                     onUpdateAgent = onUpdateAgent,
                     onDeleteAgent = onDeleteAgent,
                     onDuplicateAgent = onDuplicateAgent
@@ -276,6 +280,7 @@ private fun AgentDetails(
 private fun AgentSettingsTab(
     agent: Agent,
     templates: List<AgentTemplate>,
+    canDelete: Boolean,
     onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
     onDeleteAgent: () -> Unit,
     onDuplicateAgent: () -> Unit
@@ -407,11 +412,13 @@ private fun AgentSettingsTab(
                 Text("Копия")
             }
 
-            IconButton(
-                onClick = onDeleteAgent,
-                colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
-            ) {
-                Icon(Icons.Default.Delete, contentDescription = "Удалить")
+            if (canDelete) {
+                IconButton(
+                    onClick = onDeleteAgent,
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                }
             }
         }
     }

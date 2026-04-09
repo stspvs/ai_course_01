@@ -38,6 +38,9 @@ class LLMViewModel(
     private val _state = MutableStateFlow(LLMStateModel())
     val state: StateFlow<LLMStateModel> = _state.asStateFlow()
 
+    /** Скрывает агента в списке до завершения удаления в БД (мгновенный отклик UI). */
+    private val pendingDeletedAgentIds = MutableStateFlow<Set<String>>(emptySet())
+
     val agentTemplates: List<AgentTemplate> = agentManager.templates
 
     init {
@@ -56,6 +59,7 @@ class LLMViewModel(
         viewModelScope.launch {
             combine(
                 getAgentsUseCase(),
+                pendingDeletedAgentIds,
                 _state
                     .map { it.selectedAgentId ?: GENERAL_CHAT_ID }
                     .distinctUntilChanged()
@@ -68,11 +72,12 @@ class LLMViewModel(
                             Triple(id, snapshot, loading)
                         }
                     }
-            ) { agentsFromDb, (targetId, snapshot, loading) ->
+            ) { agentsFromDb, pending, (targetId, snapshot, loading) ->
+                val visibleFromDb = agentsFromDb.filter { it.id !in pending }
                 val updatedAgent = snapshot
-                    ?: agentsFromDb.find { it.id == targetId }
+                    ?: visibleFromDb.find { it.id == targetId }
                     ?: createDefaultAgent(targetId)
-                val merged = mergeAgentsFromDbWithSelection(agentsFromDb, targetId, updatedAgent)
+                val merged = mergeAgentsFromDbWithSelection(visibleFromDb, targetId, updatedAgent)
                 Triple(merged, targetId, loading)
             }.collect { (finalAgents, _, loading) ->
                 _state.updateIfChanged { currentState ->
@@ -151,8 +156,24 @@ class LLMViewModel(
     }
 
     fun deleteAgent(agentId: String) {
+        if (agentId == GENERAL_CHAT_ID) return
+        val currentAgents = _state.value.agents
+        val idx = currentAgents.indexOfFirst { it.id == agentId }
+        if (idx < 0) return
+        val newSelectionId = when {
+            idx > 0 -> currentAgents[idx - 1].id
+            currentAgents.size > idx + 1 -> currentAgents[idx + 1].id
+            else -> GENERAL_CHAT_ID
+        }
+        pendingDeletedAgentIds.update { it + agentId }
+        selectAgent(newSelectionId)
         viewModelScope.launch {
-            agentManagementUseCase.deleteAgent(agentId)
+            try {
+                chatStreamingUseCase.evictAgent(agentId)
+                agentManagementUseCase.deleteAgent(agentId)
+            } finally {
+                pendingDeletedAgentIds.update { it - agentId }
+            }
         }
     }
 

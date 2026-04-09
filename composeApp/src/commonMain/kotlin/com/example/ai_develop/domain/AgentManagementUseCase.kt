@@ -24,6 +24,7 @@ open class AgentManagementUseCase(
     }
 
     open suspend fun deleteAgent(agentId: String) {
+        if (agentId == GENERAL_CHAT_ID) return
         repository.deleteAgent(agentId)
     }
 

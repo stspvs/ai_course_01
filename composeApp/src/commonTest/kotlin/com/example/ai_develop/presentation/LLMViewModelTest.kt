@@ -78,6 +78,35 @@ class LLMViewModelTest {
         advanceUntilIdle()
 
         assertNull(fakeRepository.getAgentState(idToDelete))
+        assertEquals(GENERAL_CHAT_ID, viewModel.state.value.selectedAgentId)
+    }
+
+    @Test
+    fun `deleteAgent should not remove general chat from repository`() = runTest {
+        viewModel.onEvent(LLMEvent.DeleteAgent(GENERAL_CHAT_ID))
+        advanceUntilIdle()
+
+        assertNotNull(fakeRepository.getAgentState(GENERAL_CHAT_ID))
+        assertEquals(GENERAL_CHAT_ID, viewModel.state.value.selectedAgentId)
+    }
+
+    @Test
+    fun `deleteAgent should select previous agent in sidebar order when deleting non-first`() = runTest {
+        val idA = Uuid.random().toString()
+        val idB = Uuid.random().toString()
+        fakeRepository.saveAgentState(AgentState(idA, "A"))
+        fakeRepository.saveAgentState(AgentState(idB, "B"))
+        advanceUntilIdle()
+
+        viewModel.onEvent(LLMEvent.SelectAgent(idB))
+        advanceUntilIdle()
+        assertEquals(idB, viewModel.state.value.selectedAgentId)
+
+        viewModel.onEvent(LLMEvent.DeleteAgent(idB))
+        advanceUntilIdle()
+
+        assertNull(fakeRepository.getAgentState(idB))
+        assertEquals(idA, viewModel.state.value.selectedAgentId)
     }
 
     @Test
@@ -421,6 +450,7 @@ class LLMViewModelTest {
         }
 
         override suspend fun deleteAgent(agentId: String) {
+            if (agentId == GENERAL_CHAT_ID) return
             repo.deleteAgent(agentId)
         }
 
