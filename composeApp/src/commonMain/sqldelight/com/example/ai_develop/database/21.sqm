@@ -1,0 +1,1 @@
+ALTER TABLE TaskEntity ADD COLUMN runtimeStateJson TEXT NOT NULL DEFAULT '{}';

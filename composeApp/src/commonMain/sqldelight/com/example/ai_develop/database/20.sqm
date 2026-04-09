@@ -1,0 +1,1 @@
+ALTER TABLE AgentMessageEntity ADD COLUMN llmSnapshotJson TEXT;
