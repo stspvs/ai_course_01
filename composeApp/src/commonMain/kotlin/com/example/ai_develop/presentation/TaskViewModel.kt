@@ -51,6 +51,9 @@ class TaskViewModel(
     private val _selectedTaskId = MutableStateFlow<String?>(null)
     val selectedTaskId: StateFlow<String?> = _selectedTaskId.asStateFlow()
 
+    private val _streamingDraft = MutableStateFlow("")
+    val streamingDraft: StateFlow<String> = _streamingDraft.asStateFlow()
+
     private val sharing = SharingStarted.WhileSubscribed(5000)
 
     val tasks: StateFlow<List<TaskContext>> = getTasksUseCase()
@@ -87,6 +90,7 @@ class TaskViewModel(
     }
 
     fun selectTask(taskId: String?) {
+        _streamingDraft.value = ""
         _selectedTaskId.value = taskId
     }
 
@@ -137,13 +141,27 @@ class TaskViewModel(
         val cleanText = text.takeIf { it.isNotBlank() } ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, error = null) }
+            _streamingDraft.value = ""
+            val buffer = StringBuilder()
+            var lastUiUpdateMillis = 0L
             try {
                 val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
-                agent.sendMessage(cleanText).collect { }
+                agent.sendMessage(cleanText).collect { chunk ->
+                    buffer.append(chunk)
+                    val now = System.currentTimeMillis()
+                    if (now - lastUiUpdateMillis >= 48) {
+                        _streamingDraft.value = buffer.toString()
+                        lastUiUpdateMillis = now
+                    }
+                }
+                if (buffer.isNotEmpty()) {
+                    _streamingDraft.value = buffer.toString()
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e) }
                 _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send message"))
             } finally {
+                _streamingDraft.value = ""
                 _uiState.update { it.copy(isSending = false) }
             }
         }

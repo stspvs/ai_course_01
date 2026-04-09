@@ -102,6 +102,8 @@ open class AutonomousAgent(
                 _isProcessing.value = true
             }
 
+            _agent.value?.let { syncWithRepository(it) }
+
             // 2. Берем snapshot для текущей итерации LLM
             var agentSnapshot = _agent.value ?: return@flow
             

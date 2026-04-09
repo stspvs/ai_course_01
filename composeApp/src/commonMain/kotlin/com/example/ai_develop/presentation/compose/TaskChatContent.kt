@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,6 +33,8 @@ fun TaskChatContent(viewModel: TaskViewModel) {
     val selectedTaskId by viewModel.selectedTaskId.collectAsState()
     val taskContext by viewModel.activeSagaContext.collectAsState()
     val messages by viewModel.taskMessages.collectAsState()
+    val streamingDraft by viewModel.streamingDraft.collectAsState()
+    val taskUiState by viewModel.uiState.collectAsState()
     var input by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf<TaskState?>(null) }
 
@@ -127,12 +130,44 @@ fun TaskChatContent(viewModel: TaskViewModel) {
             }
 
             // Chat
+            val filteredMessages = if (filter == null) messages else messages.filter { it.taskState == filter }
+            val showStreamingBubble = streamingDraft.isNotBlank() &&
+                (filter == null || filter == task.state.taskState)
+            val displayMessages = buildList {
+                addAll(filteredMessages)
+                if (showStreamingBubble) {
+                    add(
+                        ChatMessage(
+                            id = "__streaming__${task.taskId}",
+                            message = streamingDraft,
+                            role = "assistant",
+                            source = SourceType.AI,
+                            taskId = task.taskId,
+                            taskState = task.state.taskState
+                        )
+                    )
+                }
+            }
+            val listState = rememberLazyListState()
+
+            LaunchedEffect(
+                displayMessages.size,
+                filteredMessages.lastOrNull()?.message?.length,
+                streamingDraft.length,
+                showStreamingBubble,
+                taskUiState.isSending
+            ) {
+                if (displayMessages.isNotEmpty()) {
+                    listState.scrollToItem(displayMessages.size - 1)
+                }
+            }
+
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val filteredMessages = if (filter == null) messages else messages.filter { it.taskState == filter }
-                items(filteredMessages) { msg ->
+                items(displayMessages, key = { it.id }) { msg ->
                     TaskMessageBubble(msg, task)
                 }
             }
