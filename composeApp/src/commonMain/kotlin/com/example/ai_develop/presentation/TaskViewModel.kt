@@ -278,9 +278,7 @@ class TaskViewModel(
                 _streamingDraft.value = ""
                 taskSagaCoordinator.evict(taskId)
                 resetTaskUseCase(taskId).getOrThrow()
-                val task = tasks.map { it.find { t -> t.taskId == taskId } }
-                    .filterNotNull()
-                    .first()
+                val task = latestTask(taskId) ?: return@launch
                 updateTaskUseCase(
                     task.copy(
                         state = task.state.copy(taskState = TaskState.PLANNING),
@@ -289,7 +287,7 @@ class TaskViewModel(
                         plan = emptyList(),
                         planDone = emptyList(),
                         currentPlanStep = null,
-                        runtimeState = TaskRuntimeState.defaultFor(taskId)
+                        runtimeState = TaskRuntimeState.resetProgressPreservingUserSettings(task.runtimeState)
                     )
                 ).getOrThrow()
             } catch (e: Exception) {

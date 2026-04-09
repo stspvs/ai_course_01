@@ -44,9 +44,14 @@ interface TaskRole {
         agent: Agent,
         instruction: String,
         memoryManager: ChatMemoryManager,
-        includeUserProfile: Boolean = true
+        includeUserProfile: Boolean = true,
+        includeAgentWorkingMemoryInSystem: Boolean = true
     ): String {
-        return memoryManager.wrapSystemPrompt(agent, includeUserProfile) + instruction
+        return memoryManager.wrapSystemPrompt(
+            agent,
+            includeUserProfile,
+            includeAgentWorkingMemoryInSystem
+        ) + instruction
     }
     
     fun handleResponse(response: String, sagaResponse: SagaResponse?): RoleResult
@@ -58,7 +63,8 @@ class ArchitectRole : TaskRole {
     override fun getSystemInstruction(context: TaskContext): String =
         "\n\n[SCOPE] This block is appended to your system prompt for the **next** LLM call only — the assistant reply you are generating in this step. It does not replace your base agent instructions; it adds task-stage rules for this inference.\n\n" +
         "IMPORTANT: You are currently in the PLANNING stage of the task: '${context.title}'.\n" +
-        "Your goal is to work with the user to create a detailed plan and architecture.\n" +
+        "Your goal is to work with the user to produce a clear plan for the next execution phase — " +
+        "concrete steps the executor will run one at a time (not a vague overview).\n" +
         "RULES:\n" +
         "1. Break down the task into logical steps or components.\n" +
         "2. Ask the user questions ONE BY ONE to clarify details. Do not ask multiple questions at once.\n" +
@@ -91,7 +97,9 @@ class ExecutorRole : TaskRole {
         "IMPORTANT: You are in the EXECUTION stage of task: '${context.title}'.\n" +
         "Execute ONLY the single step in the user message under \"CURRENT STEP\". Ignore other steps of the plan for this reply.\n\n" +
         "PRIMARY RULE — WHAT GOES IN \"output\":\n" +
-        "- If the step requires implementation (code, Gradle, manifests, resources, Compose, XML, SQL, tests, config): \"output\" MUST be the deliverable itself — real file bodies in markdown fences (e.g. ```kotlin / ```xml) with file path as the first line inside the block or in a comment. Do NOT fill \"output\" with plans, rationales, \"I will…\", step-by-step reasoning, or summaries of what the code would do without the actual code.\n" +
+        "- Everything you produce is **text only** inside the JSON string \"output\". Nothing is written to disk; do NOT tell the user (or the app) to create, save, or write files — no commands like \"save as\", \"write to\", or \"create file X\".\n" +
+        "- If the step requires implementation (code, Gradle, manifests, resources, Compose, XML, SQL, tests, config): \"output\" MUST contain the full deliverable as text — use markdown code fences inside the string (e.g. ```kotlin … ``` / ```xml … ```) with language tags where helpful. You may add a short comment line such as `// Foo.kt` **only** as a human-readable label, not as an instruction to write that path.\n" +
+        "- Do NOT fill \"output\" with plans, rationales, \"I will…\", step-by-step reasoning, or summaries without the actual code/text.\n" +
         "- Put reasoning or meta-commentary OUTSIDE the required deliverable only when the step is explicitly non-code (documentation/analysis). For implementation steps, at most one short sentence in \"output\" is allowed if the step demands a stated assumption; default is code-first, no essay.\n" +
         "- If the step is purely documentation or analysis, prose in \"output\" is OK.\n\n" +
         "Do not summarize future steps or claim you completed later steps.\n" +
@@ -114,8 +122,12 @@ class ValidatorRole : TaskRole {
 
     override fun getSystemInstruction(context: TaskContext): String =
         "\n\nIMPORTANT: You are currently in the VERIFICATION stage.\n" +
-        "Your goal is to verify that the task performed by the Executor matches the requirements and plan defined during the PLANNING stage.\n" +
-        "Strictly use the instructions and criteria provided in your system prompt for this validation.\n" +
+        "Your job is to check whether the Executor's deliverable matches the structured plan and CURRENT STEP in the user message. " +
+        "If it is acceptable, return success:true. If not, return success:false with concrete issues for the Executor to fix.\n" +
+        "You do NOT use the planning chat transcript; only the blocks in the user message (plan, step, optional previous verification, executor output).\n" +
+        "Verify the Executor's output against the CURRENT STEP (same step the Executor was told to run), " +
+        "not against the entire plan at once — unless the user message marks the final plan step and asks you to check overall success criteria.\n" +
+        "Strictly follow the VERIFICATION RULES block in the user message.\n" +
         "Do not refer to the task by its title.\n" +
         "Return JSON only in this shape (so the executor can read issues on retry):\n" +
         "{\"success\":true/false,\"issues\":[\"concrete problem 1\", \"...\"],\"suggestions\":[\"optional improvement\", \"...\"]}\n" +

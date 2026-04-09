@@ -77,8 +77,13 @@ class ChatMemoryManager {
     /**
      * Формирует системный промпт, включая данные из профиля пользователя и рабочей памяти.
      * @param includeUserProfile для Executor/Inspector в task-саге — false (по спецификации).
+     * @param includeAgentWorkingMemoryInSystem для Executor/Inspector в task-саге — false: рабочая память агента не дублируется в system (task-level WM передаётся в user-сообщении).
      */
-    fun wrapSystemPrompt(agent: Agent, includeUserProfile: Boolean = true): String {
+    fun wrapSystemPrompt(
+        agent: Agent,
+        includeUserProfile: Boolean = true,
+        includeAgentWorkingMemoryInSystem: Boolean = true
+    ): String {
         val promptBuilder = StringBuilder(agent.systemPrompt)
         
         if (includeUserProfile) {
@@ -95,16 +100,17 @@ class ChatMemoryManager {
             }
         }
 
-        // 2. Working Memory
-        val wm = agent.workingMemory
-        promptBuilder.append("\n=== WORKING MEMORY (Current Status) ===\n")
-        wm.currentTask?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT GOAL: $it\n") }
-        wm.progress?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT PROGRESS: $it\n") }
-        
-        val extractedFacts = wm.extractedFacts.facts
-        if (extractedFacts.isNotEmpty()) {
-            promptBuilder.append("\n=== RELEVANT CONTEXT (Extracted Facts) ===\n")
-            extractedFacts.forEach { promptBuilder.append("- $it\n") }
+        if (includeAgentWorkingMemoryInSystem) {
+            val wm = agent.workingMemory
+            promptBuilder.append("\n=== WORKING MEMORY (Current Status) ===\n")
+            wm.currentTask?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT GOAL: $it\n") }
+            wm.progress?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT PROGRESS: $it\n") }
+            
+            val extractedFacts = wm.extractedFacts.facts
+            if (extractedFacts.isNotEmpty()) {
+                promptBuilder.append("\n=== RELEVANT CONTEXT (Extracted Facts) ===\n")
+                extractedFacts.forEach { promptBuilder.append("- $it\n") }
+            }
         }
         
         return promptBuilder.toString()

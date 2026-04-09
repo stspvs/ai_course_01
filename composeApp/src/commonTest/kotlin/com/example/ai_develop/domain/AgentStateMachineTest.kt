@@ -7,6 +7,15 @@ import kotlin.test.assertTrue
 
 class AgentStateMachineTest {
 
+    private fun newFsm(stage: AgentStage) = AgentStateMachine(
+        AgentState(
+            agentId = "test",
+            currentStage = stage,
+            currentStepId = null,
+            plan = AgentPlan()
+        )
+    )
+
     @Test
     fun `test state transitions`() {
         val initialState = AgentState(
@@ -45,5 +54,38 @@ class AgentStateMachineTest {
 
         fsm.handleInvariantViolation("Constraint failed")
         assertEquals(AgentStage.PLANNING, fsm.getCurrentState().currentStage)
+    }
+
+    @Test
+    fun reviewStage_allowsDonePlanningOrExecution() {
+        val fsm = newFsm(AgentStage.REVIEW)
+        assertTrue(fsm.canTransitionTo(AgentStage.DONE))
+        assertTrue(fsm.canTransitionTo(AgentStage.PLANNING))
+        assertTrue(fsm.canTransitionTo(AgentStage.EXECUTION))
+        assertFalse(fsm.canTransitionTo(AgentStage.REVIEW))
+    }
+
+    @Test
+    fun doneStage_onlyBackToPlanning() {
+        val fsm = newFsm(AgentStage.DONE)
+        assertTrue(fsm.canTransitionTo(AgentStage.PLANNING))
+        assertFalse(fsm.canTransitionTo(AgentStage.EXECUTION))
+        assertFalse(fsm.canTransitionTo(AgentStage.REVIEW))
+    }
+
+    @Test
+    fun transitionTo_rejectsIllegal() {
+        val fsm = newFsm(AgentStage.PLANNING)
+        val r = fsm.transitionTo(AgentStage.DONE)
+        assertTrue(r.isFailure)
+    }
+
+    @Test
+    fun updatePlan_preservesStage() {
+        val fsm = newFsm(AgentStage.EXECUTION)
+        val newPlan = AgentPlan(steps = listOf(AgentStep("id", "description")))
+        val updated = fsm.updatePlan(newPlan)
+        assertEquals(AgentStage.EXECUTION, updated.currentStage)
+        assertEquals(newPlan, updated.plan)
     }
 }

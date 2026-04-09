@@ -96,18 +96,32 @@ class TaskSagaStrategyTest {
     @Test
     fun `reset should clear messages and return to planning`() = runTest(testDispatcher) {
         val agent = createAgent("a1")
-        val context = TaskContext(taskId = "t1", title = "T", state = AgentTaskState(TaskState.EXECUTION, agent), architectAgentId = "a1", isPaused = false)
-        
+        val context = TaskContext(
+            taskId = "t1",
+            title = "T",
+            state = AgentTaskState(TaskState.EXECUTION, agent),
+            architectAgentId = "a1",
+            isPaused = false,
+            runtimeState = TaskRuntimeState.defaultFor("t1").copy(
+                maxSteps = 88,
+                stepCount = 5,
+                maxPlanningSteps = 9
+            )
+        )
+
         val saga = createSagaWithAgents(context, listOf(agent))
         advanceUntilIdle()
         localRepo.saveMessage("a1", ChatMessage(message = "M1", source = SourceType.USER), "t1", TaskState.EXECUTION)
-        
+
         saga.reset()
         advanceUntilIdle()
 
         assertEquals(TaskState.PLANNING, saga.context.value.state.taskState)
         assertTrue(saga.context.value.isPaused)
         assertEquals(0, localRepo.messages.value.size, "Messages should be deleted")
+        assertEquals(88, saga.context.value.runtimeState.maxSteps, "user limits must survive saga.reset")
+        assertEquals(0, saga.context.value.runtimeState.stepCount)
+        assertEquals(9, saga.context.value.runtimeState.maxPlanningSteps)
     }
 
     @Test

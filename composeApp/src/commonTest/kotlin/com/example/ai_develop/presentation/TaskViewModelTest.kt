@@ -308,6 +308,25 @@ class TaskViewModelTest {
     }
 
     @Test
+    fun testUpdateTask_RuntimeLimitsPersisted() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        val taskId = "limits-task"
+        taskRepo.saveTask(
+            TaskContext(
+                taskId,
+                "T",
+                AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()),
+                runtimeState = TaskRuntimeState.defaultFor(taskId).copy(maxSteps = 50)
+            )
+        )
+        advanceUntilIdle()
+        val task = viewModel.tasks.value.first { it.taskId == taskId }
+        viewModel.onEvent(TaskEvent.UpdateTask(task.copy(runtimeState = task.runtimeState.copy(maxSteps = 99))))
+        advanceUntilIdle()
+        assertEquals(99, viewModel.tasks.value.find { it.taskId == taskId }?.runtimeState?.maxSteps)
+    }
+
+    @Test
     fun testResetTask_MessagesClearedAndStateReset() = runTest {
         backgroundScope.launch { viewModel.tasks.collect() }
         backgroundScope.launch { viewModel.taskMessages.collect() }
@@ -322,7 +341,13 @@ class TaskViewModelTest {
                 step = 3,
                 plan = listOf("step"),
                 planDone = listOf("done"),
-                currentPlanStep = "cur"
+                currentPlanStep = "cur",
+                runtimeState = TaskRuntimeState.defaultFor(taskId).copy(
+                    maxSteps = 77,
+                    maxPlanningSteps = 12,
+                    maxExecutionSteps = 13,
+                    maxVerificationSteps = 14
+                )
             )
         )
         messageRepo.saveMessage("agent", ChatMessage(message = "test", role = "user", source = SourceType.USER, timestamp = 0), taskId, TaskState.EXECUTION)
@@ -346,6 +371,11 @@ class TaskViewModelTest {
         assertTrue(task.plan.isEmpty())
         assertTrue(task.planDone.isEmpty())
         assertNull(task.currentPlanStep)
+        assertEquals(77, task.runtimeState.maxSteps, "maxSteps must survive reset")
+        assertEquals(12, task.runtimeState.maxPlanningSteps)
+        assertEquals(13, task.runtimeState.maxExecutionSteps)
+        assertEquals(14, task.runtimeState.maxVerificationSteps)
+        assertEquals(0, task.runtimeState.stepCount)
 
         val cleared = chatRepo.lastSavedState(taskId)
         assertNotNull(cleared)
@@ -407,4 +437,68 @@ class TaskViewModelTest {
         assertNull(viewModel.selectedTaskId.value)
         assertNull(viewModel.activeAgent.value)
     }
+
+    @Test
+    fun testCorner_SelectTask_nullThenId() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        taskRepo.saveTask(
+            TaskContext("t1", "A", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()))
+        )
+        advanceUntilIdle()
+        viewModel.onEvent(TaskEvent.SelectTask("t1"))
+        advanceUntilIdle()
+        assertEquals("t1", viewModel.selectedTaskId.value)
+        viewModel.onEvent(TaskEvent.SelectTask(null))
+        advanceUntilIdle()
+        assertNull(viewModel.selectedTaskId.value)
+    }
+
+    @Test
+    fun testStress_SequentialResetAndRuntimeUpdates() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        val taskId = "stress-reset"
+        taskRepo.saveTask(
+            TaskContext(
+                taskId,
+                "S",
+                AgentTaskState(TaskState.EXECUTION, DefaultAgentFactory().create()),
+                isPaused = true,
+                step = 2,
+                runtimeState = TaskRuntimeState.defaultFor(taskId).copy(maxSteps = 100, stepCount = 5)
+            )
+        )
+        advanceUntilIdle()
+
+        repeat(20) { i ->
+            val before = viewModel.tasks.value.first { it.taskId == taskId }
+            viewModel.onEvent(
+                TaskEvent.UpdateTask(before.copy(runtimeState = before.runtimeState.copy(maxSteps = 100 + i)))
+            )
+            advanceUntilIdle()
+            viewModel.onEvent(TaskEvent.ResetTask(taskId))
+            advanceUntilIdle()
+            val t = viewModel.tasks.value.first { it.taskId == taskId }
+            assertEquals(100 + i, t.runtimeState.maxSteps, "iteration $i")
+            assertEquals(0, t.runtimeState.stepCount)
+            assertEquals(TaskState.PLANNING, t.state.taskState)
+        }
+    }
+
+    @Test
+    fun testStress_RapidSelectBetweenTasks() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        repeat(30) { i ->
+            taskRepo.saveTask(
+                TaskContext("s-$i", "T$i", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()))
+            )
+        }
+        advanceUntilIdle()
+        repeat(100) { r ->
+            val id = "s-${r % 30}"
+            viewModel.onEvent(TaskEvent.SelectTask(id))
+        }
+        advanceUntilIdle()
+        assertEquals("s-9", viewModel.selectedTaskId.value)
+    }
 }
+

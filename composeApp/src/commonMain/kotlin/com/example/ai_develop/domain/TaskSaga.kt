@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -25,6 +26,10 @@ import kotlinx.serialization.json.Json
 
 private const val DEFAULT_LLM_TIMEOUT_MS = 120_000L
 
+/**
+ * Оркестратор этапов задачи (PLANNING → EXECUTION → VERIFICATION → DONE).
+ * Слои FSM vs лента чата: [TaskSagaDomainLayer].
+ */
 @OptIn(ExperimentalUuidApi::class)
 class TaskSaga(
     private val repository: ChatRepository,
@@ -48,6 +53,12 @@ class TaskSaga(
     private val stageMutex = Mutex()
 
     /**
+     * Очередь тиков FSM: один потребитель вызывает [processCurrentState], чтобы не гоняться
+     * с синхронной эмиссией [LocalChatRepository.saveTask] и несколькими входами ([start], collect getTasks, сообщение пользователя).
+     */
+    private val sagaTickChannel = Channel<Unit>(Channel.UNLIMITED)
+
+    /**
      * Last task snapshot that arrived via [LocalChatRepository.getTasks] emissions.
      * [updateStateInDb] assigns [_context] before [LocalChatRepository.saveTask], so comparing
      * "old" state against [_context] in the collector misses PLANNING→EXECUTION transitions.
@@ -58,6 +69,12 @@ class TaskSaga(
     private class APIException(val error: Throwable) : Exception(error.message)
 
     init {
+        scope.launch {
+            for (ignored in sagaTickChannel) {
+                processCurrentState()
+            }
+        }
+
         scope.launch {
             localRepository.getTasks()
                 .map { tasks -> tasks.find { it.taskId == initialContext.taskId } }
@@ -74,7 +91,7 @@ class TaskSaga(
                     val stateChangedWhileRunning = !updatedContext.isPaused && oldState != updatedContext.state.taskState
 
                     if (becameUnpaused || stateChangedWhileRunning) {
-                        processCurrentState()
+                        scheduleProcessCurrentState()
                     }
                 }
         }
@@ -114,7 +131,7 @@ class TaskSaga(
 
     fun start() {
         if (!_context.value.isPaused) {
-            processCurrentState()
+            scheduleProcessCurrentState()
         }
     }
 
@@ -139,6 +156,13 @@ class TaskSaga(
     /** Cancels the saga scope when this instance owns it (see [providedScope]). */
     fun dispose() {
         ownedSupervisorJob?.cancel()
+        if (ownedSupervisorJob != null) {
+            sagaTickChannel.close()
+        }
+    }
+
+    private fun scheduleProcessCurrentState() {
+        sagaTickChannel.trySend(Unit)
     }
 
     fun pause() {
@@ -169,7 +193,7 @@ class TaskSaga(
                     planDone = emptyList(),
                     currentPlanStep = null,
                     isPaused = true,
-                    runtimeState = TaskRuntimeState.defaultFor(it.taskId)
+                    runtimeState = TaskRuntimeState.resetProgressPreservingUserSettings(it.runtimeState)
                 )
             }
         }
@@ -186,7 +210,7 @@ class TaskSaga(
             val plan = ctx.runtimeState.planResult ?: return@launch
             if (!AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.EXECUTION)) return@launch
             if (AutonomousTaskStateMachine.isGlobalStepLimitExceeded(ctx.runtimeState)) {
-                stageMutex.withLock { finishWithOutcome(TaskOutcome.TIMEOUT) }
+                stageMutex.withLock { finishWithOutcome(TaskOutcome.FAILED) }
                 return@launch
             }
             // Must not hold [stageMutex] here: forceCompress updates DB and triggers processCurrentState → same mutex.
@@ -211,18 +235,8 @@ class TaskSaga(
             stageMutex.withLock {
                 val ctx = _context.value
                 if (ctx.state.taskState == TaskState.DONE) return@withLock
-                if (!AutonomousTaskStateMachine.canTransition(ctx.state.taskState, TaskState.DONE)) return@withLock
-                updateStateInDb {
-                    it.copy(
-                        isPaused = true,
-                        state = it.state.copy(taskState = TaskState.DONE),
-                        runtimeState = it.runtimeState.copy(
-                            stage = TaskState.DONE,
-                            outcome = TaskOutcome.CANCELLED,
-                            cancelled = true
-                        )
-                    )
-                }
+                val next = TaskSagaReducer.finishCancelled(ctx) ?: return@withLock
+                updateStateInDb { next }
                 notifySystem("Задача отменена пользователем.", ctx.state.taskState)
             }
         }
@@ -248,7 +262,7 @@ class TaskSaga(
             return
         }
         if (AutonomousTaskStateMachine.isGlobalStepLimitExceeded(currentContext.runtimeState)) {
-            scope.launch { finishWithOutcome(TaskOutcome.TIMEOUT) }
+            scope.launch { finishWithOutcome(TaskOutcome.FAILED) }
             return
         }
 
@@ -417,13 +431,7 @@ class TaskSaga(
     private suspend fun handlePlannerOutput(sourceAgentId: String, out: PlannerOutput, raw: String, sagaResp: SagaResponse?) {
         val ctx = _context.value
         if (out.questions?.isNotEmpty() == true) {
-            updateStateInDb {
-                it.copy(
-                    runtimeState = it.runtimeState.copy(
-                        planningMessagesSinceCompress = it.runtimeState.planningMessagesSinceCompress + 1
-                    )
-                )
-            }
+            updateStateInDb { TaskSagaReducer.incrementPlanningMessagesSinceCompress(it) }
             logVerbose("Planner has open questions")
             return
         }
@@ -435,15 +443,7 @@ class TaskSaga(
         }
         val plan = resolvePlanFromPlannerOutput(ctx, out, raw, sagaResp)
         if (out.requiresUserConfirmation) {
-            updateStateInDb {
-                it.copy(
-                    runtimeState = it.runtimeState.copy(
-                        planResult = plan,
-                        awaitingPlanConfirmation = true
-                    ),
-                    plan = plan.steps
-                )
-            }
+            updateStateInDb { TaskSagaReducer.setPlanAwaitingUserConfirmation(it, plan) }
             logVerbose("Awaiting plan confirmation")
             return
         }
@@ -475,15 +475,7 @@ class TaskSaga(
                         contextSummary = null
                     )
                 ).expandNumberedSteps()
-                updateStateInDb {
-                    it.copy(
-                        runtimeState = it.runtimeState.copy(
-                            planResult = plan,
-                            awaitingPlanConfirmation = true
-                        ),
-                        plan = plan.steps
-                    )
-                }
+                updateStateInDb { TaskSagaReducer.setPlanAwaitingUserConfirmation(it, plan) }
                 logVerbose("Legacy SUCCESS — awaiting confirmPlan()")
             }
             else -> {}
@@ -537,13 +529,23 @@ class TaskSaga(
         val stepIndex = snap.runtimeState.currentPlanStepIndex.coerceIn(0, (plan.steps.size - 1).coerceAtLeast(0))
 
         val systemInstruction = role.getSystemInstruction(snap)
-        val fullSystemPrompt = role.buildSystemPrompt(agentForLlm, systemInstruction, memoryManager, includeUserProfile = false)
+        val fullSystemPrompt = role.buildSystemPrompt(
+            agentForLlm,
+            systemInstruction,
+            memoryManager,
+            includeUserProfile = false,
+            includeAgentWorkingMemoryInSystem = false
+        )
 
+        // lastVerification / lastExecution / workingMemory — из _context: снимок из Flow/БД может отставать
+        // и приходить без только что записанного вердикта инспектора после провала верификации.
+        val liveRs = _context.value.runtimeState
         val userContent = TaskOrchestratorPrompts.executorUserContent(
             plan = plan,
             stepIndex = stepIndex,
-            lastVerification = snap.runtimeState.lastVerification,
-            workingMemory = snap.runtimeState.workingMemory
+            lastVerification = liveRs.lastVerification,
+            workingMemory = liveRs.workingMemory,
+            lastExecution = liveRs.lastExecution
         )
         val contextMessages = listOf(
             ChatMessage(
@@ -649,7 +651,7 @@ class TaskSaga(
             from = TaskState.EXECUTION,
             to = TaskState.VERIFICATION,
             planResult = plan,
-            notification = "--- EXECUTION OK ---\n${execResult.output.take(300)}"
+            notification = "--- EXECUTION OK ---\n${execResult.output}"
         )
     }
 
@@ -689,24 +691,15 @@ class TaskSaga(
         }
 
         val systemInstruction = role.getSystemInstruction(ctx)
-        val fullSystemPrompt = role.buildSystemPrompt(agentForLlm, systemInstruction, memoryManager, includeUserProfile = false)
+        val fullSystemPrompt = role.buildSystemPrompt(
+            agentForLlm,
+            systemInstruction,
+            memoryManager,
+            includeUserProfile = false,
+            includeAgentWorkingMemoryInSystem = false
+        )
 
-        val planningTranscript = localRepository.getMessagesForTask(ctx.taskId).first()
-            .asSequence()
-            .filter { it.taskId == ctx.taskId && it.taskState == TaskState.PLANNING }
-            .sortedBy { it.timestamp }
-            .joinToString(separator = "\n\n---\n\n") { msg ->
-                val label = when (msg.source) {
-                    SourceType.USER -> "user"
-                    SourceType.AI, SourceType.ASSISTANT -> "assistant"
-                    else -> msg.role.ifBlank { "system" }
-                }
-                "[$label]\n${msg.message}"
-            }
-            .take(16_000)
-            .ifBlank { null }
-
-        // Снимок из persist: в промпт инспектора — lastExecution последнего исполнения (см. resolvedTaskContext).
+        // Снимок из persist: план, lastExecution, lastVerification (ответ исполнителя — только в lastExecution).
         val snap = resolvedTaskContext()
         val planForInspector = snap.runtimeState.planResult ?: PlanResult(
             goal = snap.title,
@@ -718,11 +711,17 @@ class TaskSaga(
         val execForInspector = snap.runtimeState.lastExecution
             ?: ExecutionResult(false, "", listOf("No execution"))
 
+        val verifyStepIndex = snap.runtimeState.currentPlanStepIndex.coerceIn(
+            0,
+            (planForInspector.steps.size - 1).coerceAtLeast(0)
+        )
+
         val userContent = TaskOrchestratorPrompts.inspectorUserContent(
             plan = planForInspector,
+            stepIndex = verifyStepIndex,
             execution = execForInspector,
             successCriteria = planForInspector.successCriteria,
-            planningPhaseTranscript = planningTranscript
+            lastVerification = snap.runtimeState.lastVerification
         )
         val contextMessages = listOf(
             ChatMessage(
@@ -821,17 +820,8 @@ class TaskSaga(
         if (verResult.success) {
             if (stepIndex >= lastIndex) {
                 if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.DONE)) {
-                    updateStateInDb {
-                        it.copy(
-                            state = it.state.copy(taskState = TaskState.DONE),
-                            runtimeState = it.runtimeState.copy(
-                                stage = TaskState.DONE,
-                                outcome = TaskOutcome.SUCCESS,
-                                lastVerification = null
-                            ),
-                            step = it.step + 1
-                        )
-                    }
+                    val successNext = TaskSagaReducer.verificationSuccessTerminal(_context.value) ?: return
+                    updateStateInDb { successNext }
                     notifySystem("--- TASK SUCCESS ---", TaskState.VERIFICATION)
                 }
             } else {
@@ -844,19 +834,8 @@ class TaskSaga(
                     // пока isStageRunning ещё true, launch отменяется; затем явный processCurrentState()
                     // дублирует запуск после снятия блокировки → второй LLM-вызов исполнителя на том же шаге.
                     isStageRunning = false
-                    updateStateInDb {
-                        it.copy(
-                            state = it.state.copy(taskState = TaskState.EXECUTION),
-                            runtimeState = it.runtimeState.copy(
-                                currentPlanStepIndex = nextIndex,
-                                stepCount = it.runtimeState.stepCount + 1,
-                                lastVerification = null,
-                                executionRetryCount = 0
-                            ),
-                            currentPlanStep = nextStepText,
-                            step = it.step + 1
-                        )
-                    }
+                    val execNext = TaskSagaReducer.verificationSuccessNextStep(_context.value, nextIndex, nextStepText) ?: return
+                    updateStateInDb { execNext }
                 }
             }
         } else {
@@ -866,22 +845,32 @@ class TaskSaga(
                 if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
                     notifyStageEntry(TaskState.EXECUTION)
                     isStageRunning = false
-                    updateStateInDb {
-                        it.copy(state = it.state.copy(taskState = TaskState.EXECUTION))
-                    }
+                    val failNext = TaskSagaReducer.verificationFailToExecution(
+                        _context.value,
+                        _context.value.runtimeState.verificationRetryCount
+                    ) ?: return
+                    updateStateInDb { failNext }
                 }
             } else {
                 if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
                     notifyStageEntry(TaskState.EXECUTION)
                     isStageRunning = false
-                    updateStateInDb {
-                        it.copy(state = it.state.copy(taskState = TaskState.EXECUTION))
-                    }
+                    val failNext = TaskSagaReducer.verificationFailToExecution(
+                        _context.value,
+                        _context.value.runtimeState.verificationRetryCount
+                    ) ?: return
+                    updateStateInDb { failNext }
                 }
             }
         }
     }
 
+    /**
+     * Порядок эффектов при смене этапа (регрессия: баннер до persist — см. [TaskSagaStageOrderingTest]):
+     * 1. Системное сообщение о переходе ([notification], привязано к этапу [from])
+     * 2. [notifyStageEntry] для этапа [to]
+     * 3. [updateStateInDb] с [TaskSagaReducer.stageTransition]
+     */
     private suspend fun transitionToNextState(
         sourceAgentId: String,
         from: TaskState,
@@ -919,41 +908,15 @@ class TaskSaga(
         // следующего этапа стартует раньше, чем появится «▶ Начинается этап…» в ленте.
         notifyStageEntry(to)
 
-        updateStateInDb {
-            val newPlan = planResult?.steps ?: it.plan
-            it.copy(
-                state = it.state.copy(taskState = to),
-                plan = newPlan,
-                currentPlanStep = planResult?.steps?.firstOrNull(),
-                runtimeState = it.runtimeState.copy(
-                    stage = to,
-                    planResult = planResult ?: it.runtimeState.planResult,
-                    // Явно сохраняем результат последнего исполнения при переходе EXECUTION → VERIFICATION.
-                    lastExecution = it.runtimeState.lastExecution,
-                    awaitingPlanConfirmation = false,
-                    // После EXECUTION индекс шага не сбрасываем — иначе инспектор/сага видят «шаг 0» после 2+ шага.
-                    currentPlanStepIndex = when (from) {
-                        TaskState.EXECUTION -> it.runtimeState.currentPlanStepIndex
-                        else -> 0
-                    },
-                    stepCount = it.runtimeState.stepCount + 1
-                ),
-                step = it.step + 1
-            )
-        }
+        val next = TaskSagaReducer.stageTransition(_context.value, from, to, planResult) ?: return
+        updateStateInDb { next }
     }
 
     private suspend fun finishWithOutcome(outcome: TaskOutcome) {
         isStageRunning = false
         val ctx = _context.value
-        if (!AutonomousTaskStateMachine.canTransition(ctx.state.taskState, TaskState.DONE)) return
-        updateStateInDb {
-            it.copy(
-                isPaused = true,
-                state = it.state.copy(taskState = TaskState.DONE),
-                runtimeState = it.runtimeState.copy(stage = TaskState.DONE, outcome = outcome)
-            )
-        }
+        val next = TaskSagaReducer.finishOutcome(ctx, outcome) ?: return
+        updateStateInDb { next }
         notifySystem("--- TASK END: $outcome ---", ctx.state.taskState)
     }
 
@@ -1115,7 +1078,7 @@ class TaskSaga(
             }
 
             if (!_context.value.isPaused) {
-                processCurrentState()
+                scheduleProcessCurrentState()
             }
         }
     }

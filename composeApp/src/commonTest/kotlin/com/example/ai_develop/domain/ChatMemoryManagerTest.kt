@@ -116,6 +116,29 @@ class ChatMemoryManagerTest {
     }
 
     @Test
+    fun testWrapSystemPromptOmitsWorkingMemoryWhenDisabled() {
+        val base = "You are an AI."
+        val wm = WorkingMemory(
+            currentTask = "Solve math",
+            progress = "Started"
+        )
+        val agent = Agent(
+            name = "Test",
+            systemPrompt = base,
+            workingMemory = wm,
+            temperature = 0.7,
+            provider = LLMProvider.Yandex(),
+            stopWord = "",
+            maxTokens = 100
+        )
+
+        val wrapped = manager.wrapSystemPrompt(agent, includeAgentWorkingMemoryInSystem = false)
+        assertTrue(wrapped.contains(base))
+        assertTrue(!wrapped.contains("WORKING MEMORY"))
+        assertTrue(!wrapped.contains("Solve math"))
+    }
+
+    @Test
     fun testShortTermMemoryAsMessage() {
         val summary = "User wants to buy a car."
         val agent = Agent(

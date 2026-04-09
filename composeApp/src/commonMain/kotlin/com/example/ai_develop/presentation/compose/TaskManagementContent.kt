@@ -218,9 +218,13 @@ private fun RuntimeIntField(
     modifier: Modifier = Modifier,
     range: IntRange = 1..10_000
 ) {
+    var isFocused by remember { mutableStateOf(false) }
     var text by remember(taskId) { mutableStateOf(value.toString()) }
-    LaunchedEffect(taskId, value) {
+    LaunchedEffect(taskId) {
         text = value.toString()
+    }
+    LaunchedEffect(value) {
+        if (!isFocused) text = value.toString()
     }
     val scope = rememberCoroutineScope()
     var debounceJob by remember { mutableStateOf<Job?>(null) }
@@ -249,6 +253,7 @@ private fun RuntimeIntField(
         modifier = modifier
             .fillMaxWidth()
             .onFocusChanged { focusState ->
+                isFocused = focusState.isFocused
                 if (!focusState.isFocused) {
                     debounceJob?.cancel()
                     val v = text.toIntOrNull()?.coerceIn(range) ?: value
