@@ -23,9 +23,9 @@ open class ChatStreamingUseCase(
     /**
      * Получает или создает автономного агента.
      */
-    open fun getOrCreateAgent(agentId: String): AutonomousAgent {
+    open fun getOrCreateAgent(agentId: String, taskIdForMessagePersistence: String? = null): AutonomousAgent {
         return activeAgents.getOrPut(agentId) {
-            AutonomousAgent(agentId, repository, engine, scope)
+            AutonomousAgent(agentId, repository, engine, scope, taskIdForMessagePersistence)
         }
     }
 

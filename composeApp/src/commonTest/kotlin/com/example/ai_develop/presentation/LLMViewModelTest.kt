@@ -35,7 +35,12 @@ class LLMViewModelTest {
         fakeManagementUseCase = FakeAgentManagementUseCase(fakeRepository, fakeStreamingUseCase)
         agentManager = AgentManager()
         
-        viewModel = LLMViewModel(fakeManagementUseCase, fakeStreamingUseCase, agentManager)
+        viewModel = LLMViewModel(
+            fakeManagementUseCase,
+            fakeStreamingUseCase,
+            agentManager,
+            GetAgentsUseCase(fakeRepository)
+        )
     }
 
     @AfterEach
@@ -271,7 +276,12 @@ class LLMViewModelTest {
         advanceUntilIdle()
         
         // Recreate ViewModel
-        val newVm = LLMViewModel(fakeManagementUseCase, fakeStreamingUseCase, agentManager)
+        val newVm = LLMViewModel(
+            fakeManagementUseCase,
+            fakeStreamingUseCase,
+            agentManager,
+            GetAgentsUseCase(fakeRepository)
+        )
         advanceUntilIdle()
         
         val agent = newVm.state.value.agents.find { it.id == agentId }
@@ -306,9 +316,18 @@ class LLMViewModelTest {
         private val profiles = mutableMapOf<String, UserProfile>()
         private val _agentObservers = mutableMapOf<String, MutableSharedFlow<AgentState?>>()
         
+        private val _allAgents = MutableStateFlow<List<AgentState>>(emptyList())
+
         init {
             states[GENERAL_CHAT_ID] = AgentState(GENERAL_CHAT_ID, "Общий чат")
+            notifyAllAgentsChanged()
         }
+
+        private fun notifyAllAgentsChanged() {
+            _allAgents.value = states.values.toList()
+        }
+
+        override fun observeAllAgents(): Flow<List<AgentState>> = _allAgents
 
         override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider) = flowOf(Result.success(""))
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
@@ -319,6 +338,7 @@ class LLMViewModelTest {
         override suspend fun saveAgentState(state: AgentState) { 
             states[state.agentId] = state
             _agentObservers[state.agentId]?.emit(state)
+            notifyAllAgentsChanged()
         }
         override suspend fun getAgentState(agentId: String) = states[agentId]
         override fun observeAgentState(agentId: String): Flow<AgentState?> {
@@ -328,6 +348,7 @@ class LLMViewModelTest {
         override suspend fun deleteAgent(agentId: String) { 
             states.remove(agentId)
             _agentObservers[agentId]?.emit(null)
+            notifyAllAgentsChanged()
         }
         
         override suspend fun getProfile(agentId: String) = profiles[agentId]
@@ -344,9 +365,9 @@ class LLMViewModelTest {
     ) : ChatStreamingUseCase(repo, mm, scope) {
         private val agentsMap = mutableMapOf<String, FakeAutonomousAgent>()
 
-        override fun getOrCreateAgent(agentId: String): AutonomousAgent {
+        override fun getOrCreateAgent(agentId: String, taskIdForMessagePersistence: String?): AutonomousAgent {
             return agentsMap.getOrPut(agentId) {
-                FakeAutonomousAgent(agentId, repo, scope)
+                FakeAutonomousAgent(agentId, repo, scope, taskIdForMessagePersistence)
             }
         }
     }
@@ -354,8 +375,9 @@ class LLMViewModelTest {
     private class FakeAutonomousAgent(
         id: String,
         private val repo: ChatRepository,
-        scope: CoroutineScope
-    ) : AutonomousAgent(id, repo, AgentEngine(repo, ChatMemoryManager(), emptyList()), scope) {
+        scope: CoroutineScope,
+        taskIdForMessagePersistence: String? = null
+    ) : AutonomousAgent(id, repo, AgentEngine(repo, ChatMemoryManager(), emptyList()), scope, taskIdForMessagePersistence) {
         
         private val _agentFlow = MutableStateFlow<Agent?>(null)
         override val agent: StateFlow<Agent?> = _agentFlow.asStateFlow()
@@ -432,11 +454,12 @@ class LLMViewModelTest {
 
         override fun forceUpdateMemory(agentId: String): Flow<MemoryUpdateState> = flow {
             emit(MemoryUpdateState(isLoading = true))
-            // Emit transform
+            val old = repo.getAgentState(agentId)
+            if (old != null) {
+                repo.saveAgentState(old.copy(name = "Updated by Memory"))
+            }
+            streaming.getOrCreateAgent(agentId).refreshAgent()
             emit(MemoryUpdateState(isLoading = false, agentUpdate = agentId to { it.copy(name = "Updated by Memory") }))
-            // Emit final loading state (if UseCase does it)
-            // Looking at real UseCase: it emits isLoading=false separately or as part of agentUpdate emission
-            // My fake implementation in previous run emitted isLoading=false with agentUpdate.
         }
     }
 }

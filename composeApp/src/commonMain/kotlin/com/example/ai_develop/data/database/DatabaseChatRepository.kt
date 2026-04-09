@@ -12,9 +12,8 @@ class DatabaseChatRepository(
     TaskRepository by taskRepository,
     MessageRepository by messageRepository {
 
-    // Переопределяем методы LocalChatRepository, чтобы они возвращали Result
-    // так как AgentRepository и другие теперь возвращают Result в своих сигнатурах.
-    // Интерфейс LocalChatRepository также был обновлен.
+    // Переопределяем методы LocalChatRepository, чтобы они возвращали Result,
+    // делегируя вызовы в TaskRepository / MessageRepository (и save-операции агента).
 
     override suspend fun saveAgent(agent: Agent): Result<Unit> = 
         agentRepository.saveAgent(agent)
@@ -24,9 +23,6 @@ class DatabaseChatRepository(
 
     override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?): Result<Unit> = 
         messageRepository.saveMessage(agentId, message, taskId, taskState)
-
-    override suspend fun deleteAgent(agentId: String): Result<Unit> = 
-        agentRepository.deleteAgent(agentId)
 
     override suspend fun saveTask(task: TaskContext): Result<Unit> = 
         taskRepository.saveTask(task)

@@ -6,7 +6,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.*
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -17,6 +21,7 @@ class TaskViewModelTest {
     private class FakeTaskRepository : TaskRepository {
         val tasks = MutableStateFlow<List<TaskContext>>(emptyList())
         override fun getTasks(): Flow<List<TaskContext>> = tasks.asStateFlow()
+        override suspend fun getTask(taskId: String): TaskContext? = tasks.value.find { it.taskId == taskId }
         override suspend fun saveTask(task: TaskContext): Result<Unit> {
             tasks.value = tasks.value.filterNot { it.taskId == task.taskId } + task
             return Result.success(Unit)
@@ -28,53 +33,91 @@ class TaskViewModelTest {
     }
 
     private class FakeMessageRepository : MessageRepository {
-        val messages = mutableMapOf<String, MutableList<ChatMessage>>()
-        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> = flow {
-            emit(messages[taskId] ?: emptyList())
+        private val taskMessages = MutableStateFlow<Map<String, List<ChatMessage>>>(emptyMap())
+
+        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> =
+            taskMessages.map { it[taskId] ?: emptyList() }
+
+        fun syncFromAgentState(taskId: String, messages: List<ChatMessage>) {
+            taskMessages.update { it + (taskId to messages) }
         }
+
+        fun getTaskMessagesSnapshot(taskId: String): List<ChatMessage> =
+            taskMessages.value[taskId] ?: emptyList()
+
         override suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String?, taskState: TaskState?): Result<Unit> {
             if (taskId != null) {
-                messages.getOrPut(taskId) { mutableListOf() }.add(message)
+                taskMessages.update { curr ->
+                    val list = (curr[taskId] ?: emptyList()) + message
+                    curr + (taskId to list)
+                }
             }
             return Result.success(Unit)
         }
+
         override suspend fun deleteMessagesForTask(taskId: String): Result<Unit> {
-            messages.remove(taskId)
+            taskMessages.update { it - taskId }
             return Result.success(Unit)
         }
     }
 
-    private class FakeAgentRepository : AgentRepository {
-        private val agents = MutableStateFlow<List<Agent>>(emptyList())
-        override fun getAgents(): Flow<List<Agent>> = agents.asStateFlow()
-        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = flowOf(null)
-        override suspend fun saveAgent(agent: Agent): Result<Unit> {
-            agents.value = agents.value.filterNot { it.id == agent.id } + agent
-            return Result.success(Unit)
-        }
-        override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> = Result.success(Unit)
-        override suspend fun deleteAgent(agentId: String): Result<Unit> = Result.success(Unit)
-    }
+    private class FakeChatRepo(
+        private val messageRepo: FakeMessageRepository
+    ) : ChatRepository {
+        private val states = mutableMapOf<String, AgentState>()
+        private val stateFlows = mutableMapOf<String, MutableStateFlow<AgentState?>>()
 
-    private class FakeChatRepo : ChatRepository {
-        override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider) = flowOf(Result.success(""))
-        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
-        override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) = Result.success("")
-        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(TaskAnalysisResult())
-        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(WorkingMemoryAnalysis())
-        override suspend fun saveAgentState(state: AgentState) {}
-        override suspend fun getAgentState(agentId: String) = null
+        override fun chatStreaming(
+            messages: List<ChatMessage>,
+            systemPrompt: String,
+            maxTokens: Int,
+            temperature: Double,
+            stopWord: String,
+            isJsonMode: Boolean,
+            provider: LLMProvider
+        ) = flowOf(Result.success("reply"))
+
+        override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) =
+            Result.success(ChatFacts())
+
+        override suspend fun summarize(messages: List<ChatMessage>, previousSummary: String?, instruction: String, provider: LLMProvider) =
+            Result.success("")
+
+        override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) =
+            Result.success(TaskAnalysisResult())
+
+        override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) =
+            Result.success(WorkingMemoryAnalysis())
+
+        override suspend fun saveAgentState(state: AgentState) {
+            states[state.agentId] = state
+            stateFlows.getOrPut(state.agentId) { MutableStateFlow(null) }.value = state
+            val tid = state.messages.firstOrNull()?.taskId
+            if (tid != null) {
+                messageRepo.syncFromAgentState(tid, state.messages)
+            }
+        }
+
+        override suspend fun getAgentState(agentId: String): AgentState? = states[agentId]
+
         override suspend fun getProfile(agentId: String): UserProfile? = null
         override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
         override suspend fun getInvariants(agentId: String, stage: AgentStage) = emptyList<Invariant>()
         override suspend fun saveInvariant(invariant: Invariant) {}
-        override fun observeAgentState(agentId: String) = flowOf(null)
-        override suspend fun deleteAgent(agentId: String) {}
+
+        override fun observeAgentState(agentId: String): Flow<AgentState?> =
+            stateFlows.getOrPut(agentId) { MutableStateFlow(states[agentId]) }
+
+        override suspend fun deleteAgent(agentId: String) {
+            states.remove(agentId)
+            stateFlows.remove(agentId)
+        }
+
+        fun lastSavedState(agentId: String): AgentState? = states[agentId]
     }
 
     private lateinit var taskRepo: FakeTaskRepository
     private lateinit var messageRepo: FakeMessageRepository
-    private lateinit var agentRepo: FakeAgentRepository
     private lateinit var chatRepo: FakeChatRepo
     private lateinit var viewModel: TaskViewModel
 
@@ -83,8 +126,7 @@ class TaskViewModelTest {
         Dispatchers.setMain(testDispatcher)
         taskRepo = FakeTaskRepository()
         messageRepo = FakeMessageRepository()
-        agentRepo = FakeAgentRepository()
-        chatRepo = FakeChatRepo()
+        chatRepo = FakeChatRepo(messageRepo)
         
         val chatStreamingUseCase = ChatStreamingUseCase(chatRepo, ChatMemoryManager(), CoroutineScope(testDispatcher))
         val agentFactory = DefaultAgentFactory()
@@ -97,7 +139,7 @@ class TaskViewModelTest {
             resetTaskUseCase = ResetTaskUseCase(messageRepo),
             getMessagesUseCase = GetMessagesUseCase(messageRepo),
             chatStreamingUseCase = chatStreamingUseCase,
-            getAgentsUseCase = GetAgentsUseCase(agentRepo),
+            getAgentsUseCase = GetAgentsUseCase(chatRepo),
             agentFactory = agentFactory
         )
     }
@@ -144,6 +186,48 @@ class TaskViewModelTest {
         viewModel.onEvent(TaskEvent.SendMessage("id", "   "))
         advanceUntilIdle()
         assertFalse(viewModel.uiState.value.isSending)
+    }
+
+    @Test
+    fun testSendMessage_TaskMessagesPopulated() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        backgroundScope.launch { viewModel.taskMessages.collect() }
+        backgroundScope.launch { viewModel.activeAgent.collect() }
+        advanceUntilIdle()
+
+        val taskId = "task-with-msgs"
+        taskRepo.saveTask(
+            TaskContext(
+                taskId,
+                "Title",
+                AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create())
+            )
+        )
+        advanceUntilIdle()
+
+        viewModel.onEvent(TaskEvent.SelectTask(taskId))
+        advanceUntilIdle()
+
+        viewModel.onEvent(TaskEvent.SendMessage(taskId, "hello"))
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error, "sendMessage should not leave error: ${viewModel.uiState.value.error}")
+
+        val saved = chatRepo.lastSavedState(taskId)
+        assertNotNull(saved, "saveAgentState should have been called for task agent")
+        assertTrue(
+            (saved?.messages?.size ?: 0) >= 2,
+            "expected user + assistant in saved agent state, got ${saved?.messages?.size}"
+        )
+        assertEquals(taskId, saved?.messages?.firstOrNull()?.taskId)
+        assertTrue(
+            messageRepo.getTaskMessagesSnapshot(taskId).size >= 2,
+            "message repo should receive user + assistant after saveAgentState"
+        )
+        assertTrue(
+            viewModel.taskMessages.value.size >= 2,
+            "taskMessages should reflect persisted task chat"
+        )
     }
 
     @Test

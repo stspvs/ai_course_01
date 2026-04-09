@@ -61,7 +61,7 @@ class TaskViewModel(
 
     val activeAgent: StateFlow<AutonomousAgent?> = _selectedTaskId
         .mapLatest { id ->
-            id?.let { chatStreamingUseCase.getOrCreateAgent(it) }
+            id?.let { chatStreamingUseCase.getOrCreateAgent(it, it) }
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
@@ -138,8 +138,8 @@ class TaskViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, error = null) }
             try {
-                val agent = chatStreamingUseCase.getOrCreateAgent(taskId)
-                agent.sendMessage(cleanText)
+                val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
+                agent.sendMessage(cleanText).collect { }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e) }
                 _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send message"))

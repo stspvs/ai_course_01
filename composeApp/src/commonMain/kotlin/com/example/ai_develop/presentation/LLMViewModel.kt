@@ -31,7 +31,8 @@ sealed interface LLMEvent {
 class LLMViewModel(
     private val agentManagementUseCase: AgentManagementUseCase,
     private val chatStreamingUseCase: ChatStreamingUseCase,
-    private val agentManager: AgentManager
+    private val agentManager: AgentManager,
+    private val getAgentsUseCase: GetAgentsUseCase
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LLMStateModel())
@@ -47,42 +48,61 @@ class LLMViewModel(
 
     /**
      * Логика наблюдения за агентами:
+     * - Список агентов берётся из БД ([GetAgentsUseCase]), чтобы после перезапуска в чате были все сохранённые агенты.
+     * - Для выбранного агента подставляется полный снимок из [AutonomousAgent] (сообщения, ветки и т.д.).
      * - flatMapLatest предотвращает утечки при смене агента.
-     * - combine делает isLoading реактивным.
      */
     private fun observeAgents() {
         viewModelScope.launch {
-            _state
-                .map { it.selectedAgentId ?: GENERAL_CHAT_ID }
-                .distinctUntilChanged()
-                .flatMapLatest { id ->
-                    val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(id)
-                    combine(
-                        autonomousAgent.agent,
-                        autonomousAgent.isProcessing
-                    ) { snapshot, loading ->
-                        Triple(id, snapshot, loading)
-                    }
-                }
-                .collect { (targetId, snapshot, loading) ->
-                    _state.updateIfChanged { currentState ->
-                        val updatedAgent = snapshot ?: createDefaultAgent(targetId)
-                        val agents = currentState.agents
-
-                        val updatedList = agents.updateAgent(targetId) { updatedAgent }
-                        val finalAgents = if (updatedList === agents && agents.none { it.id == targetId }) {
-                            agents + updatedAgent
-                        } else {
-                            updatedList
+            combine(
+                getAgentsUseCase(),
+                _state
+                    .map { it.selectedAgentId ?: GENERAL_CHAT_ID }
+                    .distinctUntilChanged()
+                    .flatMapLatest { id ->
+                        val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(id)
+                        combine(
+                            autonomousAgent.agent,
+                            autonomousAgent.isProcessing
+                        ) { snapshot, loading ->
+                            Triple(id, snapshot, loading)
                         }
-
-                        currentState.copy(
-                            agents = finalAgents,
-                            selectedAgentId = targetId,
-                            isLoading = loading
-                        )
                     }
+            ) { agentsFromDb, (targetId, snapshot, loading) ->
+                val updatedAgent = snapshot
+                    ?: agentsFromDb.find { it.id == targetId }
+                    ?: createDefaultAgent(targetId)
+                val merged = mergeAgentsFromDbWithSelection(agentsFromDb, targetId, updatedAgent)
+                Triple(merged, targetId, loading)
+            }.collect { (finalAgents, _, loading) ->
+                _state.updateIfChanged { currentState ->
+                    currentState.copy(
+                        agents = finalAgents,
+                        isLoading = loading
+                    )
                 }
+            }
+        }
+    }
+
+    /**
+     * Объединяет полный список агентов из БД с детальным состоянием текущего выбранного агента.
+     */
+    private fun mergeAgentsFromDbWithSelection(
+        agentsFromDb: List<Agent>,
+        targetId: String,
+        selectedDetail: Agent
+    ): List<Agent> {
+        if (agentsFromDb.isEmpty()) {
+            return listOf(selectedDetail)
+        }
+        val merged = agentsFromDb.map { agent ->
+            if (agent.id == targetId) selectedDetail else agent
+        }
+        return if (merged.none { it.id == targetId }) {
+            merged + selectedDetail
+        } else {
+            merged
         }
     }
 

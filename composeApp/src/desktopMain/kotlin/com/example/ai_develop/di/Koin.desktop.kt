@@ -1,15 +1,8 @@
 package com.example.ai_develop.di
 
-import com.example.ai_develop.data.database.*
-import com.example.ai_develop.domain.AgentRepository
-import com.example.ai_develop.domain.MessageRepository
-import com.example.ai_develop.domain.TaskRepository
 import com.example.ai_develop.database.DriverFactory
 import com.example.ai_develop.database.AgentDatabase
 import com.example.ai_develop.database.stageAdapter
-import com.example.aidevelop.database.AgentMessageEntity
-import com.example.aidevelop.database.AgentStateEntity
-import com.example.aidevelop.database.InvariantEntity
 import io.ktor.client.*
 import io.ktor.client.engine.*
 import io.ktor.client.engine.okhttp.*
@@ -18,26 +11,11 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.*
 import app.cash.sqldelight.db.SqlDriver
+import com.example.aidevelop.database.AgentMessageEntity
+import com.example.aidevelop.database.AgentStateEntity
+import com.example.aidevelop.database.InvariantEntity
 
 actual val platformModule = module {
-    single<AppDatabase> {
-        getDatabaseBuilder().build()
-    }
-    
-    single<AgentRepository> { DatabaseAgentRepository(get()) }
-    single<TaskRepository> { DatabaseTaskRepository(get()) }
-    single<MessageRepository> { DatabaseMessageRepository(get()) }
-    
-    single<DatabaseChatRepository> { 
-        DatabaseChatRepository(
-            agentRepository = get(),
-            taskRepository = get(),
-            messageRepository = get()
-        ) 
-    }
-    
-    single<LocalChatRepository> { get<DatabaseChatRepository>() }
-    
     // SqlDelight Driver Factory and Driver
     single { DriverFactory() }
     single<SqlDriver> { get<DriverFactory>().createDriver() }

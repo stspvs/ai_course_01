@@ -38,9 +38,8 @@ class TaskSagaDetailedTest {
             return Result.success(Unit)
         }
 
-        override suspend fun deleteAgent(agentId: String): Result<Unit> {
+        override suspend fun deleteAgent(agentId: String) {
             _agents.value = _agents.value.filterNot { it.id == agentId }
-            return Result.success(Unit)
         }
 
         override fun getTasks(): Flow<List<TaskContext>> = _tasks.asStateFlow()

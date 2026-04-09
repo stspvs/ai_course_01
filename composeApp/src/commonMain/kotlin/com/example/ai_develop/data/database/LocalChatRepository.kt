@@ -9,7 +9,7 @@ interface LocalChatRepository {
     suspend fun saveAgent(agent: Agent): Result<Unit>
     suspend fun saveAgentMetadata(agent: Agent): Result<Unit>
     suspend fun saveMessage(agentId: String, message: ChatMessage, taskId: String? = null, taskState: TaskState? = null): Result<Unit>
-    suspend fun deleteAgent(agentId: String): Result<Unit>
+    suspend fun deleteAgent(agentId: String)
     
     // Task operations
     fun getTasks(): Flow<List<TaskContext>>

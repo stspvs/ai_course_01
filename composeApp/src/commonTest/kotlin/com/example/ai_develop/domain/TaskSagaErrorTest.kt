@@ -26,7 +26,7 @@ class TaskSagaErrorTest {
             _messages.value = _messages.value + message.copy(taskId = taskId, taskState = taskState)
             return Result.success(Unit)
         }
-        override suspend fun deleteAgent(agentId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgent(agentId: String) {}
         override fun getTasks(): Flow<List<TaskContext>> = _tasks.asStateFlow()
         override suspend fun saveTask(task: TaskContext): Result<Unit> {
             _tasks.value = _tasks.value.filterNot { it.taskId == task.taskId } + task

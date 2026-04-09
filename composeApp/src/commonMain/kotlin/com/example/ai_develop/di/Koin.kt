@@ -3,29 +3,7 @@ package com.example.ai_develop.di
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
 import com.example.ai_develop.data.SqlDelightChatRepository
-import com.example.ai_develop.data.database.DatabaseAgentRepository
-import com.example.ai_develop.data.database.DatabaseChatRepository
-import com.example.ai_develop.data.database.DatabaseMessageRepository
-import com.example.ai_develop.data.database.DatabaseTaskRepository
-import com.example.ai_develop.data.database.LocalChatRepository
-import com.example.ai_develop.domain.AgentManagementUseCase
-import com.example.ai_develop.domain.AgentRepository
-import com.example.ai_develop.domain.ChatMemoryManager
-import com.example.ai_develop.domain.ChatRepository
-import com.example.ai_develop.domain.ChatStreamingUseCase
-import com.example.ai_develop.domain.CreateTaskUseCase
-import com.example.ai_develop.domain.DefaultAgentFactory
-import com.example.ai_develop.domain.DeleteTaskUseCase
-import com.example.ai_develop.domain.ExtractFactsUseCase
-import com.example.ai_develop.domain.GetAgentsUseCase
-import com.example.ai_develop.domain.GetMessagesUseCase
-import com.example.ai_develop.domain.GetTasksUseCase
-import com.example.ai_develop.domain.MessageRepository
-import com.example.ai_develop.domain.ResetTaskUseCase
-import com.example.ai_develop.domain.SummarizeChatUseCase
-import com.example.ai_develop.domain.TaskRepository
-import com.example.ai_develop.domain.UpdateTaskUseCase
-import com.example.ai_develop.domain.UpdateWorkingMemoryUseCase
+import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.AgentManager
 import com.example.ai_develop.presentation.ChatInteractor
 import com.example.ai_develop.presentation.LLMViewModel
@@ -90,8 +68,7 @@ val commonModule = module {
         }
     }
 
-
-// Сетевой репозиторий
+    // Сетевой репозиторий
     single<ChatRepository>(named("network")) {
         KtorChatRepository(
             httpClient = get(),
@@ -102,29 +79,17 @@ val commonModule = module {
         )
     }
 
-// Основной репозиторий
-    single<ChatRepository> {
+    // Основной репозиторий (SqlDelight) — одна реализация на все интерфейсы
+    single {
         SqlDelightChatRepository(
             db = get(),
             networkRepository = get(named("network"))
         )
     }
-    // Room Database provided in platformModule
-
-    // Database Repositories
-    single<AgentRepository> { DatabaseAgentRepository(get()) }
-    single<TaskRepository> { DatabaseTaskRepository(get()) }
-    single<MessageRepository> { DatabaseMessageRepository(get()) }
-
-    single<DatabaseChatRepository> {
-        DatabaseChatRepository(
-            agentRepository = get(),
-            taskRepository = get(),
-            messageRepository = get()
-        )
-    }
-
-    single<LocalChatRepository> { get<DatabaseChatRepository>() }
+    single<ChatRepository> { get<SqlDelightChatRepository>() }
+    single<AgentRepository> { get<SqlDelightChatRepository>() }
+    single<TaskRepository> { get<SqlDelightChatRepository>() }
+    single<MessageRepository> { get<SqlDelightChatRepository>() }
 
     single<CoroutineDispatcher> { Dispatchers.Default }
     single { CoroutineScope(SupervisorJob() + get<CoroutineDispatcher>()) }

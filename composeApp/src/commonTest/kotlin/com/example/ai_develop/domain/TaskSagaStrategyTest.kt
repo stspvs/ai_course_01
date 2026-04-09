@@ -25,9 +25,8 @@ class TaskSagaStrategyTest {
             messages.value = messages.value + message.copy(taskId = taskId, taskState = taskState)
             return Result.success(Unit)
         }
-        override suspend fun deleteAgent(agentId: String): Result<Unit> { 
+        override suspend fun deleteAgent(agentId: String) {
             agents.value = agents.value.filterNot { it.id == agentId }
-            return Result.success(Unit)
         }
         override fun getTasks(): Flow<List<TaskContext>> = tasks.map { it.values.toList() }
         override suspend fun saveTask(task: TaskContext): Result<Unit> { 

@@ -5,8 +5,6 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
-    alias(libs.plugins.ksp)
-    alias(libs.plugins.androidxRoom)
     alias(libs.plugins.sqldelight)
     id("com.github.gmazzo.buildconfig") version "6.0.9"
 }
@@ -43,9 +41,6 @@ kotlin {
 
                 implementation(libs.sqldelight.runtime)
                 implementation(libs.sqldelight.coroutine.extensions)
-
-                implementation(libs.androidx.room.runtime)
-                implementation(libs.androidx.sqlite.bundled)
             }
         }
 
@@ -86,14 +81,6 @@ sqldelight {
             packageName.set("com.example.ai_develop.database")
         }
     }
-}
-
-room {
-    schemaDirectory("$projectDir/schemas")
-}
-
-dependencies {
-    add("kspDesktop", libs.androidx.room.compiler)
 }
 
 compose.desktop {

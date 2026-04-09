@@ -39,7 +39,27 @@ CREATE TABLE IF NOT EXISTS AgentMessageEntity (
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
+    taskId TEXT, -- Ссылка на задачу, если сообщение относится к ней
     FOREIGN KEY(agentId) REFERENCES AgentStateEntity(agentId) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS TaskEntity (
+    taskId TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    taskState TEXT NOT NULL, -- TaskState enum name
+    isPaused INTEGER AS Boolean NOT NULL DEFAULT 0,
+    step INTEGER NOT NULL DEFAULT 0,
+    planJson TEXT NOT NULL, -- JSON List<String>
+    planDoneJson TEXT NOT NULL, -- JSON List<String>
+    currentPlanStep TEXT,
+    totalCount INTEGER NOT NULL DEFAULT 0,
+    architectAgentId TEXT,
+    executorAgentId TEXT,
+    validatorAgentId TEXT,
+    architectColor INTEGER NOT NULL DEFAULT 0,
+    executorColor INTEGER NOT NULL DEFAULT 0,
+    validatorColor INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL
 );
 
 -- Queries
@@ -71,11 +91,38 @@ getInvariantsForStage:
 SELECT * FROM InvariantEntity WHERE agentId = ? AND stage = ? AND isActive = 1;
 
 insertMessage:
-INSERT INTO AgentMessageEntity(id, agentId, stage, stepId, role, content, timestamp)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO AgentMessageEntity(id, agentId, stage, stepId, role, content, timestamp, taskId)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 getMessagesForAgent:
 SELECT * FROM AgentMessageEntity WHERE agentId = ? ORDER BY timestamp ASC;
 
+getMessagesForTask:
+SELECT * FROM AgentMessageEntity WHERE taskId = ? ORDER BY timestamp ASC;
+
+deleteMessagesForTask:
+DELETE FROM AgentMessageEntity WHERE taskId = ?;
+
+deleteMessagesForAgent:
+DELETE FROM AgentMessageEntity WHERE agentId = ?;
+
 deleteAgent:
 DELETE FROM AgentStateEntity WHERE agentId = ?;
+
+-- Task Queries
+saveTask:
+INSERT OR REPLACE INTO TaskEntity(
+    taskId, title, taskState, isPaused, step, planJson, planDoneJson,
+    currentPlanStep, totalCount, architectAgentId, executorAgentId,
+    validatorAgentId, architectColor, executorColor, validatorColor, createdAt
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getTask:
+SELECT * FROM TaskEntity WHERE taskId = ?;
+
+getAllTasks:
+SELECT * FROM TaskEntity ORDER BY createdAt DESC;
+
+deleteTask:
+DELETE FROM TaskEntity WHERE taskId = ?;

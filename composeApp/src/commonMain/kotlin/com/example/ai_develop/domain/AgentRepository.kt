@@ -7,5 +7,5 @@ interface AgentRepository {
     fun getAgentWithMessages(agentId: String): Flow<Agent?>
     suspend fun saveAgent(agent: Agent): Result<Unit>
     suspend fun saveAgentMetadata(agent: Agent): Result<Unit>
-    suspend fun deleteAgent(agentId: String): Result<Unit>
+    suspend fun deleteAgent(agentId: String)
 }

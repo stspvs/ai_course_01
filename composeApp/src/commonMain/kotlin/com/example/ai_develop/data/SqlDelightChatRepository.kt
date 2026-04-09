@@ -4,22 +4,58 @@ import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import app.cash.sqldelight.coroutines.mapToOneOrNull
 import com.example.ai_develop.database.AgentDatabase
-import com.example.aidevelop.database.AgentStateEntity
 import com.example.ai_develop.domain.*
+import com.example.aidevelop.database.AgentMessageEntity
+import com.example.aidevelop.database.AgentStateEntity
+import com.example.aidevelop.database.TaskEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 
 class SqlDelightChatRepository(
     private val db: AgentDatabase,
-    private val networkRepository: ChatRepository // Для проброса вызовов к LLM
-) : ChatRepository by networkRepository {
+    private val networkRepository: ChatRepository
+) : ChatRepository by networkRepository, AgentRepository, TaskRepository, MessageRepository {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { 
+        ignoreUnknownKeys = true 
+        encodeDefaults = true
+    }
+
+    private val queries = db.agentDatabaseQueries
+
+    // --- ChatRepository implementation ---
 
     override suspend fun saveAgentState(state: AgentState) {
-        db.agentDatabaseQueries.saveAgentState(
+        db.transaction {
+            persistAgentStateRow(state)
+            queries.deleteMessagesForAgent(state.agentId)
+            val taskRow = queries.getTask(state.agentId).executeAsOneOrNull()
+            val defaultTaskState = taskRow?.let { TaskState.valueOf(it.taskState) }
+            val defaultStage = taskStateToAgentStage(defaultTaskState) ?: state.currentStage
+            val taskScopedId = if (taskRow != null) state.agentId else null
+            state.messages.forEach { msg ->
+                val stage = taskStateToAgentStage(msg.taskState) ?: defaultStage
+                val rowTaskId = msg.taskId ?: taskScopedId
+                queries.insertMessage(
+                    id = msg.id.takeIf { it.isNotBlank() } ?: "${state.agentId}_${msg.timestamp}_${msg.role}",
+                    agentId = state.agentId,
+                    stage = stage,
+                    stepId = null,
+                    role = msg.role,
+                    content = msg.content,
+                    timestamp = msg.timestamp,
+                    taskId = rowTaskId
+                )
+            }
+        }
+    }
+
+    private fun persistAgentStateRow(state: AgentState) {
+        queries.saveAgentState(
             agentId = state.agentId,
             name = state.name,
             systemPrompt = state.systemPrompt,
@@ -35,31 +71,213 @@ class SqlDelightChatRepository(
     }
 
     override suspend fun getAgentState(agentId: String): AgentState? {
-        return db.agentDatabaseQueries.getAgentState(agentId).executeAsOneOrNull()?.let {
-            mapToDomain(it)
+        return queries.getAgentState(agentId).executeAsOneOrNull()?.let {
+            agentStateWithMessages(it)
         }
     }
 
     override suspend fun deleteAgent(agentId: String) {
-        db.agentDatabaseQueries.deleteAgent(agentId)
+        queries.deleteAgent(agentId)
     }
 
     override fun observeAgentState(agentId: String): Flow<AgentState?> {
-        return db.agentDatabaseQueries.getAgentState(agentId)
+        return queries.getAgentState(agentId)
             .asFlow()
             .mapToOneOrNull(Dispatchers.Default)
             .map { entity ->
-                entity?.let { mapToDomain(it) }
+                entity?.let { agentStateWithMessages(it) }
             }
     }
 
     override fun observeAllAgents(): Flow<List<AgentState>> {
-        return db.agentDatabaseQueries.getAllAgents()
+        return queries.getAllAgents()
             .asFlow()
             .mapToList(Dispatchers.Default)
             .map { list ->
                 list.map { mapToDomain(it) }
             }
+    }
+
+    // --- AgentRepository implementation ---
+
+    override fun getAgents(): Flow<List<Agent>> {
+        return observeAllAgents().map { states ->
+            states.map { state ->
+                Agent(
+                    id = state.agentId,
+                    name = state.name,
+                    systemPrompt = state.systemPrompt,
+                    temperature = state.temperature,
+                    provider = LLMProvider.Yandex(), 
+                    stopWord = state.stopWord,
+                    maxTokens = state.maxTokens,
+                    memoryStrategy = state.memoryStrategy,
+                    workingMemory = state.workingMemory,
+                    messages = emptyList()
+                )
+            }
+        }
+    }
+
+    override fun getAgentWithMessages(agentId: String): Flow<Agent?> {
+        return observeAgentState(agentId).map { state ->
+            state?.let {
+                Agent(
+                    id = it.agentId,
+                    name = it.name,
+                    systemPrompt = it.systemPrompt,
+                    temperature = it.temperature,
+                    provider = LLMProvider.Yandex(),
+                    stopWord = it.stopWord,
+                    maxTokens = it.maxTokens,
+                    memoryStrategy = it.memoryStrategy,
+                    workingMemory = it.workingMemory,
+                    messages = it.messages
+                )
+            }
+        }
+    }
+
+    override suspend fun saveAgent(agent: Agent): Result<Unit> = runCatching {
+        val state = AgentState(
+            agentId = agent.id,
+            name = agent.name,
+            systemPrompt = agent.systemPrompt,
+            temperature = agent.temperature,
+            maxTokens = agent.maxTokens,
+            stopWord = agent.stopWord,
+            memoryStrategy = agent.memoryStrategy,
+            workingMemory = agent.workingMemory,
+            messages = agent.messages
+        )
+        saveAgentState(state)
+    }
+
+    override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> = runCatching {
+        val state = AgentState(
+            agentId = agent.id,
+            name = agent.name,
+            systemPrompt = agent.systemPrompt,
+            temperature = agent.temperature,
+            maxTokens = agent.maxTokens,
+            stopWord = agent.stopWord,
+            memoryStrategy = agent.memoryStrategy,
+            workingMemory = agent.workingMemory
+        )
+        persistAgentStateRow(state)
+    }
+
+    // --- TaskRepository implementation ---
+
+    override fun getTasks(): Flow<List<TaskContext>> {
+        return queries.getAllTasks()
+            .asFlow()
+            .mapToList(Dispatchers.Default)
+            .map { list -> list.map { mapTaskToDomain(it) } }
+    }
+
+    override suspend fun saveTask(task: TaskContext): Result<Unit> = runCatching {
+        queries.saveTask(
+            taskId = task.taskId,
+            title = task.title,
+            taskState = task.state.taskState.name,
+            isPaused = task.isPaused,
+            step = task.step.toLong(),
+            planJson = json.encodeToString(ListSerializer(String.serializer()), task.plan),
+            planDoneJson = json.encodeToString(ListSerializer(String.serializer()), task.planDone),
+            currentPlanStep = task.currentPlanStep,
+            totalCount = task.totalCount.toLong(),
+            architectAgentId = task.architectAgentId,
+            executorAgentId = task.executorAgentId,
+            validatorAgentId = task.validatorAgentId,
+            architectColor = task.architectColor,
+            executorColor = task.executorColor,
+            validatorColor = task.validatorColor,
+            createdAt = System.currentTimeMillis()
+        )
+    }
+
+    override suspend fun deleteTask(task: TaskContext): Result<Unit> = runCatching {
+        queries.deleteTask(task.taskId)
+    }
+
+    override suspend fun getTask(taskId: String): TaskContext? {
+        return queries.getTask(taskId).executeAsOneOrNull()?.let { mapTaskToDomain(it) }
+    }
+
+    // --- MessageRepository implementation ---
+
+    override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> {
+        return queries.getMessagesForTask(taskId)
+            .asFlow()
+            .mapToList(Dispatchers.Default)
+            .map { list ->
+                list.map { mapMessageEntityToChat(it) }
+            }
+    }
+
+    override suspend fun saveMessage(
+        agentId: String,
+        message: ChatMessage,
+        taskId: String?,
+        taskState: TaskState?
+    ): Result<Unit> = runCatching {
+        val stage = taskStateToAgentStage(taskState) ?: AgentStage.PLANNING
+        queries.insertMessage(
+            id = message.id ?: "${agentId}_${message.timestamp}",
+            agentId = agentId,
+            stage = stage,
+            stepId = null,
+            role = message.role,
+            content = message.content,
+            timestamp = message.timestamp,
+            taskId = taskId
+        )
+    }
+
+    override suspend fun deleteMessagesForTask(taskId: String): Result<Unit> = runCatching {
+        queries.deleteMessagesForTask(taskId)
+    }
+
+    // --- Helpers ---
+
+    private fun agentStateWithMessages(entity: AgentStateEntity): AgentState {
+        val base = mapToDomain(entity)
+        val msgs = queries.getMessagesForAgent(entity.agentId).executeAsList().map { mapMessageEntityToChat(it) }
+        return base.copy(messages = msgs)
+    }
+
+    private fun mapMessageEntityToChat(msg: AgentMessageEntity): ChatMessage {
+        return ChatMessage(
+            id = msg.id,
+            role = msg.role,
+            message = msg.content,
+            timestamp = msg.timestamp,
+            source = roleToSourceType(msg.role),
+            taskId = msg.taskId,
+            taskState = agentStageToTaskState(msg.stage)
+        )
+    }
+
+    private fun roleToSourceType(role: String): SourceType = when (role.lowercase()) {
+        "user" -> SourceType.USER
+        "assistant" -> SourceType.AI
+        else -> SourceType.SYSTEM
+    }
+
+    private fun agentStageToTaskState(stage: AgentStage): TaskState? = when (stage) {
+        AgentStage.PLANNING -> TaskState.PLANNING
+        AgentStage.EXECUTION -> TaskState.EXECUTION
+        AgentStage.REVIEW -> TaskState.VALIDATION
+        AgentStage.DONE -> TaskState.DONE
+    }
+
+    private fun taskStateToAgentStage(taskState: TaskState?): AgentStage? = when (taskState) {
+        null -> null
+        TaskState.PLANNING -> AgentStage.PLANNING
+        TaskState.EXECUTION -> AgentStage.EXECUTION
+        TaskState.VALIDATION -> AgentStage.REVIEW
+        TaskState.DONE -> AgentStage.DONE
     }
 
     private fun mapToDomain(it: AgentStateEntity): AgentState {
@@ -102,8 +320,31 @@ class SqlDelightChatRepository(
         )
     }
 
+    private fun mapTaskToDomain(it: TaskEntity): TaskContext {
+        return TaskContext(
+            taskId = it.taskId,
+            title = it.title,
+            state = AgentTaskState(
+                taskState = TaskState.valueOf(it.taskState),
+                agent = Agent(id = "temp", name = "Temp", systemPrompt = "", temperature = 0.7, provider = LLMProvider.Yandex(), stopWord = "", maxTokens = 2000, memoryStrategy = ChatMemoryStrategy.SlidingWindow(10), workingMemory = WorkingMemory(), messages = emptyList())
+            ),
+            isPaused = it.isPaused,
+            step = it.step.toInt(),
+            plan = try { json.decodeFromString(ListSerializer(String.serializer()), it.planJson) } catch(e: Exception) { emptyList() },
+            planDone = try { json.decodeFromString(ListSerializer(String.serializer()), it.planDoneJson) } catch(e: Exception) { emptyList() },
+            currentPlanStep = it.currentPlanStep,
+            totalCount = it.totalCount.toInt(),
+            architectAgentId = it.architectAgentId,
+            executorAgentId = it.executorAgentId,
+            validatorAgentId = it.validatorAgentId,
+            architectColor = it.architectColor,
+            executorColor = it.executorColor,
+            validatorColor = it.validatorColor
+        )
+    }
+
     override suspend fun getProfile(agentId: String): UserProfile? {
-        return db.agentDatabaseQueries.getProfile(agentId).executeAsOneOrNull()?.let {
+        return queries.getProfile(agentId).executeAsOneOrNull()?.let {
             UserProfile(
                 preferences = it.preferences,
                 constraints = it.constraints,
@@ -119,7 +360,7 @@ class SqlDelightChatRepository(
     }
 
     override suspend fun saveProfile(agentId: String, profile: UserProfile) {
-        db.agentDatabaseQueries.saveProfile(
+        queries.saveProfile(
             agentId = agentId,
             preferences = profile.preferences,
             constraints = profile.constraints,
@@ -128,13 +369,13 @@ class SqlDelightChatRepository(
     }
 
     override suspend fun getInvariants(agentId: String, stage: AgentStage): List<Invariant> {
-        return db.agentDatabaseQueries.getInvariantsForStage(agentId, stage).executeAsList().map {
+        return queries.getInvariantsForStage(agentId, stage).executeAsList().map {
             Invariant(it.id, it.rule, it.stage, it.isActive)
         }
     }
 
     override suspend fun saveInvariant(invariant: Invariant) {
-        db.agentDatabaseQueries.insertInvariant(
+        queries.insertInvariant(
             id = invariant.id,
             agentId = "default",
             rule = invariant.rule,

@@ -16,7 +16,8 @@ open class AutonomousAgent(
     val agentId: String,
     private val repository: ChatRepository,
     private val engine: AgentEngine,
-    externalScope: CoroutineScope
+    externalScope: CoroutineScope,
+    private val taskIdForMessagePersistence: String? = null
 ) {
     private val job = SupervisorJob(externalScope.coroutineContext[Job])
     private val scope = CoroutineScope(externalScope.coroutineContext.minusKey(Job) + job)
@@ -183,8 +184,14 @@ open class AutonomousAgent(
         role = role,
         message = content,
         timestamp = System.currentTimeMillis(),
-        source = if (role == "user") SourceType.USER else SourceType.AI,
-        parentId = parentId
+        source = when (role.lowercase()) {
+            "user" -> SourceType.USER
+            "assistant" -> SourceType.AI
+            "system" -> SourceType.SYSTEM
+            else -> SourceType.AI
+        },
+        parentId = parentId,
+        taskId = taskIdForMessagePersistence
     )
 
     private suspend fun syncWithRepository(agent: Agent) {

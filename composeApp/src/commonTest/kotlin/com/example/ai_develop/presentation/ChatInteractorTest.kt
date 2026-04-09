@@ -31,7 +31,7 @@ class ChatInteractorTest {
             savedMessages.add(message) 
             return Result.success(Unit)
         }
-        override suspend fun deleteAgent(agentId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgent(agentId: String) {}
         override fun getTasks(): Flow<List<TaskContext>> = emptyFlow()
         override suspend fun saveTask(task: TaskContext): Result<Unit> = Result.success(Unit)
         override suspend fun deleteTask(task: TaskContext): Result<Unit> = Result.success(Unit)
