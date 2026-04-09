@@ -13,6 +13,12 @@ interface AgentTool {
     suspend fun execute(input: String): String
 }
 
+data class PreparedLlmRequest(
+    val systemPrompt: String,
+    val inputMessages: List<ChatMessage>,
+    val snapshot: LlmRequestSnapshot
+)
+
 /**
  * Движок агента — инкапсулирует логику взаимодействия с LLM и выполнение инструментов.
  * Он не хранит состояние, а только обрабатывает переданного агента.
@@ -24,32 +30,58 @@ open class AgentEngine(
     private val tools: List<AgentTool> = emptyList()
 ) {
     /**
+     * Тот же запрос к LLM, что и в [streamResponse], без стриминга — для логов и отладки.
+     */
+    open fun prepareChatRequest(
+        agent: Agent,
+        stage: AgentStage,
+        isJsonMode: Boolean = false
+    ): PreparedLlmRequest {
+        val systemPrompt = prepareSystemPrompt(agent, stage)
+        val inputMessages = prepareInputMessages(agent)
+        val snapshot = LlmRequestSnapshot(
+            effectiveSystemPrompt = systemPrompt,
+            inputMessagesText = formatLlmInputMessagesText(inputMessages),
+            providerName = agent.provider.name,
+            model = agent.provider.model,
+            agentStage = stage.toString(),
+            temperature = agent.temperature,
+            maxTokens = agent.maxTokens,
+            isJsonMode = isJsonMode,
+            stopWord = agent.stopWord
+        )
+        return PreparedLlmRequest(systemPrompt, inputMessages, snapshot)
+    }
+
+    /**
+     * Стриминг по уже подготовленному запросу (тот же [PreparedLlmRequest], что ушёл в лог).
+     */
+    open fun streamFromPrepared(
+        agent: Agent,
+        prepared: PreparedLlmRequest
+    ): Flow<String> = flow {
+        repository.chatStreaming(
+            messages = prepared.inputMessages,
+            systemPrompt = prepared.systemPrompt,
+            maxTokens = agent.maxTokens,
+            temperature = agent.temperature,
+            stopWord = agent.stopWord,
+            isJsonMode = prepared.snapshot.isJsonMode,
+            provider = agent.provider
+        ).collect { result ->
+            result.onSuccess { chunk ->
+                emit(chunk)
+            }.onFailure { throw it }
+        }
+    }
+
+    /**
      * Формирует поток токенов и возвращает финальное сообщение AI.
      */
     open fun streamResponse(
         agent: Agent,
         stage: AgentStage
-    ): Flow<String> = flow {
-        val systemPrompt = prepareSystemPrompt(agent, stage)
-        val inputMessages = prepareInputMessages(agent)
-
-        val fullResponse = StringBuilder()
-
-        repository.chatStreaming(
-            messages = inputMessages,
-            systemPrompt = systemPrompt,
-            maxTokens = agent.maxTokens,
-            temperature = agent.temperature,
-            stopWord = agent.stopWord,
-            isJsonMode = false,
-            provider = agent.provider
-        ).collect { result ->
-            result.onSuccess { chunk ->
-                fullResponse.append(chunk)
-                emit(chunk)
-            }.onFailure { throw it }
-        }
-    }
+    ): Flow<String> = streamFromPrepared(agent, prepareChatRequest(agent, stage, isJsonMode = false))
 
     /**
      * Анализирует сообщение на наличие вызовов инструментов (Tool Calling).

@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS AgentMessageEntity (
     content TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
     taskId TEXT, -- Ссылка на задачу, если сообщение относится к ней
+    llmSnapshotJson TEXT, -- JSON LlmRequestSnapshot для отладки
     FOREIGN KEY(agentId) REFERENCES AgentStateEntity(agentId) ON DELETE CASCADE
 );
 
@@ -91,8 +92,8 @@ getInvariantsForStage:
 SELECT * FROM InvariantEntity WHERE agentId = ? AND stage = ? AND isActive = 1;
 
 insertMessage:
-INSERT OR REPLACE INTO AgentMessageEntity(id, agentId, stage, stepId, role, content, timestamp, taskId)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO AgentMessageEntity(id, agentId, stage, stepId, role, content, timestamp, taskId, llmSnapshotJson)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getMessagesForAgent:
 SELECT * FROM AgentMessageEntity WHERE agentId = ? ORDER BY timestamp ASC;

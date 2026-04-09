@@ -49,6 +49,7 @@ data class MessageEntity(
     val isSystemNotification: Boolean = false,
     val taskId: String? = null,
     val taskState: TaskState? = null,
+    val llmSnapshotJson: String? = null,
     val updatedAt: Long = System.currentTimeMillis()
 )
 

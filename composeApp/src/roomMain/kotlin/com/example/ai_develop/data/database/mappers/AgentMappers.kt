@@ -3,6 +3,9 @@ package com.example.ai_develop.data.database.mappers
 import com.example.ai_develop.data.database.AgentEntity
 import com.example.ai_develop.data.database.MessageEntity
 import com.example.ai_develop.domain.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 
 fun AgentEntity.toDomain(messages: List<ChatMessage>) = Agent(
     id = id,
@@ -20,6 +23,8 @@ fun AgentEntity.toDomain(messages: List<ChatMessage>) = Agent(
     userProfile = userProfile,
     workingMemory = workingMemory
 )
+
+private val snapshotCodec = Json { ignoreUnknownKeys = true }
 
 fun Agent.toEntity() = AgentEntity(
     id = id,
@@ -52,7 +57,14 @@ fun MessageEntity.toDomain() = ChatMessage(
     source = source,
     isSystemNotification = isSystemNotification,
     taskId = taskId,
-    taskState = taskState
+    taskState = taskState,
+    llmRequestSnapshot = llmSnapshotJson?.let { raw ->
+        try {
+            snapshotCodec.decodeFromString(LlmRequestSnapshot.serializer(), raw)
+        } catch (_: Exception) {
+            null
+        }
+    }
 )
 
 fun ChatMessage.toEntity(agentId: String) = MessageEntity(
@@ -66,5 +78,8 @@ fun ChatMessage.toEntity(agentId: String) = MessageEntity(
     timestamp = timestamp,
     isSystemNotification = isSystemNotification,
     taskId = taskId,
-    taskState = taskState
+    taskState = taskState,
+    llmSnapshotJson = llmRequestSnapshot?.let {
+        snapshotCodec.encodeToString(LlmRequestSnapshot.serializer(), it)
+    }
 )

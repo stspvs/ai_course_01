@@ -175,6 +175,14 @@ class TaskSaga(
                 }
                 contextMessages.addAll(finalHistory)
 
+                val llmSnapshot = buildLlmRequestSnapshot(
+                    effectiveSystemPrompt = fullSystemPrompt,
+                    inputMessages = contextMessages,
+                    agent = agent,
+                    agentStageLabel = currentContext.state.taskState.name,
+                    isJsonMode = role.isJsonMode()
+                )
+
                 var fullResponse = ""
 
                 repository.chatStreaming(
@@ -205,7 +213,8 @@ class TaskSaga(
                         timestamp = System.currentTimeMillis(),
                         taskId = currentContext.taskId,
                         taskState = currentContext.state.taskState,
-                        parentId = lastMsgId
+                        parentId = lastMsgId,
+                        llmRequestSnapshot = llmSnapshot
                     )
                     localRepository.saveMessage(
                         agentId = agent.id,

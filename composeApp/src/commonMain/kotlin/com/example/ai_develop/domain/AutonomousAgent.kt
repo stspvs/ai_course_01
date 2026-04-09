@@ -97,7 +97,12 @@ open class AutonomousAgent(
             // 1. Добавляем пользовательское сообщение под локом, чтобы гарантировать порядок
             processingMutex.withLock {
                 val currentAgent = _agent.value ?: return@flow
-                val msg = createMessage("user", text, currentAgent.messages.lastOrNull()?.id)
+                val msg = createMessage(
+                    "user",
+                    text,
+                    currentAgent.messages.lastOrNull()?.id,
+                    fsm.getCurrentState().currentStage
+                )
                 _agent.update { it?.copy(messages = it.messages + msg) }
                 _isProcessing.value = true
             }
@@ -119,7 +124,12 @@ open class AutonomousAgent(
                 emit("\n[Executing tool...]\n")
                 
                 agentSnapshot = _agent.value ?: break
-                val toolMsg = createMessage("system", "Tool Result: $toolResult", agentSnapshot.messages.lastOrNull()?.id)
+                val toolMsg = createMessage(
+                    "system",
+                    "Tool Result: $toolResult",
+                    agentSnapshot.messages.lastOrNull()?.id,
+                    fsm.getCurrentState().currentStage
+                )
                 
                 processingMutex.withLock {
                     _agent.update { it?.copy(messages = it.messages + toolMsg) }
@@ -158,9 +168,10 @@ open class AutonomousAgent(
         agent: Agent,
         stage: AgentStage
     ): String {
+        val prepared = engine.prepareChatRequest(agent, stage, isJsonMode = false)
         val sb = StringBuilder()
         try {
-            engine.streamResponse(agent, stage).collect { chunk ->
+            engine.streamFromPrepared(agent, prepared).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 sb.append(chunk)
                 _partialResponse.emit(chunk)
@@ -170,18 +181,29 @@ open class AutonomousAgent(
             _partialResponse.emit("Error during streaming: ${e.message}")
             throw e
         }
-        
-        // Обновляем сообщения агента под локом для сохранения консистентности
+
         processingMutex.withLock {
             val parentId = _agent.value?.messages?.lastOrNull()?.id
-            val aiMsg = createMessage("assistant", sb.toString(), parentId)
+            val aiMsg = createMessage(
+                "assistant",
+                sb.toString(),
+                parentId,
+                stage,
+                prepared.snapshot
+            )
             _agent.update { it?.copy(messages = it.messages + aiMsg) }
         }
-        
+
         return sb.toString()
     }
 
-    private fun createMessage(role: String, content: String, parentId: String?) = ChatMessage(
+    private fun createMessage(
+        role: String,
+        content: String,
+        parentId: String?,
+        agentStage: AgentStage,
+        llmSnapshot: LlmRequestSnapshot? = null
+    ) = ChatMessage(
         id = Uuid.random().toString(),
         role = role,
         message = content,
@@ -193,8 +215,17 @@ open class AutonomousAgent(
             else -> SourceType.AI
         },
         parentId = parentId,
-        taskId = taskIdForMessagePersistence
+        taskId = taskIdForMessagePersistence,
+        taskState = taskIdForMessagePersistence?.let { agentStageToTaskState(agentStage) },
+        llmRequestSnapshot = llmSnapshot
     )
+
+    private fun agentStageToTaskState(stage: AgentStage): TaskState = when (stage) {
+        AgentStage.PLANNING -> TaskState.PLANNING
+        AgentStage.EXECUTION -> TaskState.EXECUTION
+        AgentStage.REVIEW -> TaskState.VALIDATION
+        AgentStage.DONE -> TaskState.DONE
+    }
 
     private suspend fun syncWithRepository(agent: Agent) {
         val fsm = _stateMachine.value ?: return

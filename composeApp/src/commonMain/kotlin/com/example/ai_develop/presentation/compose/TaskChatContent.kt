@@ -3,7 +3,10 @@ package com.example.ai_develop.presentation.compose
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -21,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.ChatMessage
+import com.example.ai_develop.domain.LlmRequestSnapshot
 import com.example.ai_develop.domain.SourceType
 import com.example.ai_develop.domain.TaskContext
 import com.example.ai_develop.domain.TaskState
@@ -37,6 +41,8 @@ fun TaskChatContent(viewModel: TaskViewModel) {
     val taskUiState by viewModel.uiState.collectAsState()
     var input by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf<TaskState?>(null) }
+    var logTargetMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    val logSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Header with Task Selection and Controls
@@ -168,7 +174,11 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(displayMessages, key = { it.id }) { msg ->
-                    TaskMessageBubble(msg, task)
+                    TaskMessageBubble(
+                        message = msg,
+                        task = task,
+                        onOpenLog = { logTargetMessage = it }
+                    )
                 }
             }
 
@@ -213,12 +223,77 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                     }
                 }
             }
+
+            if (logTargetMessage != null) {
+                ModalBottomSheet(
+                    onDismissRequest = { logTargetMessage = null },
+                    sheetState = logSheetState
+                ) {
+                    TaskLlmLogPanel(
+                        message = logTargetMessage!!,
+                        onClose = { logTargetMessage = null }
+                    )
+                }
+            }
         } ?: run {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Выберите задачу для отображения чата", style = MaterialTheme.typography.titleMedium, color = Color.Gray)
             }
         }
     }
+}
+
+@Composable
+private fun TaskLlmLogPanel(message: ChatMessage, onClose: () -> Unit) {
+    val scroll = rememberScrollState()
+    val snap = message.llmRequestSnapshot
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 24.dp)
+            .verticalScroll(scroll)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Запрос к LLM", style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = onClose) { Text("Закрыть") }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (snap == null) {
+            Text(
+                "К этому сообщению нет сохранённых логов запроса к LLM.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            TaskLlmSnapshotDetails(snap)
+        }
+    }
+}
+
+@Composable
+private fun TaskLlmSnapshotDetails(snap: LlmRequestSnapshot) {
+    Text("Провайдер: ${snap.providerName}", style = MaterialTheme.typography.titleSmall)
+    Text("Модель: ${snap.model}", style = MaterialTheme.typography.bodyMedium)
+    Text("Этап: ${snap.agentStage}", style = MaterialTheme.typography.bodyMedium)
+    Text(
+        "Параметры: temp=${snap.temperature}, maxTokens=${snap.maxTokens}, jsonMode=${snap.isJsonMode}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (snap.stopWord.isNotBlank()) {
+        Text("Стоп-слово: ${snap.stopWord}", style = MaterialTheme.typography.bodySmall)
+    }
+    Spacer(Modifier.height(12.dp))
+    Text("Системный промпт", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    Text(snap.effectiveSystemPrompt, style = MaterialTheme.typography.bodySmall)
+    Spacer(Modifier.height(12.dp))
+    Text("Сообщения в запросе", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    Text(snap.inputMessagesText, style = MaterialTheme.typography.bodySmall)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -344,17 +419,24 @@ fun TaskProgressBar(task: TaskContext) {
 }
 
 @Composable
-fun TaskMessageBubble(message: ChatMessage, task: TaskContext) {
+fun TaskMessageBubble(
+    message: ChatMessage,
+    task: TaskContext,
+    onOpenLog: (ChatMessage) -> Unit
+) {
     val alignment = if (message.source == SourceType.USER) Alignment.CenterEnd else Alignment.CenterStart
     val stageColor = message.taskState?.let { getStageColor(it, task) } ?: MaterialTheme.colorScheme.secondaryContainer
     val bgColor = if (message.source == SourceType.USER) MaterialTheme.colorScheme.primaryContainer else stageColor.copy(alpha = 0.1f)
+    val hasLog = message.llmRequestSnapshot != null
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = bgColor,
             border = if (message.source != SourceType.USER) BorderStroke(1.dp, stageColor) else null,
-            modifier = Modifier.widthIn(max = 500.dp)
+            modifier = Modifier
+                .widthIn(max = 500.dp)
+                .clickable { onOpenLog(message) }
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 if (message.taskState != null && message.source != SourceType.USER) {
@@ -367,12 +449,27 @@ fun TaskMessageBubble(message: ChatMessage, task: TaskContext) {
                     Spacer(Modifier.height(4.dp))
                 }
                 Text(message.message)
-                Text(
-                    text = if (message.source == SourceType.USER) "Вы" else "Агент (${message.taskState ?: "System"})",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.align(Alignment.End),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (hasLog) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Spacer(Modifier.size(14.dp))
+                    }
+                    Text(
+                        text = if (message.source == SourceType.USER) "Вы" else "Агент (${message.taskState ?: "System"})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
             }
         }
     }

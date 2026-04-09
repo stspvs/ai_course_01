@@ -48,7 +48,8 @@ class SqlDelightChatRepository(
                     role = msg.role,
                     content = msg.content,
                     timestamp = msg.timestamp,
-                    taskId = rowTaskId
+                    taskId = rowTaskId,
+                    llmSnapshotJson = encodeLlmSnapshot(msg.llmRequestSnapshot)
                 )
             }
         }
@@ -231,7 +232,8 @@ class SqlDelightChatRepository(
             role = message.role,
             content = message.content,
             timestamp = message.timestamp,
-            taskId = taskId
+            taskId = taskId,
+            llmSnapshotJson = encodeLlmSnapshot(message.llmRequestSnapshot)
         )
     }
 
@@ -255,9 +257,22 @@ class SqlDelightChatRepository(
             timestamp = msg.timestamp,
             source = roleToSourceType(msg.role),
             taskId = msg.taskId,
-            taskState = agentStageToTaskState(msg.stage)
+            taskState = agentStageToTaskState(msg.stage),
+            llmRequestSnapshot = decodeLlmSnapshot(msg.llmSnapshotJson)
         )
     }
+
+    private fun encodeLlmSnapshot(snapshot: LlmRequestSnapshot?): String? =
+        snapshot?.let { json.encodeToString(LlmRequestSnapshot.serializer(), it) }
+
+    private fun decodeLlmSnapshot(jsonStr: String?): LlmRequestSnapshot? =
+        jsonStr?.takeIf { it.isNotBlank() }?.let {
+            try {
+                json.decodeFromString(LlmRequestSnapshot.serializer(), it)
+            } catch (_: Exception) {
+                null
+            }
+        }
 
     private fun roleToSourceType(role: String): SourceType = when (role.lowercase()) {
         "user" -> SourceType.USER

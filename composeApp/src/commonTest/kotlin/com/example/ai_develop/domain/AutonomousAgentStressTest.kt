@@ -81,7 +81,7 @@ class AutonomousAgentStressTest {
     @Test
     fun testFailureRecovery() = runTest {
         val brokenEngine = object : AgentEngine(repository, memoryManager) {
-            override fun streamResponse(agent: Agent, stage: AgentStage): Flow<String> = flow {
+            override fun streamFromPrepared(agent: Agent, prepared: PreparedLlmRequest): Flow<String> = flow {
                 emit("Starting... ")
                 throw IllegalStateException("API connection lost")
             }
@@ -123,7 +123,7 @@ class AutonomousAgentStressTest {
         fun queueResponse(chunks: List<String>) = responses.add(chunks)
         fun queueToolResult(res: String?) = toolResults.add(res)
 
-        override fun streamResponse(agent: Agent, stage: AgentStage): Flow<String> = flow {
+        override fun streamFromPrepared(agent: Agent, prepared: PreparedLlmRequest): Flow<String> = flow {
             val chunks = if (responses.isNotEmpty()) responses.removeAt(0) else listOf("Default")
             for (chunk in chunks) {
                 emit(chunk)
