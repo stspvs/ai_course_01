@@ -124,6 +124,22 @@ fun Agent.applyUpdate(update: AgentUpdate): Agent {
     )
 }
 
+/** Сбрасывает содержимое разговорной памяти, сохраняя параметры окна/автообновления. */
+fun WorkingMemory.clearConversation(): WorkingMemory = copy(
+    currentTask = null,
+    progress = null,
+    extractedFacts = ChatFacts()
+)
+
+/** Убирает данные прошлых диалогов из стратегии, сохраняя настройки (размер окна, промпты и т.д.). */
+fun ChatMemoryStrategy.clearConversationData(): ChatMemoryStrategy = when (this) {
+    is ChatMemoryStrategy.SlidingWindow -> this
+    is ChatMemoryStrategy.Branching -> this
+    is ChatMemoryStrategy.StickyFacts -> copy(facts = ChatFacts())
+    is ChatMemoryStrategy.Summarization -> copy(summary = null)
+    is ChatMemoryStrategy.TaskOriented -> copy(currentGoal = null)
+}
+
 @Serializable
 data class AgentTemplate(
     val name: String,

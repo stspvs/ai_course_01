@@ -163,12 +163,54 @@ open class AutonomousAgent(
         }
     }
 
+    /**
+     * Первое сообщение ассистента без пользовательского ввода: краткое приветствие (пустой чат).
+     */
+    fun sendWelcomeMessage(): Flow<String> = flow {
+        val fsm = _stateMachine.filterNotNull().first()
+        try {
+            processingMutex.withLock {
+                val currentAgent = _agent.value ?: return@flow
+                if (currentAgent.messages.isNotEmpty()) return@flow
+                _isProcessing.value = true
+            }
+
+            val stage = fsm.getCurrentState().currentStage
+            val agentSnapshot = _agent.value ?: return@flow
+            val prepared = engine.prepareChatRequest(agentSnapshot, stage, isJsonMode = false)
+            val welcomePrompt = prepared.systemPrompt + WELCOME_SYSTEM_SUFFIX
+            val preparedWelcome = prepared.copy(
+                systemPrompt = welcomePrompt,
+                snapshot = prepared.snapshot.copy(effectiveSystemPrompt = welcomePrompt)
+            )
+            executeStreamingStepWithPrepared(this, agentSnapshot, stage, preparedWelcome)
+            _agent.value?.let { syncWithRepository(it) }
+        } catch (e: Exception) {
+            val err = "Error: ${e.message}"
+            _partialResponse.emit(err)
+            emit(err)
+        } finally {
+            _isProcessing.value = false
+        }
+    }
+
     private suspend fun executeStreamingStep(
         collector: FlowCollector<String>,
         agent: Agent,
         stage: AgentStage
+    ): String = executeStreamingStepWithPrepared(
+        collector,
+        agent,
+        stage,
+        engine.prepareChatRequest(agent, stage, isJsonMode = false)
+    )
+
+    private suspend fun executeStreamingStepWithPrepared(
+        collector: FlowCollector<String>,
+        agent: Agent,
+        stage: AgentStage,
+        prepared: PreparedLlmRequest
     ): String {
-        val prepared = engine.prepareChatRequest(agent, stage, isJsonMode = false)
         val sb = StringBuilder()
         try {
             engine.streamFromPrepared(agent, prepared).collect { chunk ->
@@ -195,6 +237,11 @@ open class AutonomousAgent(
         }
 
         return sb.toString()
+    }
+
+    private companion object {
+        private const val WELCOME_SYSTEM_SUFFIX =
+            "\n\n[ИНСТРУКЦИЯ] Пользователь ещё не начал диалог. Кратко поприветствуй его и предложи начать обсуждение задачи. Ответь одним коротким сообщением."
     }
 
     private fun createMessage(

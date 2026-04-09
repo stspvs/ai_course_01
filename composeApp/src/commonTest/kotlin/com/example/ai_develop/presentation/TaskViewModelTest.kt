@@ -92,10 +92,22 @@ class TaskViewModelTest {
         override suspend fun saveAgentState(state: AgentState) {
             states[state.agentId] = state
             stateFlows.getOrPut(state.agentId) { MutableStateFlow(null) }.value = state
-            val tid = state.messages.firstOrNull()?.taskId
-            if (tid != null) {
-                messageRepo.syncFromAgentState(tid, state.messages)
-            }
+            val tid = state.messages.firstOrNull()?.taskId ?: state.agentId
+            messageRepo.syncFromAgentState(tid, state.messages)
+        }
+
+        override suspend fun resetTaskConversation(taskId: String): Result<Unit> = runCatching {
+            messageRepo.deleteMessagesForTask(taskId)
+            val state = states[taskId] ?: return@runCatching
+            val cleared = state.copy(
+                workingMemory = state.workingMemory.clearConversation(),
+                memoryStrategy = state.memoryStrategy.clearConversationData(),
+                messages = emptyList(),
+                plan = AgentPlan(),
+                currentStepId = null,
+                currentStage = AgentStage.PLANNING
+            )
+            saveAgentState(cleared)
         }
 
         override suspend fun getAgentState(agentId: String): AgentState? = states[agentId]
@@ -136,7 +148,7 @@ class TaskViewModelTest {
             createTaskUseCase = CreateTaskUseCase(taskRepo),
             updateTaskUseCase = UpdateTaskUseCase(taskRepo),
             deleteTaskUseCase = DeleteTaskUseCase(taskRepo),
-            resetTaskUseCase = ResetTaskUseCase(messageRepo),
+            resetTaskUseCase = ResetTaskUseCase(chatRepo, chatStreamingUseCase),
             getMessagesUseCase = GetMessagesUseCase(messageRepo),
             chatStreamingUseCase = chatStreamingUseCase,
             getAgentsUseCase = GetAgentsUseCase(chatRepo),
@@ -258,8 +270,26 @@ class TaskViewModelTest {
         backgroundScope.launch { viewModel.taskMessages.collect() }
 
         val taskId = "reset-me"
-        taskRepo.saveTask(TaskContext(taskId, "Title", AgentTaskState(TaskState.EXECUTION, DefaultAgentFactory().create()), isPaused = false))
+        taskRepo.saveTask(
+            TaskContext(
+                taskId,
+                "Title",
+                AgentTaskState(TaskState.EXECUTION, DefaultAgentFactory().create()),
+                isPaused = false,
+                step = 3,
+                plan = listOf("step"),
+                planDone = listOf("done"),
+                currentPlanStep = "cur"
+            )
+        )
         messageRepo.saveMessage("agent", ChatMessage(message = "test", role = "user", source = SourceType.USER, timestamp = 0), taskId, TaskState.EXECUTION)
+        chatRepo.saveAgentState(
+            AgentState(
+                agentId = taskId,
+                workingMemory = WorkingMemory(currentTask = "old"),
+                memoryStrategy = ChatMemoryStrategy.Summarization(10, summary = "old")
+            )
+        )
         advanceUntilIdle()
 
         viewModel.onEvent(TaskEvent.ResetTask(taskId))
@@ -269,11 +299,39 @@ class TaskViewModelTest {
         assertNotNull(task)
         assertEquals(TaskState.PLANNING, task.state.taskState)
         assertTrue(task.isPaused)
-        
-        // Проверка через поток сообщений (нужно выбрать задачу)
+        assertEquals(0, task.step)
+        assertTrue(task.plan.isEmpty())
+        assertTrue(task.planDone.isEmpty())
+        assertNull(task.currentPlanStep)
+
+        val cleared = chatRepo.lastSavedState(taskId)
+        assertNotNull(cleared)
+        assertNull(cleared?.workingMemory?.currentTask)
+        assertNull((cleared?.memoryStrategy as? ChatMemoryStrategy.Summarization)?.summary)
+
         viewModel.onEvent(TaskEvent.SelectTask(taskId))
         advanceUntilIdle()
         assertTrue(viewModel.taskMessages.value.isEmpty())
+    }
+
+    @Test
+    fun testWelcomeOnUnpauseEmptyChat() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        backgroundScope.launch { viewModel.taskMessages.collect() }
+        backgroundScope.launch { viewModel.activeAgent.collect() }
+
+        val taskId = "welcome-task"
+        taskRepo.saveTask(
+            TaskContext(taskId, "T", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()), isPaused = true)
+        )
+        advanceUntilIdle()
+        viewModel.onEvent(TaskEvent.SelectTask(taskId))
+        advanceUntilIdle()
+
+        viewModel.onEvent(TaskEvent.TogglePause(taskId))
+        advanceUntilIdle()
+
+        assertTrue(viewModel.taskMessages.value.any { it.role == "assistant" }, "welcome should add assistant message")
     }
 
     @Test

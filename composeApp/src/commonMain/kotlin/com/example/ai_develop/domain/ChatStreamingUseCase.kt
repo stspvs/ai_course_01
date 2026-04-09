@@ -29,6 +29,11 @@ open class ChatStreamingUseCase(
         }
     }
 
+    /** Сбрасывает кэш агента после смены данных в БД (например сброс задачи). */
+    open fun evictAgent(agentId: String) {
+        activeAgents.remove(agentId)?.dispose()
+    }
+
     /**
      * Совместимость со старым кодом.
      */

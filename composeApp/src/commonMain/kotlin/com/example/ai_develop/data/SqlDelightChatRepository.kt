@@ -241,6 +241,20 @@ class SqlDelightChatRepository(
         queries.deleteMessagesForTask(taskId)
     }
 
+    override suspend fun resetTaskConversation(taskId: String): Result<Unit> = runCatching {
+        deleteMessagesForTask(taskId).getOrThrow()
+        val state = getAgentState(taskId) ?: return@runCatching
+        val cleared = state.copy(
+            workingMemory = state.workingMemory.clearConversation(),
+            memoryStrategy = state.memoryStrategy.clearConversationData(),
+            messages = emptyList(),
+            plan = AgentPlan(),
+            currentStepId = null,
+            currentStage = AgentStage.PLANNING
+        )
+        saveAgentState(cleared)
+    }
+
     // --- Helpers ---
 
     private fun agentStateWithMessages(entity: AgentStateEntity): AgentState {

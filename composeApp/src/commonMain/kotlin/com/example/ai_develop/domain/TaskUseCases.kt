@@ -19,8 +19,15 @@ class DeleteTaskUseCase(private val repository: TaskRepository) {
     suspend operator fun invoke(task: TaskContext): Result<Unit> = repository.deleteTask(task)
 }
 
-class ResetTaskUseCase(private val repository: MessageRepository) {
-    suspend operator fun invoke(taskId: String): Result<Unit> = repository.deleteMessagesForTask(taskId)
+class ResetTaskUseCase(
+    private val chatRepository: ChatRepository,
+    private val chatStreamingUseCase: ChatStreamingUseCase
+) {
+    suspend operator fun invoke(taskId: String): Result<Unit> {
+        chatRepository.resetTaskConversation(taskId).getOrThrow()
+        chatStreamingUseCase.evictAgent(taskId)
+        return Result.success(Unit)
+    }
 }
 
 class GetMessagesUseCase(private val repository: MessageRepository) {

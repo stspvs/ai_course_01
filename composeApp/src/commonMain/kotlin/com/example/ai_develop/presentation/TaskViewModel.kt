@@ -173,7 +173,36 @@ class TaskViewModel(
                 val task = tasks.map { it.find { t -> t.taskId == taskId } }
                     .filterNotNull()
                     .first()
+                val wasPaused = task.isPaused
+                val messagesBeforeUnpause =
+                    if (wasPaused) getMessagesUseCase(taskId).first() else emptyList()
                 updateTaskUseCase(task.copy(isPaused = !task.isPaused)).getOrThrow()
+                if (wasPaused && messagesBeforeUnpause.isEmpty()) {
+                    _uiState.update { it.copy(isSending = true, error = null) }
+                    _streamingDraft.value = ""
+                    val buffer = StringBuilder()
+                    var lastUiUpdateMillis = 0L
+                    try {
+                        val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
+                        agent.sendWelcomeMessage().collect { chunk ->
+                            buffer.append(chunk)
+                            val now = System.currentTimeMillis()
+                            if (now - lastUiUpdateMillis >= 48) {
+                                _streamingDraft.value = buffer.toString()
+                                lastUiUpdateMillis = now
+                            }
+                        }
+                        if (buffer.isNotEmpty()) {
+                            _streamingDraft.value = buffer.toString()
+                        }
+                    } catch (e: Exception) {
+                        _uiState.update { it.copy(error = e) }
+                        _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send welcome"))
+                    } finally {
+                        _streamingDraft.value = ""
+                        _uiState.update { it.copy(isSending = false) }
+                    }
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e) }
             }
@@ -190,7 +219,11 @@ class TaskViewModel(
                 updateTaskUseCase(
                     task.copy(
                         state = task.state.copy(taskState = TaskState.PLANNING),
-                        isPaused = true
+                        isPaused = true,
+                        step = 0,
+                        plan = emptyList(),
+                        planDone = emptyList(),
+                        currentPlanStep = null
                     )
                 ).getOrThrow()
             } catch (e: Exception) {
