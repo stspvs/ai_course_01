@@ -1,10 +1,29 @@
 package com.example.ai_develop.domain
 
 import com.example.ai_develop.data.database.LocalChatRepository
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
-import kotlinx.serialization.json.Json
 import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+
+private const val DEFAULT_LLM_TIMEOUT_MS = 120_000L
 
 @OptIn(ExperimentalUuidApi::class)
 class TaskSaga(
@@ -21,10 +40,20 @@ class TaskSaga(
     private val _context = MutableStateFlow(initialContext)
     val context: StateFlow<TaskContext> = _context.asStateFlow()
 
-    private val scope = providedScope ?: CoroutineScope(dispatcher + SupervisorJob())
+    private val ownedSupervisorJob = if (providedScope == null) SupervisorJob() else null
+    private val scope = providedScope ?: CoroutineScope(dispatcher + ownedSupervisorJob!!)
     private val json = Json { ignoreUnknownKeys = true }
-    
+
     private var isStageRunning = false
+    private val stageMutex = Mutex()
+
+    /**
+     * Last task snapshot that arrived via [LocalChatRepository.getTasks] emissions.
+     * [updateStateInDb] assigns [_context] before [LocalChatRepository.saveTask], so comparing
+     * "old" state against [_context] in the collector misses PLANNING→EXECUTION transitions.
+     */
+    private var lastTaskStateFromFlow: TaskState? = null
+    private var lastPausedFromFlow: Boolean? = null
 
     private class APIException(val error: Throwable) : Exception(error.message)
 
@@ -35,13 +64,15 @@ class TaskSaga(
                 .filterNotNull()
                 .distinctUntilChanged()
                 .collect { updatedContext ->
-                    val wasPaused = _context.value.isPaused
-                    val oldState = _context.value.state.taskState
+                    val wasPaused = lastPausedFromFlow ?: _context.value.isPaused
+                    val oldState = lastTaskStateFromFlow ?: _context.value.state.taskState
+                    lastTaskStateFromFlow = updatedContext.state.taskState
+                    lastPausedFromFlow = updatedContext.isPaused
                     _context.value = updatedContext
-                    
+
                     val becameUnpaused = wasPaused && !updatedContext.isPaused
                     val stateChangedWhileRunning = !updatedContext.isPaused && oldState != updatedContext.state.taskState
-                    
+
                     if (becameUnpaused || stateChangedWhileRunning) {
                         processCurrentState()
                     }
@@ -52,10 +83,10 @@ class TaskSaga(
             localRepository.getAgents().collect { allAgents ->
                 val newArchitect = allAgents.find { it.id == _context.value.architectAgentId }
                 if (newArchitect != null) architect = newArchitect
-                
+
                 val newExecutor = allAgents.find { it.id == _context.value.executorAgentId }
                 if (newExecutor != null) executor = newExecutor
-                
+
                 val newValidator = allAgents.find { it.id == _context.value.validatorAgentId }
                 if (newValidator != null) validator = newValidator
             }
@@ -64,11 +95,11 @@ class TaskSaga(
 
     private fun getValidAgentId(): String? {
         val ctx = _context.value
-        return architect?.id 
-            ?: executor?.id 
-            ?: validator?.id 
-            ?: ctx.architectAgentId 
-            ?: ctx.executorAgentId 
+        return architect?.id
+            ?: executor?.id
+            ?: validator?.id
+            ?: ctx.architectAgentId
+            ?: ctx.executorAgentId
             ?: ctx.validatorAgentId
     }
 
@@ -76,7 +107,7 @@ class TaskSaga(
         return when (state) {
             TaskState.PLANNING -> ArchitectRole()
             TaskState.EXECUTION -> ExecutorRole()
-            TaskState.VALIDATION -> ValidatorRole()
+            TaskState.VERIFICATION -> ValidatorRole()
             TaskState.DONE -> throw IllegalStateException("No role for DONE state")
         }
     }
@@ -87,9 +118,27 @@ class TaskSaga(
         }
     }
 
-    fun stop() {
-        // Only cancel if we created the scope ourselves
-        // If providedScope was passed, we shouldn't cancel it as it's managed externally (e.g. ViewModel or runTest)
+    fun stop() {}
+
+    /** Подставляет лимиты итераций/LLM из сохранённой задачи в память саги (см. [TaskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved]). */
+    fun applyRuntimeLimitsFrom(source: TaskContext) {
+        if (source.taskId != _context.value.taskId) return
+        val cur = _context.value
+        val src = source.runtimeState
+        val merged = cur.runtimeState.copy(
+            maxSteps = src.maxSteps,
+            maxPlanningSteps = src.maxPlanningSteps,
+            maxExecutionSteps = src.maxExecutionSteps,
+            maxVerificationSteps = src.maxVerificationSteps
+        )
+        if (merged != cur.runtimeState) {
+            _context.value = cur.copy(runtimeState = merged)
+        }
+    }
+
+    /** Cancels the saga scope when this instance owns it (see [providedScope]). */
+    fun dispose() {
+        ownedSupervisorJob?.cancel()
     }
 
     fun pause() {
@@ -112,30 +161,94 @@ class TaskSaga(
     fun reset() {
         scope.launch {
             localRepository.deleteMessagesForTask(_context.value.taskId)
-            updateStateInDb { 
+            updateStateInDb {
                 it.copy(
                     state = it.state.copy(taskState = TaskState.PLANNING),
                     step = 0,
                     plan = emptyList(),
                     planDone = emptyList(),
                     currentPlanStep = null,
-                    isPaused = true
+                    isPaused = true,
+                    runtimeState = TaskRuntimeState.defaultFor(it.taskId)
                 )
             }
         }
     }
 
+    /**
+     * Подтверждение плана пользователем: принудительное сжатие и переход PLANNING → EXECUTION.
+     */
+    fun confirmPlan() {
+        scope.launch {
+            val ctx = _context.value
+            if (ctx.state.taskState != TaskState.PLANNING) return@launch
+            if (!ctx.runtimeState.awaitingPlanConfirmation && ctx.runtimeState.planResult == null) return@launch
+            val plan = ctx.runtimeState.planResult ?: return@launch
+            if (!AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.EXECUTION)) return@launch
+            if (AutonomousTaskStateMachine.isGlobalStepLimitExceeded(ctx.runtimeState)) {
+                stageMutex.withLock { finishWithOutcome(TaskOutcome.TIMEOUT) }
+                return@launch
+            }
+            // Must not hold [stageMutex] here: forceCompress updates DB and triggers processCurrentState → same mutex.
+            forceCompressPlanningContext()
+            stageMutex.withLock {
+                val ctx2 = _context.value
+                val plan2 = ctx2.runtimeState.planResult ?: return@withLock
+                if (ctx2.state.taskState != TaskState.PLANNING) return@withLock
+                transitionToNextState(
+                    sourceAgentId = ctx2.architectAgentId ?: return@withLock,
+                    from = TaskState.PLANNING,
+                    to = TaskState.EXECUTION,
+                    planResult = plan2,
+                    notification = "--- PLAN CONFIRMED ---\n${plan2.goal}"
+                )
+            }
+        }
+    }
+
+    fun cancelTask() {
+        scope.launch {
+            stageMutex.withLock {
+                val ctx = _context.value
+                if (ctx.state.taskState == TaskState.DONE) return@withLock
+                if (!AutonomousTaskStateMachine.canTransition(ctx.state.taskState, TaskState.DONE)) return@withLock
+                updateStateInDb {
+                    it.copy(
+                        isPaused = true,
+                        state = it.state.copy(taskState = TaskState.DONE),
+                        runtimeState = it.runtimeState.copy(
+                            stage = TaskState.DONE,
+                            outcome = TaskOutcome.CANCELLED,
+                            cancelled = true
+                        )
+                    )
+                }
+                notifySystem("Задача отменена пользователем.", ctx.state.taskState)
+            }
+        }
+    }
+
     private suspend fun updateStateInDb(block: (TaskContext) -> TaskContext) {
-        val newState = block(_context.value)
+        val newState = block(_context.value).let { it.copy(runtimeState = it.runtimeState.copy(stage = it.state.taskState, taskId = it.taskId)) }
+        _context.value = newState
         localRepository.saveTask(newState)
+    }
+
+    /** Последний persist задачи из [LocalChatRepository] — не расходится с коллектором [getTasks] и индексом шага. */
+    private suspend fun resolvedTaskContext(): TaskContext {
+        val id = _context.value.taskId
+        return localRepository.getTasks().first().find { it.taskId == id } ?: _context.value
     }
 
     private fun processCurrentState() {
         val currentContext = _context.value
         if (currentContext.isPaused || currentContext.state.taskState == TaskState.DONE) return
-
         if (!currentContext.isReadyToRun) {
             pause()
+            return
+        }
+        if (AutonomousTaskStateMachine.isGlobalStepLimitExceeded(currentContext.runtimeState)) {
+            scope.launch { finishWithOutcome(TaskOutcome.TIMEOUT) }
             return
         }
 
@@ -143,50 +256,90 @@ class TaskSaga(
         val agent = when (currentContext.state.taskState) {
             TaskState.PLANNING -> architect
             TaskState.EXECUTION -> executor
-            TaskState.VALIDATION -> validator
+            TaskState.VERIFICATION -> validator
             TaskState.DONE -> null
         }
-        
-        runStage(agent, role)
+
+        when (currentContext.state.taskState) {
+            TaskState.PLANNING -> runPlanningStage(agent, role as ArchitectRole)
+            TaskState.EXECUTION -> runExecutionStage(agent, role as ExecutorRole)
+            TaskState.VERIFICATION -> runVerificationStage(agent, role as ValidatorRole)
+            TaskState.DONE -> {}
+        }
     }
 
-    private fun runStage(agent: Agent?, role: TaskRole) {
+    private fun runPlanningStage(agent: Agent?, role: ArchitectRole) {
         if (agent == null) {
-            scope.launch {
-                handleStageError(null, Exception("Агент для этапа ${role.taskState} не назначен"))
+            scope.launch { handleStageError(null, Exception("Агент для этапа PLANNING не назначен")) }
+            return
+        }
+        scope.launch {
+            stageMutex.withLock {
+                if (isStageRunning) return@launch
+                isStageRunning = true
             }
+            try {
+                runPlanningStageLocked(agent, role)
+            } catch (e: APIException) {
+                handleStageError(agent, e.error)
+            } catch (e: Exception) {
+                handleStageError(agent, e)
+            } finally {
+                isStageRunning = false
+            }
+        }
+    }
+
+    /**
+     * [LocalChatRepository.getAgents] обновляется только при изменении AgentState, а не при новых сообщениях,
+     * поэтому [architect].messages устаревает. Для промпта планирования всегда берём актуальный поток задачи.
+     */
+    private suspend fun agentWithCurrentTaskMessages(base: Agent): Agent {
+        val msgs = localRepository.getMessagesForTask(_context.value.taskId).first()
+        return base.copy(messages = msgs)
+    }
+
+    private suspend fun runPlanningStageLocked(agent: Agent, role: ArchitectRole) {
+        val currentContext = _context.value
+        if (currentContext.isPaused) return
+
+        val rs = currentContext.runtimeState
+        if (rs.planningLlmCalls == 0) {
+            notifyStageEntry(TaskState.PLANNING)
+        }
+        val newRs = rs.copy(planningLlmCalls = rs.planningLlmCalls + 1)
+        updateStateInDb { it.copy(runtimeState = newRs) }
+
+        if (AutonomousTaskStateMachine.shouldTimeoutPlanning(newRs)) {
+            finishWithOutcome(TaskOutcome.TIMEOUT)
             return
         }
 
-        if (isStageRunning) return
-        isStageRunning = true
+        maybeCompressPlanningDuringDialog(agent)
 
-        scope.launch {
-            try {
-                val currentContext = _context.value
-                
-                val finalHistory = role.processHistory(agent, memoryManager)
-                val systemInstruction = role.getSystemInstruction(currentContext)
-                val fullSystemPrompt = role.buildSystemPrompt(agent, systemInstruction, memoryManager)
-                
-                val contextMessages = mutableListOf<ChatMessage>()
-                if (role is ArchitectRole) {
-                    memoryManager.getShortTermMemoryMessage(agent)?.let { contextMessages.add(it) }
-                }
-                contextMessages.addAll(finalHistory)
+        val agentForLlm = agentWithCurrentTaskMessages(agent)
+        val finalHistory = role.processHistory(agentForLlm, memoryManager)
+        val systemInstruction = role.getSystemInstruction(currentContext)
+        val fullSystemPrompt = role.buildSystemPrompt(agentForLlm, systemInstruction, memoryManager, includeUserProfile = true)
 
-                val llmSnapshot = buildLlmRequestSnapshot(
-                    effectiveSystemPrompt = fullSystemPrompt,
-                    inputMessages = contextMessages,
-                    agent = agent,
-                    agentStageLabel = currentContext.state.taskState.name,
-                    isJsonMode = role.isJsonMode()
-                )
+        val contextMessages = mutableListOf<ChatMessage>()
+        memoryManager.getShortTermMemoryMessage(agentForLlm)?.let { contextMessages.add(it) }
+        contextMessages.addAll(finalHistory)
 
-                var fullResponse = ""
+        val llmSnapshot = buildLlmRequestSnapshot(
+            effectiveSystemPrompt = fullSystemPrompt,
+            inputMessages = contextMessages,
+            agent = agentForLlm,
+            agentStageLabel = currentContext.state.taskState.name,
+            isJsonMode = role.isJsonMode()
+        )
 
+        var fullResponse = ""
+        val timeoutMs = currentContext.runtimeState.maxPlanningSteps * 1000L + DEFAULT_LLM_TIMEOUT_MS
+        try {
+            withTimeout(timeoutMs.coerceAtMost(600_000L)) {
                 repository.chatStreaming(
-                    messages = contextMessages, 
+                    messages = contextMessages,
                     systemPrompt = fullSystemPrompt,
                     maxTokens = agent.maxTokens,
                     temperature = agent.temperature,
@@ -194,54 +347,705 @@ class TaskSaga(
                     isJsonMode = role.isJsonMode(),
                     provider = agent.provider
                 ).collect { result ->
-                    result.onSuccess { chunk ->
-                        fullResponse += chunk
-                    }.onFailure { error ->
-                        throw APIException(error)
-                    }
+                    result.onSuccess { chunk -> fullResponse += chunk }
+                        .onFailure { error -> throw APIException(error) }
                 }
-                
-                if (fullResponse.isNotBlank() && !_context.value.isPaused) {
-                    val sagaResp = parseSagaResponse(fullResponse)
-                    
-                    val lastMsgId = agent.messages.lastOrNull()?.id
-
-                    val chatMessage = ChatMessage(
-                        message = fullResponse,
-                        role = "assistant",
-                        source = SourceType.AI,
-                        timestamp = System.currentTimeMillis(),
-                        taskId = currentContext.taskId,
-                        taskState = currentContext.state.taskState,
-                        parentId = lastMsgId,
-                        llmRequestSnapshot = llmSnapshot
-                    )
-                    localRepository.saveMessage(
-                        agentId = agent.id,
-                        message = chatMessage,
-                        taskId = currentContext.taskId,
-                        taskState = currentContext.state.taskState
-                    )
-                    
-                    isStageRunning = false
-                    
-                    when (val result = role.handleResponse(fullResponse, sagaResp)) {
-                        is RoleResult.Success -> transitionToNext(agent.id, result.result)
-                        is RoleResult.Failure -> transitionBack(agent.id, result.reason)
-                        RoleResult.Partial -> { /* Continue conversation */ }
-                    }
-                } else {
-                    isStageRunning = false
-                }
-            } catch (e: APIException) {
-                isStageRunning = false
-                handleStageError(agent, e.error)
-            } catch (e: CancellationException) {
-                isStageRunning = false
-            } catch (e: Exception) {
-                isStageRunning = false
-                handleStageError(agent, e)
             }
+        } catch (_: TimeoutCancellationException) {
+            finishWithOutcome(TaskOutcome.TIMEOUT)
+            return
+        }
+
+        val trimmedResponse = fullResponse.trim()
+        if (trimmedResponse.isBlank() || _context.value.isPaused) return
+
+        val plannerOut = AutonomousTaskJsonParsers.parsePlannerOutput(trimmedResponse)
+        val sagaResp = parseSagaResponse(trimmedResponse)
+
+        val lastMsgId = agentForLlm.messages.lastOrNull()?.id
+        val chatMessage = ChatMessage(
+            message = trimmedResponse,
+            role = "assistant",
+            source = SourceType.AI,
+            timestamp = System.currentTimeMillis(),
+            taskId = currentContext.taskId,
+            taskState = currentContext.state.taskState,
+            parentId = lastMsgId,
+            llmRequestSnapshot = llmSnapshot
+        )
+        localRepository.saveMessage(
+            agentId = agent.id,
+            message = chatMessage,
+            taskId = currentContext.taskId,
+            taskState = currentContext.state.taskState
+        )
+
+        when {
+            plannerOut != null -> handlePlannerOutput(agent.id, plannerOut, trimmedResponse, sagaResp)
+            sagaResp != null -> handleLegacyPlannerSaga(agent.id, sagaResp)
+            else -> {
+                if (role.handleResponse(trimmedResponse, sagaResp) is RoleResult.Partial) {
+                    logVerbose("Planning partial (no JSON)")
+                }
+            }
+        }
+    }
+
+    private fun resolvePlanFromPlannerOutput(ctx: TaskContext, out: PlannerOutput, raw: String, sagaResp: SagaResponse?): PlanResult {
+        val base = when {
+            out.plan != null -> out.plan
+            sagaResp != null && sagaResp.status.equals("SUCCESS", ignoreCase = true) && sagaResp.result.isNotBlank() ->
+                PlanResult(
+                    goal = ctx.title,
+                    steps = listOf(sagaResp.result.trim()),
+                    successCriteria = "Satisfy the stated goal.",
+                    constraints = null,
+                    contextSummary = null
+                )
+            else -> AutonomousTaskJsonParsers.parsePlanResult(raw)
+                ?: PlanResult(
+                    goal = ctx.title,
+                    steps = ctx.plan.ifEmpty { listOf(raw.take(500)) },
+                    successCriteria = "Satisfy the stated goal.",
+                    constraints = null,
+                    contextSummary = null
+                )
+        }
+        return AutonomousTaskJsonParsers.normalizePlanResult(base).expandNumberedSteps()
+    }
+
+    private suspend fun handlePlannerOutput(sourceAgentId: String, out: PlannerOutput, raw: String, sagaResp: SagaResponse?) {
+        val ctx = _context.value
+        if (out.questions?.isNotEmpty() == true) {
+            updateStateInDb {
+                it.copy(
+                    runtimeState = it.runtimeState.copy(
+                        planningMessagesSinceCompress = it.runtimeState.planningMessagesSinceCompress + 1
+                    )
+                )
+            }
+            logVerbose("Planner has open questions")
+            return
+        }
+        if (!out.success) {
+            if (AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.DONE)) {
+                finishWithOutcome(TaskOutcome.FAILED)
+            }
+            return
+        }
+        val plan = resolvePlanFromPlannerOutput(ctx, out, raw, sagaResp)
+        if (out.requiresUserConfirmation) {
+            updateStateInDb {
+                it.copy(
+                    runtimeState = it.runtimeState.copy(
+                        planResult = plan,
+                        awaitingPlanConfirmation = true
+                    ),
+                    plan = plan.steps
+                )
+            }
+            logVerbose("Awaiting plan confirmation")
+            return
+        }
+        forceCompressPlanningContext()
+        transitionToNextState(
+            sourceAgentId = sourceAgentId,
+            from = TaskState.PLANNING,
+            to = TaskState.EXECUTION,
+            planResult = plan,
+            notification = "--- PLAN READY ---\n${plan.goal}"
+        )
+    }
+
+    private suspend fun handleLegacyPlannerSaga(sourceAgentId: String, sagaResp: SagaResponse) {
+        when (sagaResp.status.uppercase()) {
+            "FAILED" -> {
+                if (AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.DONE)) {
+                    finishWithOutcome(TaskOutcome.FAILED)
+                }
+            }
+            "SUCCESS" -> {
+                val ctx = _context.value
+                val plan = AutonomousTaskJsonParsers.normalizePlanResult(
+                    PlanResult(
+                        goal = ctx.title,
+                        steps = ctx.plan.ifEmpty { listOf(sagaResp.result) },
+                        successCriteria = sagaResp.result,
+                        constraints = null,
+                        contextSummary = null
+                    )
+                ).expandNumberedSteps()
+                updateStateInDb {
+                    it.copy(
+                        runtimeState = it.runtimeState.copy(
+                            planResult = plan,
+                            awaitingPlanConfirmation = true
+                        ),
+                        plan = plan.steps
+                    )
+                }
+                logVerbose("Legacy SUCCESS — awaiting confirmPlan()")
+            }
+            else -> {}
+        }
+    }
+
+    private fun runExecutionStage(agent: Agent?, role: ExecutorRole) {
+        if (agent == null) {
+            scope.launch { handleStageError(null, Exception("Агент для EXECUTION не назначен")) }
+            return
+        }
+        scope.launch {
+            stageMutex.withLock {
+                if (isStageRunning) return@launch
+                isStageRunning = true
+            }
+            try {
+                runExecutionStageLocked(agent, role)
+            } catch (e: APIException) {
+                handleStageError(agent, e.error)
+            } catch (e: Exception) {
+                handleStageError(agent, e)
+            } finally {
+                isStageRunning = false
+            }
+        }
+    }
+
+    private suspend fun runExecutionStageLocked(agent: Agent, role: ExecutorRole) {
+        val ctx = _context.value
+        if (ctx.isPaused) return
+        val agentForLlm = agentWithCurrentTaskMessages(agent)
+        val rs = ctx.runtimeState
+        val newRs = rs.copy(executionLlmCalls = rs.executionLlmCalls + 1, executionRetryCount = rs.executionRetryCount)
+        updateStateInDb { it.copy(runtimeState = newRs) }
+
+        if (AutonomousTaskStateMachine.shouldTimeoutExecution(newRs)) {
+            finishWithOutcome(TaskOutcome.TIMEOUT)
+            return
+        }
+
+        // После updateStateInDb: индекс шага и план из последнего persist (иначе залипание на шаге 0 из-за рассинхрона _context).
+        val snap = resolvedTaskContext()
+        val plan = snap.runtimeState.planResult ?: PlanResult(
+            goal = snap.title,
+            steps = snap.plan,
+            successCriteria = "",
+            constraints = null,
+            contextSummary = null
+        )
+        val stepIndex = snap.runtimeState.currentPlanStepIndex.coerceIn(0, (plan.steps.size - 1).coerceAtLeast(0))
+
+        val systemInstruction = role.getSystemInstruction(snap)
+        val fullSystemPrompt = role.buildSystemPrompt(agentForLlm, systemInstruction, memoryManager, includeUserProfile = false)
+
+        val userContent = TaskOrchestratorPrompts.executorUserContent(
+            plan = plan,
+            stepIndex = stepIndex,
+            lastVerification = snap.runtimeState.lastVerification,
+            workingMemory = snap.runtimeState.workingMemory
+        )
+        val contextMessages = listOf(
+            ChatMessage(
+                id = Uuid.random().toString(),
+                role = "user",
+                message = userContent,
+                timestamp = System.currentTimeMillis(),
+                taskId = snap.taskId,
+                taskState = TaskState.EXECUTION
+            )
+        )
+
+        val llmSnapshot = buildLlmRequestSnapshot(
+            effectiveSystemPrompt = fullSystemPrompt,
+            inputMessages = contextMessages,
+            agent = agentForLlm,
+            agentStageLabel = TaskState.EXECUTION.name,
+            isJsonMode = true
+        )
+
+        var fullResponse = ""
+        try {
+            withTimeout(DEFAULT_LLM_TIMEOUT_MS) {
+                repository.chatStreaming(
+                    messages = contextMessages,
+                    systemPrompt = fullSystemPrompt,
+                    maxTokens = agent.maxTokens,
+                    temperature = agent.temperature,
+                    stopWord = agent.stopWord,
+                    isJsonMode = true,
+                    provider = agent.provider
+                ).collect { result ->
+                    result.onSuccess { chunk -> fullResponse += chunk }
+                        .onFailure { throw APIException(it) }
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            finishWithOutcome(TaskOutcome.TIMEOUT)
+            return
+        }
+
+        if (fullResponse.isBlank() || _context.value.isPaused) return
+
+        val execResult = AutonomousTaskJsonParsers.parseExecutionResult(fullResponse)
+            ?: run {
+                val retry = _context.value.runtimeState.executionRetryCount
+                val maxRetries = _context.value.runtimeState.maxRetries
+                if (retry < maxRetries) {
+                    updateStateInDb {
+                        it.copy(runtimeState = it.runtimeState.copy(executionRetryCount = retry + 1))
+                    }
+                    runExecutionStageLocked(agent, role)
+                } else {
+                    if (AutonomousTaskStateMachine.canTransition(TaskState.EXECUTION, TaskState.DONE)) {
+                        finishWithOutcome(TaskOutcome.FAILED)
+                    }
+                }
+                return
+            }
+
+        val lastMsgId = agentForLlm.messages.lastOrNull()?.id
+        localRepository.saveMessage(
+            agentId = agent.id,
+            message = ChatMessage(
+                message = fullResponse,
+                role = "assistant",
+                source = SourceType.AI,
+                timestamp = System.currentTimeMillis(),
+                taskId = snap.taskId,
+                taskState = TaskState.EXECUTION,
+                parentId = lastMsgId,
+                llmRequestSnapshot = llmSnapshot
+            ),
+            taskId = snap.taskId,
+            taskState = TaskState.EXECUTION
+        )
+
+        updateStateInDb {
+            it.copy(
+                runtimeState = it.runtimeState.copy(
+                    lastExecution = execResult,
+                    executionRetryCount = if (execResult.success) 0 else it.runtimeState.executionRetryCount,
+                    workingMemory = listOfNotNull(it.runtimeState.workingMemory, execResult.output).joinToString("\n").take(8000)
+                )
+            )
+        }
+
+        if (!execResult.success) {
+            val retry = _context.value.runtimeState.executionRetryCount
+            if (retry < _context.value.runtimeState.maxRetries) {
+                updateStateInDb { it.copy(runtimeState = it.runtimeState.copy(executionRetryCount = retry + 1)) }
+                runExecutionStageLocked(agent, role)
+                return
+            }
+            if (AutonomousTaskStateMachine.canTransition(TaskState.EXECUTION, TaskState.DONE)) {
+                finishWithOutcome(TaskOutcome.FAILED)
+            }
+            return
+        }
+
+        transitionToNextState(
+            sourceAgentId = agent.id,
+            from = TaskState.EXECUTION,
+            to = TaskState.VERIFICATION,
+            planResult = plan,
+            notification = "--- EXECUTION OK ---\n${execResult.output.take(300)}"
+        )
+    }
+
+    private fun runVerificationStage(agent: Agent?, role: ValidatorRole) {
+        if (agent == null) {
+            scope.launch { handleStageError(null, Exception("Агент для VERIFICATION не назначен")) }
+            return
+        }
+        scope.launch {
+            stageMutex.withLock {
+                if (isStageRunning) return@launch
+                isStageRunning = true
+            }
+            try {
+                runVerificationStageLocked(agent, role)
+            } catch (e: APIException) {
+                handleStageError(agent, e.error)
+            } catch (e: Exception) {
+                handleStageError(agent, e)
+            } finally {
+                isStageRunning = false
+            }
+        }
+    }
+
+    private suspend fun runVerificationStageLocked(agent: Agent, role: ValidatorRole) {
+        val ctx = _context.value
+        if (ctx.isPaused) return
+        val agentForLlm = agentWithCurrentTaskMessages(agent)
+        val rs = ctx.runtimeState
+        val newRs = rs.copy(verificationLlmCalls = rs.verificationLlmCalls + 1, verificationRetryCount = rs.verificationRetryCount)
+        updateStateInDb { it.copy(runtimeState = newRs) }
+
+        if (AutonomousTaskStateMachine.shouldTimeoutVerification(newRs)) {
+            finishWithOutcome(TaskOutcome.TIMEOUT)
+            return
+        }
+
+        val systemInstruction = role.getSystemInstruction(ctx)
+        val fullSystemPrompt = role.buildSystemPrompt(agentForLlm, systemInstruction, memoryManager, includeUserProfile = false)
+
+        val planningTranscript = localRepository.getMessagesForTask(ctx.taskId).first()
+            .asSequence()
+            .filter { it.taskId == ctx.taskId && it.taskState == TaskState.PLANNING }
+            .sortedBy { it.timestamp }
+            .joinToString(separator = "\n\n---\n\n") { msg ->
+                val label = when (msg.source) {
+                    SourceType.USER -> "user"
+                    SourceType.AI, SourceType.ASSISTANT -> "assistant"
+                    else -> msg.role.ifBlank { "system" }
+                }
+                "[$label]\n${msg.message}"
+            }
+            .take(16_000)
+            .ifBlank { null }
+
+        // Снимок из persist: в промпт инспектора — lastExecution последнего исполнения (см. resolvedTaskContext).
+        val snap = resolvedTaskContext()
+        val planForInspector = snap.runtimeState.planResult ?: PlanResult(
+            goal = snap.title,
+            steps = snap.plan,
+            successCriteria = "",
+            constraints = null,
+            contextSummary = null
+        )
+        val execForInspector = snap.runtimeState.lastExecution
+            ?: ExecutionResult(false, "", listOf("No execution"))
+
+        val userContent = TaskOrchestratorPrompts.inspectorUserContent(
+            plan = planForInspector,
+            execution = execForInspector,
+            successCriteria = planForInspector.successCriteria,
+            planningPhaseTranscript = planningTranscript
+        )
+        val contextMessages = listOf(
+            ChatMessage(
+                id = Uuid.random().toString(),
+                role = "user",
+                message = userContent,
+                timestamp = System.currentTimeMillis(),
+                taskId = ctx.taskId,
+                taskState = TaskState.VERIFICATION
+            )
+        )
+
+        val llmSnapshot = buildLlmRequestSnapshot(
+            effectiveSystemPrompt = fullSystemPrompt,
+            inputMessages = contextMessages,
+            agent = agentForLlm,
+            agentStageLabel = TaskState.VERIFICATION.name,
+            isJsonMode = true
+        )
+
+        var fullResponse = ""
+        try {
+            withTimeout(DEFAULT_LLM_TIMEOUT_MS) {
+                repository.chatStreaming(
+                    messages = contextMessages,
+                    systemPrompt = fullSystemPrompt,
+                    maxTokens = agent.maxTokens,
+                    temperature = agent.temperature,
+                    stopWord = agent.stopWord,
+                    isJsonMode = true,
+                    provider = agent.provider
+                ).collect { result ->
+                    result.onSuccess { chunk -> fullResponse += chunk }
+                        .onFailure { throw APIException(it) }
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            finishWithOutcome(TaskOutcome.TIMEOUT)
+            return
+        }
+
+        if (fullResponse.isBlank() || _context.value.isPaused) return
+
+        val verResult = AutonomousTaskJsonParsers.parseVerificationResult(fullResponse)
+            ?: run {
+                val retry = _context.value.runtimeState.verificationRetryCount
+                val maxRetries = _context.value.runtimeState.maxRetries
+                if (retry < maxRetries) {
+                    updateStateInDb {
+                        it.copy(runtimeState = it.runtimeState.copy(verificationRetryCount = retry + 1))
+                    }
+                    runVerificationStageLocked(agent, role)
+                } else {
+                    finishWithOutcome(TaskOutcome.FAILED)
+                }
+                return
+            }
+
+        val lastMsgId = agentForLlm.messages.lastOrNull()?.id
+        localRepository.saveMessage(
+            agentId = agent.id,
+            message = ChatMessage(
+                message = fullResponse,
+                role = "assistant",
+                source = SourceType.AI,
+                timestamp = System.currentTimeMillis(),
+                taskId = ctx.taskId,
+                taskState = TaskState.VERIFICATION,
+                parentId = lastMsgId,
+                llmRequestSnapshot = llmSnapshot
+            ),
+            taskId = ctx.taskId,
+            taskState = TaskState.VERIFICATION
+        )
+
+        updateStateInDb {
+            it.copy(
+                runtimeState = it.runtimeState.copy(
+                    lastVerification = verResult,
+                    verificationRetryCount = if (verResult.success) 0 else it.runtimeState.verificationRetryCount
+                )
+            )
+        }
+
+        val postVerify = resolvedTaskContext()
+        val stepIndex = postVerify.runtimeState.currentPlanStepIndex
+        val planForStepDecision = postVerify.runtimeState.planResult ?: PlanResult(
+            goal = postVerify.title,
+            steps = postVerify.plan,
+            successCriteria = "",
+            constraints = null,
+            contextSummary = null
+        )
+        val lastIndex = planForStepDecision.steps.lastIndex.coerceAtLeast(0)
+
+        if (verResult.success) {
+            if (stepIndex >= lastIndex) {
+                if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.DONE)) {
+                    updateStateInDb {
+                        it.copy(
+                            state = it.state.copy(taskState = TaskState.DONE),
+                            runtimeState = it.runtimeState.copy(
+                                stage = TaskState.DONE,
+                                outcome = TaskOutcome.SUCCESS,
+                                lastVerification = null
+                            ),
+                            step = it.step + 1
+                        )
+                    }
+                    notifySystem("--- TASK SUCCESS ---", TaskState.VERIFICATION)
+                }
+            } else {
+                val nextIndex = stepIndex + 1
+                if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
+                    val nextStepText = planForStepDecision.steps.getOrNull(nextIndex)
+                    notifyStageEntry(TaskState.EXECUTION)
+                    notifySystem("--- NEXT STEP ---\n$nextStepText", TaskState.EXECUTION)
+                    // До persist снимаем блокировку: иначе collect(processCurrentState) запускает EXECUTION,
+                    // пока isStageRunning ещё true, launch отменяется; затем явный processCurrentState()
+                    // дублирует запуск после снятия блокировки → второй LLM-вызов исполнителя на том же шаге.
+                    isStageRunning = false
+                    updateStateInDb {
+                        it.copy(
+                            state = it.state.copy(taskState = TaskState.EXECUTION),
+                            runtimeState = it.runtimeState.copy(
+                                currentPlanStepIndex = nextIndex,
+                                stepCount = it.runtimeState.stepCount + 1,
+                                lastVerification = null,
+                                executionRetryCount = 0
+                            ),
+                            currentPlanStep = nextStepText,
+                            step = it.step + 1
+                        )
+                    }
+                }
+            }
+        } else {
+            val retry = _context.value.runtimeState.verificationRetryCount
+            if (retry < _context.value.runtimeState.maxRetries) {
+                updateStateInDb { it.copy(runtimeState = it.runtimeState.copy(verificationRetryCount = retry + 1)) }
+                if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
+                    notifyStageEntry(TaskState.EXECUTION)
+                    isStageRunning = false
+                    updateStateInDb {
+                        it.copy(state = it.state.copy(taskState = TaskState.EXECUTION))
+                    }
+                }
+            } else {
+                if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
+                    notifyStageEntry(TaskState.EXECUTION)
+                    isStageRunning = false
+                    updateStateInDb {
+                        it.copy(state = it.state.copy(taskState = TaskState.EXECUTION))
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun transitionToNextState(
+        sourceAgentId: String,
+        from: TaskState,
+        to: TaskState,
+        planResult: PlanResult?,
+        notification: String
+    ) {
+        // Снимаем блокировку до persist, иначе collect { processCurrentState } пропустит следующую стадию
+        isStageRunning = false
+        if (!AutonomousTaskStateMachine.canTransition(from, to)) return
+        val currentAgent = when (from) {
+            TaskState.PLANNING -> architect
+            TaskState.EXECUTION -> executor
+            TaskState.VERIFICATION -> validator
+            else -> null
+        }
+        val lastMsgId = currentAgent?.let { agentWithCurrentTaskMessages(it).messages.lastOrNull()?.id }
+        localRepository.saveMessage(
+            agentId = sourceAgentId,
+            message = ChatMessage(
+                message = notification,
+                role = "system",
+                source = SourceType.SYSTEM,
+                timestamp = System.currentTimeMillis(),
+                taskId = _context.value.taskId,
+                taskState = from,
+                isSystemNotification = true,
+                parentId = lastMsgId
+            ),
+            taskId = _context.value.taskId,
+            taskState = from
+        )
+
+        // До persist: иначе saveTask синхронно эмитит getTasks → processCurrentState() и LLM
+        // следующего этапа стартует раньше, чем появится «▶ Начинается этап…» в ленте.
+        notifyStageEntry(to)
+
+        updateStateInDb {
+            val newPlan = planResult?.steps ?: it.plan
+            it.copy(
+                state = it.state.copy(taskState = to),
+                plan = newPlan,
+                currentPlanStep = planResult?.steps?.firstOrNull(),
+                runtimeState = it.runtimeState.copy(
+                    stage = to,
+                    planResult = planResult ?: it.runtimeState.planResult,
+                    // Явно сохраняем результат последнего исполнения при переходе EXECUTION → VERIFICATION.
+                    lastExecution = it.runtimeState.lastExecution,
+                    awaitingPlanConfirmation = false,
+                    // После EXECUTION индекс шага не сбрасываем — иначе инспектор/сага видят «шаг 0» после 2+ шага.
+                    currentPlanStepIndex = when (from) {
+                        TaskState.EXECUTION -> it.runtimeState.currentPlanStepIndex
+                        else -> 0
+                    },
+                    stepCount = it.runtimeState.stepCount + 1
+                ),
+                step = it.step + 1
+            )
+        }
+    }
+
+    private suspend fun finishWithOutcome(outcome: TaskOutcome) {
+        isStageRunning = false
+        val ctx = _context.value
+        if (!AutonomousTaskStateMachine.canTransition(ctx.state.taskState, TaskState.DONE)) return
+        updateStateInDb {
+            it.copy(
+                isPaused = true,
+                state = it.state.copy(taskState = TaskState.DONE),
+                runtimeState = it.runtimeState.copy(stage = TaskState.DONE, outcome = outcome)
+            )
+        }
+        notifySystem("--- TASK END: $outcome ---", ctx.state.taskState)
+    }
+
+    private suspend fun notifySystem(text: String, taskState: TaskState) {
+        val agentId = getValidAgentId() ?: return
+        localRepository.saveMessage(
+            agentId = agentId,
+            message = ChatMessage(
+                message = text,
+                role = "system",
+                source = SourceType.SYSTEM,
+                timestamp = System.currentTimeMillis(),
+                taskId = _context.value.taskId,
+                taskState = taskState,
+                isSystemNotification = true
+            ),
+            taskId = _context.value.taskId,
+            taskState = taskState
+        )
+    }
+
+    /**
+     * Системное сообщение о входе в этап (видно в общей ленте задачи).
+     * [taskState] — этап, который начинается (метка пузыря в UI).
+     */
+    private suspend fun notifyStageEntry(stage: TaskState) {
+        val text = when (stage) {
+            TaskState.PLANNING -> "▶ Начинается этап: планирование (архитектор)"
+            TaskState.EXECUTION -> "▶ Начинается этап: исполнение (исполнитель)"
+            TaskState.VERIFICATION -> "▶ Начинается этап: проверка (инспектор)"
+            TaskState.DONE -> "▶ Задача завершена"
+        }
+        val taskId = _context.value.taskId
+        val lastId = localRepository.getMessagesForTask(taskId).first().lastOrNull()?.id
+        val agentId = getValidAgentId() ?: return
+        localRepository.saveMessage(
+            agentId = agentId,
+            message = ChatMessage(
+                message = text,
+                role = "system",
+                source = SourceType.SYSTEM,
+                timestamp = System.currentTimeMillis(),
+                taskId = taskId,
+                taskState = stage,
+                isSystemNotification = true,
+                parentId = lastId
+            ),
+            taskId = taskId,
+            taskState = stage
+        )
+    }
+
+    private fun logVerbose(msg: String) {
+        if (_context.value.runtimeState.verbose) {
+            println("[TaskSaga] ${_context.value.taskId}: $msg")
+        }
+    }
+
+    private suspend fun maybeCompressPlanningDuringDialog(agent: Agent) {
+        val ctx = _context.value
+        val rs = ctx.runtimeState
+        if (!rs.autoCompress) return
+        if (rs.planningMessagesSinceCompress < rs.compressAfterMessages) return
+        forceCompressPlanningContext()
+        updateStateInDb {
+            it.copy(runtimeState = it.runtimeState.copy(planningMessagesSinceCompress = 0))
+        }
+    }
+
+    private suspend fun forceCompressPlanningContext() {
+        val architectAgent = architect ?: return
+        val withTaskMessages = agentWithCurrentTaskMessages(architectAgent)
+        val summaryInstr = (withTaskMessages.memoryStrategy as? ChatMemoryStrategy.Summarization)?.summaryPrompt
+            ?: "Summarize the planning conversation: goals, constraints, and agreed steps briefly."
+        val result = repository.summarize(
+            messages = withTaskMessages.messages,
+            previousSummary = (withTaskMessages.memoryStrategy as? ChatMemoryStrategy.Summarization)?.summary,
+            instruction = summaryInstr,
+            provider = withTaskMessages.provider
+        )
+        val summary = result.getOrNull() ?: return
+        val updated = when (val s = withTaskMessages.memoryStrategy) {
+            is ChatMemoryStrategy.Summarization -> withTaskMessages.copy(memoryStrategy = s.copy(summary = summary))
+            else -> withTaskMessages.copy(memoryStrategy = ChatMemoryStrategy.Summarization(windowSize = 50, summary = summary))
+        }
+        localRepository.saveAgentMetadata(updated)
+        updateStateInDb {
+            it.copy(
+                runtimeState = it.runtimeState.copy(
+                    workingMemory = listOfNotNull(it.runtimeState.workingMemory, summary).joinToString("\n").take(8000)
+                )
+            )
         }
     }
 
@@ -250,14 +1054,14 @@ class TaskSaga(
         val currentContext = _context.value
         val agentId = agent?.id ?: getValidAgentId() ?: return
         val lastMsgId = agent?.messages?.lastOrNull()?.id
-        
+
         val agentName = agent?.name ?: when (agentId) {
             currentContext.architectAgentId -> "Architect"
             currentContext.executorAgentId -> "Executor"
             currentContext.validatorAgentId -> "Validator"
             else -> null
         }
-        
+
         val taskId = currentContext.taskId
         val taskState = currentContext.state.taskState
 
@@ -282,9 +1086,9 @@ class TaskSaga(
     fun handleUserMessage(message: String) {
         if (_context.value.state.taskState != TaskState.PLANNING) return
         val activeAgent = architect ?: return
-        
+
         scope.launch {
-            val lastMessage = activeAgent.messages.lastOrNull()
+            val lastMessage = localRepository.getMessagesForTask(_context.value.taskId).first().lastOrNull()
 
             val chatMessage = ChatMessage(
                 message = message,
@@ -293,7 +1097,7 @@ class TaskSaga(
                 timestamp = System.currentTimeMillis(),
                 taskId = _context.value.taskId,
                 taskState = TaskState.PLANNING,
-                parentId = lastMessage?.id 
+                parentId = lastMessage?.id
             )
             localRepository.saveMessage(
                 agentId = activeAgent.id,
@@ -301,119 +1105,25 @@ class TaskSaga(
                 taskId = _context.value.taskId,
                 taskState = TaskState.PLANNING
             )
-            
+
+            updateStateInDb {
+                it.copy(
+                    runtimeState = it.runtimeState.copy(
+                        planningMessagesSinceCompress = it.runtimeState.planningMessagesSinceCompress + 1
+                    )
+                )
+            }
+
             if (!_context.value.isPaused) {
                 processCurrentState()
             }
         }
     }
 
-    private suspend fun transitionToNext(sourceAgentId: String, result: String) {
-        val currentState = _context.value.state.taskState
-        val nextState = when (currentState) {
-            TaskState.PLANNING -> TaskState.EXECUTION
-            TaskState.EXECUTION -> TaskState.VALIDATION
-            TaskState.VALIDATION -> TaskState.DONE
-            TaskState.DONE -> TaskState.DONE
-        }
-        
-        val currentAgent = when(currentState) {
-            TaskState.PLANNING -> architect
-            TaskState.EXECUTION -> executor
-            TaskState.VALIDATION -> validator
-            else -> null
-        }
-
-        if (currentState == TaskState.PLANNING && nextState == TaskState.EXECUTION) {
-            compressPlanningContext(currentAgent)
-        }
-
-        val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
-
-        val notification = ChatMessage(
-            message = "--- STAGE SUCCESS ---\nResult: $result",
-            role = "system",
-            source = SourceType.SYSTEM,
-            timestamp = System.currentTimeMillis(),
-            taskId = _context.value.taskId,
-            taskState = currentState,
-            isSystemNotification = true,
-            parentId = lastMsgId
-        )
-        localRepository.saveMessage(
-            agentId = sourceAgentId,
-            message = notification,
-            taskId = _context.value.taskId,
-            taskState = currentState
-        )
-
-        updateStateInDb { 
-            it.copy(
-                state = it.state.copy(taskState = nextState),
-                step = it.step + 1
-            )
-        }
-    }
-
-    private suspend fun compressPlanningContext(agent: Agent?) {
-        val architectAgent = agent ?: return
-        if (architectAgent.memoryStrategy is ChatMemoryStrategy.Summarization) {
-            val result = repository.summarize(
-                messages = architectAgent.messages,
-                previousSummary = null,
-                instruction = architectAgent.memoryStrategy.summaryPrompt,
-                provider = architectAgent.provider
-            )
-            result.onSuccess { summary ->
-                val updatedAgent = architectAgent.copy(
-                    memoryStrategy = architectAgent.memoryStrategy.copy(summary = summary)
-                )
-                localRepository.saveAgentMetadata(updatedAgent)
-            }
-        }
-    }
-
-    private suspend fun transitionBack(sourceAgentId: String, reason: String) {
-        val currentState = _context.value.state.taskState
-        val prevState = when (currentState) {
-            TaskState.EXECUTION -> TaskState.PLANNING
-            TaskState.VALIDATION -> TaskState.EXECUTION
-            else -> currentState
-        }
-        
-        val currentAgent = when(currentState) {
-            TaskState.PLANNING -> architect
-            TaskState.EXECUTION -> executor
-            TaskState.VALIDATION -> validator
-            else -> null
-        }
-        val lastMsgId = currentAgent?.messages?.lastOrNull()?.id
-
-        val notification = ChatMessage(
-            message = "--- STAGE FAILED/REJECTED ---\nReason: $reason",
-            role = "system",
-            source = SourceType.SYSTEM,
-            timestamp = System.currentTimeMillis(),
-            taskId = _context.value.taskId,
-            taskState = currentState,
-            isSystemNotification = true,
-            parentId = lastMsgId
-        )
-        localRepository.saveMessage(
-            agentId = sourceAgentId,
-            message = notification,
-            taskId = _context.value.taskId,
-            taskState = currentState
-        )
-        updateStateInDb { 
-            it.copy(state = it.state.copy(taskState = prevState))
-        }
-    }
-    
     private fun parseSagaResponse(text: String): SagaResponse? {
         return try {
-            val start = text.indexOf("{")
-            val end = text.lastIndexOf("}")
+            val start = text.indexOf('{')
+            val end = text.lastIndexOf('}')
             if (start != -1 && end != -1) {
                 val jsonStr = text.substring(start, end + 1)
                 json.decodeFromString<SagaResponse>(jsonStr)
@@ -423,3 +1133,4 @@ class TaskSaga(
         }
     }
 }
+

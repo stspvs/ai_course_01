@@ -51,6 +51,7 @@ open class AgentManagementUseCase(
             name = params.name,
             systemPrompt = params.systemPrompt,
             temperature = params.temperature,
+            provider = params.provider,
             maxTokens = params.maxTokens,
             stopWord = params.stopWord,
             memoryStrategy = params.memoryStrategy

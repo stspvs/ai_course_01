@@ -58,7 +58,8 @@ interface ChatRepository {
     fun observeAllAgents(): Flow<List<AgentState>> = kotlinx.coroutines.flow.flowOf(emptyList())
 
     /**
-     * Очищает чат и разговорную память агента задачи ([agentId] == [taskId]), сохраняя системные поля (промпт, температуру и т.д.).
+     * Удаляет сообщения задачи и сбрасывает разговорную память у агентов, связанных с задачей
+     * (в т.ч. архитектор/исполнитель/валидатор по id из [TaskContext]), сохраняя системные поля агента.
      */
     suspend fun resetTaskConversation(taskId: String): Result<Unit> = Result.success(Unit)
 }

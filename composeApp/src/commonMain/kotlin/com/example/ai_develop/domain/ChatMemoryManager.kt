@@ -1,15 +1,29 @@
 package com.example.ai_develop.domain
 
 class ChatMemoryManager {
-    
+
+    /**
+     * Обрезает историю под [ChatMemoryStrategy.windowSize].
+     *
+     * Сначала восстанавливается ветка по [parentId] ([getBranchHistory]). Если цепочка оборвана
+     * (частые случаи в task-чате: не у всех сообщений заполнен parent), ветка содержит только
+     * хвост из одного узла — тогда для **линейного** чата (`agentBranches` пуст) берём сообщения
+     * в порядке [ChatMessage.timestamp] и [takeLast] по окну стратегии.
+     */
     fun processMessages(
         messages: List<ChatMessage>,
         strategy: ChatMemoryStrategy,
         currentBranchId: String? = null,
         agentBranches: List<ChatBranch> = emptyList()
     ): List<ChatMessage> {
+        val linearSorted = messages.sortedWith(compareBy({ it.timestamp }, { it.id }))
         val branchMessages = getBranchHistory(messages, currentBranchId, agentBranches)
-        return branchMessages.takeLast(strategy.windowSize)
+        val useLinearFallback =
+            agentBranches.isEmpty() &&
+                branchMessages.size < linearSorted.size &&
+                linearSorted.isNotEmpty()
+        val effectiveHistory = if (useLinearFallback) linearSorted else branchMessages
+        return effectiveHistory.takeLast(strategy.windowSize)
     }
 
     fun getBranchHistory(
@@ -62,19 +76,21 @@ class ChatMemoryManager {
 
     /**
      * Формирует системный промпт, включая данные из профиля пользователя и рабочей памяти.
+     * @param includeUserProfile для Executor/Inspector в task-саге — false (по спецификации).
      */
-    fun wrapSystemPrompt(agent: Agent): String {
+    fun wrapSystemPrompt(agent: Agent, includeUserProfile: Boolean = true): String {
         val promptBuilder = StringBuilder(agent.systemPrompt)
         
-        // 1. Personalization (User Profile)
-        agent.userProfile?.let { profile ->
-            if (profile.preferences.isNotEmpty() || profile.constraints.isNotEmpty()) {
-                promptBuilder.append("\n\n=== USER PERSONALIZATION ===\n")
-                if (profile.preferences.isNotEmpty()) {
-                    promptBuilder.append("User Preferences (Style, Format, Tone): ${profile.preferences}\n")
-                }
-                if (profile.constraints.isNotEmpty()) {
-                    promptBuilder.append("User Constraints (What NOT to use): ${profile.constraints}\n")
+        if (includeUserProfile) {
+            agent.userProfile?.let { profile ->
+                if (profile.preferences.isNotEmpty() || profile.constraints.isNotEmpty()) {
+                    promptBuilder.append("\n\n=== USER PERSONALIZATION ===\n")
+                    if (profile.preferences.isNotEmpty()) {
+                        promptBuilder.append("User Preferences (Style, Format, Tone): ${profile.preferences}\n")
+                    }
+                    if (profile.constraints.isNotEmpty()) {
+                        promptBuilder.append("User Constraints (What NOT to use): ${profile.constraints}\n")
+                    }
                 }
             }
         }

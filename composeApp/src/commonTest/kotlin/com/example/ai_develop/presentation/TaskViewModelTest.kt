@@ -1,5 +1,6 @@
 package com.example.ai_develop.presentation
 
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,8 +62,35 @@ class TaskViewModelTest {
         }
     }
 
-    private class FakeChatRepo(
+    private class FakeLocalChatRepo(
+        private val taskRepo: FakeTaskRepository,
         private val messageRepo: FakeMessageRepository
+    ) : LocalChatRepository {
+        override fun getAgents(): Flow<List<Agent>> = flowOf(emptyList())
+        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = flowOf(null)
+        override suspend fun saveAgent(agent: Agent): Result<Unit> = Result.success(Unit)
+        override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> = Result.success(Unit)
+        override suspend fun saveMessage(
+            agentId: String,
+            message: ChatMessage,
+            taskId: String?,
+            taskState: TaskState?
+        ): Result<Unit> = messageRepo.saveMessage(agentId, message, taskId, taskState)
+
+        override suspend fun deleteAgent(agentId: String) {}
+        override fun getTasks(): Flow<List<TaskContext>> = taskRepo.getTasks()
+        override suspend fun saveTask(task: TaskContext): Result<Unit> = taskRepo.saveTask(task)
+        override suspend fun deleteTask(task: TaskContext): Result<Unit> = taskRepo.deleteTask(task)
+        override fun getMessagesForTask(taskId: String): Flow<List<ChatMessage>> =
+            messageRepo.getMessagesForTask(taskId)
+
+        override suspend fun deleteMessagesForTask(taskId: String): Result<Unit> =
+            messageRepo.deleteMessagesForTask(taskId)
+    }
+
+    private class FakeChatRepo(
+        private val messageRepo: FakeMessageRepository,
+        private val taskRepo: FakeTaskRepository
     ) : ChatRepository {
         private val states = mutableMapOf<String, AgentState>()
         private val stateFlows = mutableMapOf<String, MutableStateFlow<AgentState?>>()
@@ -98,16 +126,27 @@ class TaskViewModelTest {
 
         override suspend fun resetTaskConversation(taskId: String): Result<Unit> = runCatching {
             messageRepo.deleteMessagesForTask(taskId)
-            val state = states[taskId] ?: return@runCatching
-            val cleared = state.copy(
-                workingMemory = state.workingMemory.clearConversation(),
-                memoryStrategy = state.memoryStrategy.clearConversationData(),
-                messages = emptyList(),
-                plan = AgentPlan(),
-                currentStepId = null,
-                currentStage = AgentStage.PLANNING
-            )
-            saveAgentState(cleared)
+            val task = taskRepo.getTask(taskId)
+            val agentIds = buildSet {
+                add(taskId)
+                task?.architectAgentId?.let { add(it) }
+                task?.executorAgentId?.let { add(it) }
+                task?.validatorAgentId?.let { add(it) }
+            }
+            for (id in agentIds) {
+                val state = states[id] ?: continue
+                val cleared = state.copy(
+                    workingMemory = state.workingMemory.clearConversation(),
+                    memoryStrategy = state.memoryStrategy.clearConversationData(),
+                    messages = state.messages.filterNot { msg ->
+                        msg.taskId == taskId || (msg.taskId == null && id == taskId)
+                    },
+                    plan = AgentPlan(),
+                    currentStepId = null,
+                    currentStage = AgentStage.PLANNING
+                )
+                saveAgentState(cleared)
+            }
         }
 
         override suspend fun getAgentState(agentId: String): AgentState? = states[agentId]
@@ -138,21 +177,25 @@ class TaskViewModelTest {
         Dispatchers.setMain(testDispatcher)
         taskRepo = FakeTaskRepository()
         messageRepo = FakeMessageRepository()
-        chatRepo = FakeChatRepo(messageRepo)
-        
+        chatRepo = FakeChatRepo(messageRepo, taskRepo)
+        val localChatRepo = FakeLocalChatRepo(taskRepo, messageRepo)
+        val taskSagaCoordinator = TaskSagaCoordinator(chatRepo, localChatRepo, ChatMemoryManager(), testDispatcher)
+
         val chatStreamingUseCase = ChatStreamingUseCase(chatRepo, ChatMemoryManager(), CoroutineScope(testDispatcher))
         val agentFactory = DefaultAgentFactory()
 
         viewModel = TaskViewModel(
             getTasksUseCase = GetTasksUseCase(taskRepo),
+            getTaskUseCase = GetTaskUseCase(taskRepo),
             createTaskUseCase = CreateTaskUseCase(taskRepo),
             updateTaskUseCase = UpdateTaskUseCase(taskRepo),
             deleteTaskUseCase = DeleteTaskUseCase(taskRepo),
             resetTaskUseCase = ResetTaskUseCase(chatRepo, chatStreamingUseCase),
             getMessagesUseCase = GetMessagesUseCase(messageRepo),
             chatStreamingUseCase = chatStreamingUseCase,
-            getAgentsUseCase = GetAgentsUseCase(chatRepo),
-            agentFactory = agentFactory
+            getAgentsUseCase = GetAgentsUseCase(localChatRepo),
+            agentFactory = agentFactory,
+            taskSagaCoordinator = taskSagaCoordinator
         )
     }
 

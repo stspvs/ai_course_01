@@ -26,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -783,16 +782,7 @@ private fun ChatInputArea(
                 onValueChange = onInputChange,
                 modifier = Modifier
                     .weight(1f)
-                    .onKeyEvent { keyEvent ->
-                        if (keyEvent.key == Key.Enter && keyEvent.type == KeyEventType.KeyDown) {
-                            if (input.isNotBlank()) {
-                                onSendMessage(input)
-                            }
-                            true
-                        } else {
-                            false
-                        }
-                    },
+                    .sendMessageOnEnter(input) { onSendMessage(input) },
                 placeholder = { Text("Сообщение...") },
                 shape = RoundedCornerShape(24.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),

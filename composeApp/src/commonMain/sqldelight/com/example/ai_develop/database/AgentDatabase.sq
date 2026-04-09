@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS AgentStateEntity (
     currentStepId TEXT,
     planJson TEXT NOT NULL, -- JSON AgentPlan
     memoryStrategyJson TEXT NOT NULL DEFAULT '', -- JSON ChatMemoryStrategy
-    workingMemoryJson TEXT NOT NULL DEFAULT '' -- JSON WorkingMemory
+    workingMemoryJson TEXT NOT NULL DEFAULT '', -- JSON WorkingMemory
+    llmProviderJson TEXT -- JSON LLMProvider (основная модель чата)
 );
 
 CREATE TABLE IF NOT EXISTS ProfileEntity (
@@ -60,16 +61,17 @@ CREATE TABLE IF NOT EXISTS TaskEntity (
     architectColor INTEGER NOT NULL DEFAULT 0,
     executorColor INTEGER NOT NULL DEFAULT 0,
     validatorColor INTEGER NOT NULL DEFAULT 0,
-    createdAt INTEGER NOT NULL
+    createdAt INTEGER NOT NULL,
+    runtimeStateJson TEXT NOT NULL DEFAULT '{}'
 );
 
 -- Queries
 saveAgentState:
 INSERT OR REPLACE INTO AgentStateEntity(
     agentId, name, systemPrompt, temperature, maxTokens, stopWord,
-    currentStage, currentStepId, planJson, memoryStrategyJson, workingMemoryJson
+    currentStage, currentStepId, planJson, memoryStrategyJson, workingMemoryJson, llmProviderJson
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getAgentState:
 SELECT * FROM AgentStateEntity WHERE agentId = ?;
@@ -115,9 +117,10 @@ saveTask:
 INSERT OR REPLACE INTO TaskEntity(
     taskId, title, taskState, isPaused, step, planJson, planDoneJson,
     currentPlanStep, totalCount, architectAgentId, executorAgentId,
-    validatorAgentId, architectColor, executorColor, validatorColor, createdAt
+    validatorAgentId, architectColor, executorColor, validatorColor, createdAt,
+    runtimeStateJson
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getTask:
 SELECT * FROM TaskEntity WHERE taskId = ?;

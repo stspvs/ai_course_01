@@ -10,6 +10,20 @@ class ChatMemoryManagerTest {
     private val manager = ChatMemoryManager()
 
     @Test
+    fun testBrokenParentChainFallsBackToChronologicalWindow() {
+        val messages = listOf(
+            ChatMessage(id = "1", message = "M1", timestamp = 100L, source = SourceType.USER),
+            ChatMessage(id = "2", message = "M2", timestamp = 200L, source = SourceType.ASSISTANT),
+            ChatMessage(id = "3", parentId = "2", message = "M3", timestamp = 300L, source = SourceType.USER),
+            ChatMessage(id = "4", parentId = "3", message = "M4", timestamp = 400L, source = SourceType.ASSISTANT)
+        )
+        val strategy = ChatMemoryStrategy.SlidingWindow(windowSize = 10)
+        val processed = manager.processMessages(messages, strategy, null, emptyList())
+        assertEquals(4, processed.size)
+        assertEquals(listOf("M1", "M2", "M3", "M4"), processed.map { it.message })
+    }
+
+    @Test
     fun testSlidingWindowProcessing() {
         val messages = listOf(
             ChatMessage(id = "1", message = "M1", source = SourceType.USER),

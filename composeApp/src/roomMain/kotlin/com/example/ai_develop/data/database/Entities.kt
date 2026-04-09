@@ -70,5 +70,6 @@ data class TaskEntity(
     val architectColor: Long,
     val executorColor: Long,
     val validatorColor: Long,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val runtimeStateJson: String = "{}"
 )

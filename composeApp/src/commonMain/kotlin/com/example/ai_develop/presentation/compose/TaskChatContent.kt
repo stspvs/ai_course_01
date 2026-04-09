@@ -6,12 +6,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
@@ -21,7 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.ChatMessage
 import com.example.ai_develop.domain.LlmRequestSnapshot
@@ -103,6 +110,15 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                             Spacer(Modifier.width(8.dp))
                             Text("Сброс")
                         }
+
+                        if (task.state.taskState != TaskState.DONE) {
+                            OutlinedButton(
+                                onClick = { viewModel.cancelAutonomousTask(task.taskId) },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("Отменить задачу")
+                            }
+                        }
                     }
                 }
 
@@ -110,6 +126,33 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                     // Progress Bar with dots
                     TaskProgressBar(task)
                     Spacer(Modifier.height(8.dp))
+                    val outcome = task.runtimeState.outcome
+                    if (outcome != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Text(
+                                "Итог задачи: ${outcome.name}",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (task.runtimeState.awaitingPlanConfirmation) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(onClick = { viewModel.confirmPlan(task.taskId) }) {
+                                Text("Подтвердить план")
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
                 }
             }
         }
@@ -185,6 +228,12 @@ fun TaskChatContent(viewModel: TaskViewModel) {
             // Input
             val isPlanning = task.state.taskState == TaskState.PLANNING
             val isInputEnabled = isPlanning
+            val trySendTaskMessage = {
+                if (isInputEnabled && input.isNotBlank()) {
+                    viewModel.sendUserMessage(task.taskId, input)
+                    input = ""
+                }
+            }
 
             Surface(
                 tonalElevation = 2.dp,
@@ -198,7 +247,9 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                     OutlinedTextField(
                         value = input,
                         onValueChange = { input = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .sendMessageOnEnter(input) { trySendTaskMessage() },
                         enabled = isInputEnabled,
                         placeholder = {
                             Text(
@@ -206,15 +257,12 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                                 else "Ввод доступен только на этапе PLANNING"
                             )
                         },
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { trySendTaskMessage() })
                     )
                     FloatingActionButton(
-                        onClick = {
-                            if (input.isNotBlank()) {
-                                viewModel.sendUserMessage(task.taskId, input)
-                                input = ""
-                            }
-                        },
+                        onClick = { trySendTaskMessage() },
                         containerColor = if (isInputEnabled && input.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp),
                         modifier = Modifier.size(52.dp)
@@ -247,6 +295,7 @@ fun TaskChatContent(viewModel: TaskViewModel) {
 private fun TaskLlmLogPanel(message: ChatMessage, onClose: () -> Unit) {
     val scroll = rememberScrollState()
     val snap = message.llmRequestSnapshot
+    val clipboard = LocalClipboardManager.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -260,19 +309,52 @@ private fun TaskLlmLogPanel(message: ChatMessage, onClose: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Запрос к LLM", style = MaterialTheme.typography.titleLarge)
-            TextButton(onClick = onClose) { Text("Закрыть") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (snap != null) {
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(snap.fullLogTextForCopy())) }) {
+                        Text("Копировать")
+                    }
+                }
+                TextButton(onClick = onClose) { Text("Закрыть") }
+            }
         }
         Spacer(Modifier.height(8.dp))
-        if (snap == null) {
-            Text(
-                "К этому сообщению нет сохранённых логов запроса к LLM.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            TaskLlmSnapshotDetails(snap)
+        SelectionContainer {
+            Column(Modifier.fillMaxWidth()) {
+                if (snap == null) {
+                    Text(
+                        "К этому сообщению нет сохранённых логов запроса к LLM.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    TaskLlmSnapshotDetails(snap)
+                }
+            }
         }
     }
+}
+
+private fun LlmRequestSnapshot.fullLogTextForCopy(): String = buildString {
+    appendLine("Провайдер: $providerName")
+    appendLine("Модель: $model")
+    appendLine("Этап: $agentStage")
+    appendLine("Параметры: temp=$temperature, maxTokens=$maxTokens, jsonMode=$isJsonMode")
+    if (stopWord.isNotBlank()) appendLine("Стоп-слово: $stopWord")
+    appendLine()
+    appendLine("Системный промпт")
+    appendLine(effectiveSystemPrompt)
+    appendLine()
+    appendLine("Сообщения в запросе")
+    when (agentStage) {
+        TaskState.EXECUTION.name ->
+            appendLine("(оркестратор: структурированный план, индекс шага, текст CURRENT STEP — всё в одном [user] ниже)")
+        TaskState.VERIFICATION.name ->
+            appendLine("(оркестратор: план, результат EXECUTION, критерии — в [user] ниже)")
+        else -> {}
+    }
+    appendLine()
+    appendLine(inputMessagesText)
 }
 
 @Composable
@@ -293,6 +375,22 @@ private fun TaskLlmSnapshotDetails(snap: LlmRequestSnapshot) {
     Text(snap.effectiveSystemPrompt, style = MaterialTheme.typography.bodySmall)
     Spacer(Modifier.height(12.dp))
     Text("Сообщения в запросе", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    when (snap.agentStage) {
+        TaskState.EXECUTION.name ->
+            Text(
+                "План и текущий шаг исполнителя передаются в одном сообщении [user]: блоки «PLAN (structured)», «CURRENT STEP INDEX», «CURRENT STEP». Отдельного поля «план» в API нет — это часть текста пользователя.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        TaskState.VERIFICATION.name ->
+            Text(
+                "Проверка: в [user] — план, результат последнего EXECUTION и критерии успеха.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        else -> {}
+    }
+    Spacer(Modifier.height(4.dp))
     Text(snap.inputMessagesText, style = MaterialTheme.typography.bodySmall)
 }
 
@@ -346,8 +444,43 @@ fun TaskProgressBar(task: TaskContext) {
     val states = TaskState.entries
     val currentState = task.state.taskState
     val currentIndex = states.indexOf(currentState)
+    val rs = task.runtimeState
+    val planSize = when {
+        task.plan.isNotEmpty() -> task.plan.size
+        else -> rs.planResult?.steps?.size ?: 0
+    }
+    val planStepCurrent = if (planSize > 0) {
+        minOf(rs.currentPlanStepIndex + 1, planSize)
+    } else {
+        0
+    }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "Итерация: ${rs.stepCount} / ${rs.maxSteps}",
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            if (planSize > 0) {
+                Text(
+                    text = "Шаг плана: $planStepCurrent из $planSize",
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -478,6 +611,6 @@ fun TaskMessageBubble(
 fun getStageColor(state: TaskState, task: TaskContext): Color = when(state) {
     TaskState.PLANNING -> Color(task.architectColor)
     TaskState.EXECUTION -> Color(task.executorColor)
-    TaskState.VALIDATION -> Color(task.validatorColor)
+    TaskState.VERIFICATION -> Color(task.validatorColor)
     TaskState.DONE -> Color(0xFF607D8B)
 }

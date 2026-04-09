@@ -11,7 +11,7 @@ import androidx.sqlite.execSQL
 
 @Database(
     entities = [AgentEntity::class, MessageEntity::class, TaskEntity::class], 
-    version = 21,
+    version = 22,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -50,6 +50,12 @@ val MIGRATION_11_20 = object : Migration(11, 20) {
 val MIGRATION_20_21 = object : Migration(20, 21) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL("ALTER TABLE messages ADD COLUMN llmSnapshotJson TEXT")
+    }
+}
+
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE tasks ADD COLUMN runtimeStateJson TEXT NOT NULL DEFAULT '{}'")
     }
 }
 

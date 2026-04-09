@@ -69,7 +69,7 @@ open class AutonomousAgent(
                 name = state.name,
                 systemPrompt = state.systemPrompt,
                 temperature = state.temperature,
-                provider = profile?.memoryModelProvider ?: LLMProvider.Yandex(),
+                provider = state.provider,
                 stopWord = state.stopWord,
                 maxTokens = state.maxTokens,
                 userProfile = profile,
@@ -270,7 +270,7 @@ open class AutonomousAgent(
     private fun agentStageToTaskState(stage: AgentStage): TaskState = when (stage) {
         AgentStage.PLANNING -> TaskState.PLANNING
         AgentStage.EXECUTION -> TaskState.EXECUTION
-        AgentStage.REVIEW -> TaskState.VALIDATION
+        AgentStage.REVIEW -> TaskState.VERIFICATION
         AgentStage.DONE -> TaskState.DONE
     }
 
@@ -281,7 +281,9 @@ open class AutonomousAgent(
                 name = agent.name,
                 systemPrompt = agent.systemPrompt,
                 temperature = agent.temperature,
+                provider = agent.provider,
                 maxTokens = agent.maxTokens,
+                stopWord = agent.stopWord,
                 messages = agent.messages,
                 workingMemory = agent.workingMemory,
                 memoryStrategy = agent.memoryStrategy

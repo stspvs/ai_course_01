@@ -63,6 +63,7 @@ class TaskSagaDetailedTest {
     private class FakeChatRepository : ChatRepository {
         val systemPrompts = mutableListOf<String>()
         var nextResponse: String = ""
+        val responseQueue = ArrayDeque<String>()
 
         override fun chatStreaming(
             messages: List<ChatMessage>,
@@ -74,7 +75,8 @@ class TaskSagaDetailedTest {
             provider: LLMProvider
         ): Flow<Result<String>> {
             systemPrompts.add(systemPrompt)
-            return flowOf(Result.success(nextResponse))
+            val text = responseQueue.removeFirstOrNull() ?: nextResponse
+            return flowOf(Result.success(text))
         }
 
         override suspend fun extractFacts(
@@ -143,14 +145,25 @@ class TaskSagaDetailedTest {
 
         val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
 
-        // 1. PLANNING stage
-        chatRepo.nextResponse = "{\"status\": \"SUCCESS\", \"result\": \"P\"}"
+        val planJson =
+            """{"success":true,"plan":{"goal":"g","steps":["one"],"successCriteria":"c"},"questions":[],"requiresUserConfirmation":false}"""
+        assertNotNull(AutonomousTaskJsonParsers.parsePlannerOutput(planJson))
+        val execJson = """{"success":true,"output":"done","errors":null}"""
+        val verJson = """{"success":true,"issues":null,"suggestions":null}"""
+        chatRepo.responseQueue.add(planJson)
+        chatRepo.responseQueue.add(execJson)
+        chatRepo.responseQueue.add(verJson)
         saga.start()
         advanceUntilIdle()
-        
+
+        assertEquals(
+            3,
+            chatRepo.systemPrompts.size,
+            "Expected PLANNING→EXECUTION→VERIFICATION LLM calls. Got:\n${chatRepo.systemPrompts.joinToString("\n---\n")}"
+        )
         assertTrue(chatRepo.systemPrompts.any { it.contains("PLANNING stage") }, "Should have called PLANNING stage")
         assertTrue(chatRepo.systemPrompts.any { it.contains("EXECUTION stage") }, "Should have called EXECUTION stage")
-        assertTrue(chatRepo.systemPrompts.any { it.contains("VALIDATION stage") }, "Should have called VALIDATION stage")
+        assertTrue(chatRepo.systemPrompts.any { it.contains("VERIFICATION stage") }, "Should have called VERIFICATION stage")
     }
 
     @Test
@@ -170,6 +183,7 @@ class TaskSagaDetailedTest {
                 maxTokens = 2000
             )
 
+            val planResult = PlanResult("Task Title", listOf("step1"), "c")
             val context = TaskContext(
                 taskId = "t1",
                 title = "Task Title",
@@ -177,25 +191,110 @@ class TaskSagaDetailedTest {
                 executorAgentId = "a1",
                 architectAgentId = "a1",
                 validatorAgentId = "a1",
-                isPaused = false
+                isPaused = false,
+                plan = planResult.steps,
+                runtimeState = TaskRuntimeState.defaultFor("t1").copy(
+                    stage = TaskState.EXECUTION,
+                    planResult = planResult
+                )
             )
             localRepo.saveAgent(agent)
             localRepo.saveTask(context)
 
             val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
 
-            chatRepo.nextResponse = "{\"status\": \"FAILED\", \"result\": \"Error reason\"}"
+            val failExec = """{"success":false,"output":"","errors":["Error reason"]}"""
+            repeat(4) { chatRepo.responseQueue.add(failExec) }
             saga.start()
             advanceUntilIdle()
 
-            assertEquals(TaskState.PLANNING, saga.context.value.state.taskState)
+            assertEquals(TaskState.DONE, saga.context.value.state.taskState)
+            assertEquals(TaskOutcome.FAILED, saga.context.value.runtimeState.outcome)
 
             val messages = localRepo.getMessagesForTask("t1").first()
-            val failedMsg = messages.find { it.message.contains("--- STAGE FAILED/REJECTED ---") }
-            assertNotNull(failedMsg)
-            assertTrue(failedMsg.message.contains("Error reason"))
-            assertEquals(SourceType.SYSTEM, failedMsg.source)
+            assertTrue(messages.any { it.message.contains("--- TASK END: FAILED ---") })
         }
+
+    @Test
+    fun `confirmPlan moves from awaiting confirmation to execution`() = runTest {
+        val localRepo = FakeLocalRepository()
+        val chatRepo = FakeChatRepository()
+        val memoryManager = ChatMemoryManager()
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
+        val agent = Agent(
+            id = "a1",
+            name = "A",
+            systemPrompt = "P",
+            temperature = 0.7,
+            provider = LLMProvider.DeepSeek(),
+            stopWord = "",
+            maxTokens = 2000
+        )
+        val context = TaskContext(
+            taskId = "t1",
+            title = "Task Title",
+            state = AgentTaskState(TaskState.PLANNING, agent),
+            architectAgentId = "a1",
+            executorAgentId = "a1",
+            validatorAgentId = "a1",
+            isPaused = false,
+            runtimeState = TaskRuntimeState.defaultFor("t1").copy(
+                awaitingPlanConfirmation = true,
+                planResult = PlanResult("Task Title", listOf("s1"), "c")
+            )
+        )
+        localRepo.saveAgent(agent)
+        localRepo.saveTask(context)
+
+        val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
+        chatRepo.responseQueue.add("""{"success":true,"output":"x","errors":null}""")
+        chatRepo.responseQueue.add("""{"success":true,"issues":null,"suggestions":null}""")
+
+        saga.confirmPlan()
+        advanceUntilIdle()
+
+        assertTrue(chatRepo.systemPrompts.any { it.contains("EXECUTION stage") })
+        // Single-step plan: after execution + verification the task may already be DONE.
+        assertTrue(
+            saga.context.value.state.taskState == TaskState.EXECUTION ||
+                saga.context.value.state.taskState == TaskState.DONE
+        )
+    }
+
+    @Test
+    fun `cancelTask sets outcome CANCELLED`() = runTest {
+        val localRepo = FakeLocalRepository()
+        val chatRepo = FakeChatRepository()
+        val memoryManager = ChatMemoryManager()
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
+        val agent = Agent(
+            id = "a1",
+            name = "A",
+            systemPrompt = "P",
+            temperature = 0.7,
+            provider = LLMProvider.DeepSeek(),
+            stopWord = "",
+            maxTokens = 2000
+        )
+        val context = TaskContext(
+            taskId = "t1",
+            title = "T",
+            state = AgentTaskState(TaskState.PLANNING, agent),
+            architectAgentId = "a1",
+            executorAgentId = "a1",
+            validatorAgentId = "a1",
+            isPaused = false
+        )
+        localRepo.saveAgent(agent)
+        localRepo.saveTask(context)
+        val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
+
+        saga.cancelTask()
+        advanceUntilIdle()
+
+        assertEquals(TaskState.DONE, saga.context.value.state.taskState)
+        assertEquals(TaskOutcome.CANCELLED, saga.context.value.runtimeState.outcome)
+    }
 
     @Test
     fun `runStage should handle invalid JSON as FAILED`() = runTest {
@@ -214,6 +313,7 @@ class TaskSagaDetailedTest {
         )
 
         // Переключаем в EXECUTION, где JSON обязателен
+        val pr = PlanResult("T", listOf("s"), "c")
         val context = TaskContext(
             taskId = "t1",
             title = "T",
@@ -221,19 +321,19 @@ class TaskSagaDetailedTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused = false
+            isPaused = false,
+            plan = pr.steps,
+            runtimeState = TaskRuntimeState.defaultFor("t1").copy(stage = TaskState.EXECUTION, planResult = pr)
         )
         localRepo.saveAgent(agent)
         localRepo.saveTask(context)
         val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
 
-        chatRepo.nextResponse = "This is not JSON at all"
+        repeat(4) { chatRepo.responseQueue.add("This is not JSON at all") }
         saga.start()
         advanceUntilIdle()
 
-        // Ожидаем откат к PLANNING
-        assertEquals(TaskState.PLANNING, saga.context.value.state.taskState)
-        val messages = localRepo.getMessagesForTask("t1").first()
-        assertTrue(messages.any { it.message.contains("Invalid JSON response") })
+        assertEquals(TaskState.DONE, saga.context.value.state.taskState)
+        assertEquals(TaskOutcome.FAILED, saga.context.value.runtimeState.outcome)
     }
 }

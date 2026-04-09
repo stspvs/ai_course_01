@@ -2,6 +2,8 @@
 
 package com.example.ai_develop.data
 
+import com.example.ai_develop.domain.DefaultAgentFactory
+
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.example.ai_develop.database.AgentDatabase
@@ -52,6 +54,7 @@ class SqlDelightChatRepositoryTest {
             name = "Test Agent",
             systemPrompt = "System",
             temperature = 0.5,
+            provider = LLMProvider.DeepSeek("deepseek-chat"),
             maxTokens = 1000,
             stopWord = "STOP",
             currentStage = AgentStage.EXECUTION,
@@ -79,6 +82,7 @@ class SqlDelightChatRepositoryTest {
         assertEquals(state.plan.steps.size, retrieved.plan.steps.size)
         assertEquals(state.memoryStrategy, retrieved.memoryStrategy)
         assertEquals(state.workingMemory.currentTask, retrieved.workingMemory.currentTask)
+        assertEquals(state.provider, retrieved.provider)
     }
 
     @Test
@@ -103,6 +107,40 @@ class SqlDelightChatRepositoryTest {
 
         repository.deleteAgent("del-1")
         assertNull(repository.getAgentState("del-1"))
+    }
+
+    @Test
+    fun resetTaskConversation_clearsArchitectWorkingMemoryWhenArchitectIdDiffersFromTaskId() = runTest {
+        val taskId = "task-1"
+        val architectId = "arch-1"
+        val factory = DefaultAgentFactory()
+        repository.saveTask(
+            TaskContext(
+                taskId = taskId,
+                title = "T",
+                state = AgentTaskState(TaskState.PLANNING, factory.create()),
+                architectAgentId = architectId,
+                runtimeState = TaskRuntimeState.defaultFor(taskId)
+            )
+        ).getOrThrow()
+        val archState = AgentState(
+            agentId = architectId,
+            name = "Arch",
+            workingMemory = WorkingMemory(currentTask = "stale goal"),
+            memoryStrategy = ChatMemoryStrategy.Summarization(10, summary = "old sum"),
+            messages = listOf(
+                ChatMessage(message = "hi", role = "user", taskId = taskId, timestamp = 1L)
+            )
+        )
+        repository.saveAgentState(archState)
+
+        repository.resetTaskConversation(taskId).getOrThrow()
+
+        val cleared = repository.getAgentState(architectId)
+        assertNotNull(cleared)
+        assertNull(cleared.workingMemory.currentTask)
+        assertNull((cleared.memoryStrategy as? ChatMemoryStrategy.Summarization)?.summary)
+        assertTrue(cleared.messages.isEmpty())
     }
 
     private class FakeNetworkRepository : ChatRepository {

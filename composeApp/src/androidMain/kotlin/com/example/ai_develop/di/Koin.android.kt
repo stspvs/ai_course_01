@@ -1,5 +1,7 @@
 package com.example.ai_develop.di
 
+import com.example.ai_develop.data.SqlDelightChatRepository
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.database.DriverFactory
 import com.example.ai_develop.database.AgentDatabase
 import com.example.ai_develop.database.stageAdapter
@@ -30,6 +32,8 @@ actual val platformModule = module {
             )
         )
     }
+
+    single<LocalChatRepository> { get<SqlDelightChatRepository>() }
 }
 
 actual fun HttpClientConfig<*>.configurePlatform() {

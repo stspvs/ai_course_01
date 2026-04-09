@@ -340,7 +340,7 @@ class LLMViewModelTest {
 
     // --- Fakes ---
 
-    private class FakeChatRepository : ChatRepository {
+    private class FakeChatRepository : ChatRepository, AgentRepository {
         private val states = mutableMapOf<String, AgentState>()
         private val profiles = mutableMapOf<String, UserProfile>()
         private val _agentObservers = mutableMapOf<String, MutableSharedFlow<AgentState?>>()
@@ -357,6 +357,63 @@ class LLMViewModelTest {
         }
 
         override fun observeAllAgents(): Flow<List<AgentState>> = _allAgents
+
+        override fun getAgents(): Flow<List<Agent>> = observeAllAgents().mapLatest { states ->
+            states.map { state ->
+                val profile = getProfile(state.agentId)
+                Agent(
+                    id = state.agentId,
+                    name = state.name,
+                    systemPrompt = state.systemPrompt,
+                    temperature = state.temperature,
+                    provider = state.provider,
+                    stopWord = state.stopWord,
+                    maxTokens = state.maxTokens,
+                    memoryStrategy = state.memoryStrategy,
+                    workingMemory = state.workingMemory,
+                    messages = emptyList(),
+                    userProfile = profile
+                )
+            }
+        }
+
+        override fun getAgentWithMessages(agentId: String): Flow<Agent?> = observeAgentState(agentId).mapLatest { state ->
+            state?.let {
+                val profile = getProfile(it.agentId)
+                Agent(
+                    id = it.agentId,
+                    name = it.name,
+                    systemPrompt = it.systemPrompt,
+                    temperature = it.temperature,
+                    provider = it.provider,
+                    stopWord = it.stopWord,
+                    maxTokens = it.maxTokens,
+                    memoryStrategy = it.memoryStrategy,
+                    workingMemory = it.workingMemory,
+                    messages = it.messages,
+                    userProfile = profile
+                )
+            }
+        }
+
+        override suspend fun saveAgent(agent: Agent): Result<Unit> = runCatching {
+            saveAgentState(
+                AgentState(
+                    agentId = agent.id,
+                    name = agent.name,
+                    systemPrompt = agent.systemPrompt,
+                    temperature = agent.temperature,
+                    provider = agent.provider,
+                    maxTokens = agent.maxTokens,
+                    stopWord = agent.stopWord,
+                    memoryStrategy = agent.memoryStrategy,
+                    workingMemory = agent.workingMemory,
+                    messages = agent.messages
+                )
+            )
+        }
+
+        override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> = saveAgent(agent)
 
         override fun chatStreaming(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider) = flowOf(Result.success(""))
         override suspend fun extractFacts(messages: List<ChatMessage>, currentFacts: ChatFacts, provider: LLMProvider) = Result.success(ChatFacts())
@@ -425,7 +482,7 @@ class LLMViewModelTest {
                     name = state.name,
                     systemPrompt = state.systemPrompt,
                     temperature = state.temperature,
-                    provider = LLMProvider.Yandex(),
+                    provider = state.provider,
                     stopWord = state.stopWord,
                     maxTokens = state.maxTokens,
                     messages = state.messages,
@@ -460,6 +517,7 @@ class LLMViewModelTest {
                 name = params.name,
                 systemPrompt = params.systemPrompt,
                 temperature = params.temperature,
+                provider = params.provider,
                 maxTokens = params.maxTokens,
                 stopWord = params.stopWord,
                 memoryStrategy = params.memoryStrategy

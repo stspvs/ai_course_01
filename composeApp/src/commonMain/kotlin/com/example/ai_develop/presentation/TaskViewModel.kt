@@ -32,6 +32,7 @@ sealed interface TaskEvent {
 @OptIn(ExperimentalUuidApi::class, ExperimentalCoroutinesApi::class)
 class TaskViewModel(
     private val getTasksUseCase: GetTasksUseCase,
+    private val getTaskUseCase: GetTaskUseCase,
     private val createTaskUseCase: CreateTaskUseCase,
     private val updateTaskUseCase: UpdateTaskUseCase,
     private val deleteTaskUseCase: DeleteTaskUseCase,
@@ -39,7 +40,8 @@ class TaskViewModel(
     private val getMessagesUseCase: GetMessagesUseCase,
     private val chatStreamingUseCase: ChatStreamingUseCase,
     private val getAgentsUseCase: GetAgentsUseCase,
-    private val agentFactory: DefaultAgentFactory
+    private val agentFactory: DefaultAgentFactory,
+    private val taskSagaCoordinator: TaskSagaCoordinator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TaskUiState())
@@ -76,6 +78,10 @@ class TaskViewModel(
         .filterNotNull()
         .flatMapLatest { id -> getMessagesUseCase(id) }
         .stateIn(viewModelScope, sharing, emptyList())
+
+    /** Актуальная задача из БД; [tasks] может отставать из‑за асинхронной эмиссии SqlDelight. */
+    private suspend fun latestTask(taskId: String): TaskContext? =
+        getTaskUseCase(taskId) ?: tasks.value.find { it.taskId == taskId }
 
     fun onEvent(event: TaskEvent) {
         when (event) {
@@ -117,6 +123,7 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 updateTaskUseCase(task).getOrThrow()
+                taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(task)
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e) }
             }
@@ -126,6 +133,7 @@ class TaskViewModel(
     fun deleteTask(task: TaskContext) {
         viewModelScope.launch {
             try {
+                taskSagaCoordinator.evict(task.taskId)
                 if (_selectedTaskId.value == task.taskId) {
                     selectTask(null)
                 }
@@ -140,6 +148,24 @@ class TaskViewModel(
     fun sendUserMessage(taskId: String, text: String) {
         val cleanText = text.takeIf { it.isNotBlank() } ?: return
         viewModelScope.launch {
+            val task = latestTask(taskId)
+            if (task != null &&
+                task.isReadyToRun &&
+                !task.isPaused &&
+                task.state.taskState == TaskState.PLANNING
+            ) {
+                _uiState.update { it.copy(isSending = true, error = null) }
+                try {
+                    taskSagaCoordinator.getOrCreateSaga(task).handleUserMessage(cleanText)
+                } catch (e: Exception) {
+                    _uiState.update { it.copy(error = e) }
+                    _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send message"))
+                } finally {
+                    _uiState.update { it.copy(isSending = false) }
+                }
+                return@launch
+            }
+
             _uiState.update { it.copy(isSending = true, error = null) }
             _streamingDraft.value = ""
             val buffer = StringBuilder()
@@ -167,40 +193,77 @@ class TaskViewModel(
         }
     }
 
+    fun confirmPlan(taskId: String) {
+        viewModelScope.launch {
+            try {
+                val task = latestTask(taskId) ?: return@launch
+                taskSagaCoordinator.getOrCreateSaga(task).confirmPlan()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+                _effects.emit(TaskEffect.ShowError(e.message ?: "confirmPlan failed"))
+            }
+        }
+    }
+
+    fun cancelAutonomousTask(taskId: String) {
+        viewModelScope.launch {
+            try {
+                val task = latestTask(taskId) ?: return@launch
+                taskSagaCoordinator.getOrCreateSaga(task).cancelTask()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e) }
+                _effects.emit(TaskEffect.ShowError(e.message ?: "cancel failed"))
+            }
+        }
+    }
+
     fun togglePause(taskId: String) {
         viewModelScope.launch {
             try {
-                val task = tasks.map { it.find { t -> t.taskId == taskId } }
-                    .filterNotNull()
-                    .first()
+                val task = latestTask(taskId) ?: return@launch
                 val wasPaused = task.isPaused
                 val messagesBeforeUnpause =
                     if (wasPaused) getMessagesUseCase(taskId).first() else emptyList()
                 updateTaskUseCase(task.copy(isPaused = !task.isPaused)).getOrThrow()
+                val refreshed = latestTask(taskId) ?: return@launch
                 if (wasPaused && messagesBeforeUnpause.isEmpty()) {
-                    _uiState.update { it.copy(isSending = true, error = null) }
-                    _streamingDraft.value = ""
-                    val buffer = StringBuilder()
-                    var lastUiUpdateMillis = 0L
-                    try {
-                        val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
-                        agent.sendWelcomeMessage().collect { chunk ->
-                            buffer.append(chunk)
-                            val now = System.currentTimeMillis()
-                            if (now - lastUiUpdateMillis >= 48) {
-                                _streamingDraft.value = buffer.toString()
-                                lastUiUpdateMillis = now
-                            }
+                    if (refreshed.isReadyToRun) {
+                        _uiState.update { it.copy(isSending = true, error = null) }
+                        try {
+                            val saga = taskSagaCoordinator.getOrCreateSaga(refreshed)
+                            taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(refreshed)
+                            saga.start()
+                        } catch (e: Exception) {
+                            _uiState.update { it.copy(error = e) }
+                            _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga start failed"))
+                        } finally {
+                            _uiState.update { it.copy(isSending = false) }
                         }
-                        if (buffer.isNotEmpty()) {
-                            _streamingDraft.value = buffer.toString()
-                        }
-                    } catch (e: Exception) {
-                        _uiState.update { it.copy(error = e) }
-                        _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send welcome"))
-                    } finally {
+                    } else {
+                        _uiState.update { it.copy(isSending = true, error = null) }
                         _streamingDraft.value = ""
-                        _uiState.update { it.copy(isSending = false) }
+                        val buffer = StringBuilder()
+                        var lastUiUpdateMillis = 0L
+                        try {
+                            val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
+                            agent.sendWelcomeMessage().collect { chunk ->
+                                buffer.append(chunk)
+                                val now = System.currentTimeMillis()
+                                if (now - lastUiUpdateMillis >= 48) {
+                                    _streamingDraft.value = buffer.toString()
+                                    lastUiUpdateMillis = now
+                                }
+                            }
+                            if (buffer.isNotEmpty()) {
+                                _streamingDraft.value = buffer.toString()
+                            }
+                        } catch (e: Exception) {
+                            _uiState.update { it.copy(error = e) }
+                            _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send welcome"))
+                        } finally {
+                            _streamingDraft.value = ""
+                            _uiState.update { it.copy(isSending = false) }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -212,6 +275,8 @@ class TaskViewModel(
     fun resetTask(taskId: String) {
         viewModelScope.launch {
             try {
+                _streamingDraft.value = ""
+                taskSagaCoordinator.evict(taskId)
                 resetTaskUseCase(taskId).getOrThrow()
                 val task = tasks.map { it.find { t -> t.taskId == taskId } }
                     .filterNotNull()
@@ -223,7 +288,8 @@ class TaskViewModel(
                         step = 0,
                         plan = emptyList(),
                         planDone = emptyList(),
-                        currentPlanStep = null
+                        currentPlanStep = null,
+                        runtimeState = TaskRuntimeState.defaultFor(taskId)
                     )
                 ).getOrThrow()
             } catch (e: Exception) {

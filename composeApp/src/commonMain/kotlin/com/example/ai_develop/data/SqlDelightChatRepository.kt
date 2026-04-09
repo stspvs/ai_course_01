@@ -4,6 +4,7 @@ import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import app.cash.sqldelight.coroutines.mapToOneOrNull
 import com.example.ai_develop.database.AgentDatabase
+import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.domain.*
 import com.example.aidevelop.database.AgentMessageEntity
 import com.example.aidevelop.database.AgentStateEntity
@@ -11,6 +12,7 @@ import com.example.aidevelop.database.TaskEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
@@ -18,7 +20,11 @@ import kotlinx.serialization.builtins.serializer
 class SqlDelightChatRepository(
     private val db: AgentDatabase,
     private val networkRepository: ChatRepository
-) : ChatRepository by networkRepository, AgentRepository, TaskRepository, MessageRepository {
+) : ChatRepository by networkRepository,
+    AgentRepository,
+    TaskRepository,
+    MessageRepository,
+    LocalChatRepository {
 
     private val json = Json { 
         ignoreUnknownKeys = true 
@@ -34,7 +40,7 @@ class SqlDelightChatRepository(
             persistAgentStateRow(state)
             queries.deleteMessagesForAgent(state.agentId)
             val taskRow = queries.getTask(state.agentId).executeAsOneOrNull()
-            val defaultTaskState = taskRow?.let { TaskState.valueOf(it.taskState) }
+            val defaultTaskState = taskRow?.let { TaskState.fromPersisted(it.taskState) }
             val defaultStage = taskStateToAgentStage(defaultTaskState) ?: state.currentStage
             val taskScopedId = if (taskRow != null) state.agentId else null
             state.messages.forEach { msg ->
@@ -67,7 +73,8 @@ class SqlDelightChatRepository(
             currentStepId = state.currentStepId,
             planJson = json.encodeToString(AgentPlan.serializer(), state.plan),
             memoryStrategyJson = json.encodeToString(ChatMemoryStrategy.serializer(), state.memoryStrategy),
-            workingMemoryJson = json.encodeToString(WorkingMemory.serializer(), state.workingMemory)
+            workingMemoryJson = json.encodeToString(WorkingMemory.serializer(), state.workingMemory),
+            llmProviderJson = json.encodeToString(LLMProvider.serializer(), state.provider)
         )
     }
 
@@ -102,38 +109,43 @@ class SqlDelightChatRepository(
     // --- AgentRepository implementation ---
 
     override fun getAgents(): Flow<List<Agent>> {
-        return observeAllAgents().map { states ->
+        return observeAllAgents().mapLatest { states ->
             states.map { state ->
+                val msgs = queries.getMessagesForAgent(state.agentId).executeAsList().map { mapMessageEntityToChat(it) }
+                val profile = getProfile(state.agentId)
                 Agent(
                     id = state.agentId,
                     name = state.name,
                     systemPrompt = state.systemPrompt,
                     temperature = state.temperature,
-                    provider = LLMProvider.Yandex(), 
+                    provider = state.provider,
                     stopWord = state.stopWord,
                     maxTokens = state.maxTokens,
                     memoryStrategy = state.memoryStrategy,
                     workingMemory = state.workingMemory,
-                    messages = emptyList()
+                    messages = msgs,
+                    userProfile = profile
                 )
             }
         }
     }
 
     override fun getAgentWithMessages(agentId: String): Flow<Agent?> {
-        return observeAgentState(agentId).map { state ->
+        return observeAgentState(agentId).mapLatest { state ->
             state?.let {
+                val profile = getProfile(it.agentId)
                 Agent(
                     id = it.agentId,
                     name = it.name,
                     systemPrompt = it.systemPrompt,
                     temperature = it.temperature,
-                    provider = LLMProvider.Yandex(),
+                    provider = it.provider,
                     stopWord = it.stopWord,
                     maxTokens = it.maxTokens,
                     memoryStrategy = it.memoryStrategy,
                     workingMemory = it.workingMemory,
-                    messages = it.messages
+                    messages = it.messages,
+                    userProfile = profile
                 )
             }
         }
@@ -145,6 +157,7 @@ class SqlDelightChatRepository(
             name = agent.name,
             systemPrompt = agent.systemPrompt,
             temperature = agent.temperature,
+            provider = agent.provider,
             maxTokens = agent.maxTokens,
             stopWord = agent.stopWord,
             memoryStrategy = agent.memoryStrategy,
@@ -160,6 +173,7 @@ class SqlDelightChatRepository(
             name = agent.name,
             systemPrompt = agent.systemPrompt,
             temperature = agent.temperature,
+            provider = agent.provider,
             maxTokens = agent.maxTokens,
             stopWord = agent.stopWord,
             memoryStrategy = agent.memoryStrategy,
@@ -194,7 +208,8 @@ class SqlDelightChatRepository(
             architectColor = task.architectColor,
             executorColor = task.executorColor,
             validatorColor = task.validatorColor,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            runtimeStateJson = TaskRuntimeStatePersistence.encode(task.runtimeState)
         )
     }
 
@@ -243,11 +258,28 @@ class SqlDelightChatRepository(
 
     override suspend fun resetTaskConversation(taskId: String): Result<Unit> = runCatching {
         deleteMessagesForTask(taskId).getOrThrow()
-        val state = getAgentState(taskId) ?: return@runCatching
+        val task = getTask(taskId)
+        val agentIds = buildSet {
+            add(taskId)
+            task?.architectAgentId?.let { add(it) }
+            task?.executorAgentId?.let { add(it) }
+            task?.validatorAgentId?.let { add(it) }
+        }
+        for (agentId in agentIds) {
+            clearAgentConversationStateAfterTaskMessagesDeleted(agentId)
+        }
+    }
+
+    /**
+     * После [deleteMessagesForTask] перезагружает сообщения агента из БД и сбрасывает разговорную память
+     * (working memory, summarization и т.д.), не трогая системный промпт и профиль.
+     * Нужно для ролей (архитектор/исполнитель/валидатор), у которых [agentId] не совпадает с [taskId].
+     */
+    private suspend fun clearAgentConversationStateAfterTaskMessagesDeleted(agentId: String) {
+        val state = getAgentState(agentId) ?: return
         val cleared = state.copy(
             workingMemory = state.workingMemory.clearConversation(),
             memoryStrategy = state.memoryStrategy.clearConversationData(),
-            messages = emptyList(),
             plan = AgentPlan(),
             currentStepId = null,
             currentStage = AgentStage.PLANNING
@@ -297,7 +329,7 @@ class SqlDelightChatRepository(
     private fun agentStageToTaskState(stage: AgentStage): TaskState? = when (stage) {
         AgentStage.PLANNING -> TaskState.PLANNING
         AgentStage.EXECUTION -> TaskState.EXECUTION
-        AgentStage.REVIEW -> TaskState.VALIDATION
+        AgentStage.REVIEW -> TaskState.VERIFICATION
         AgentStage.DONE -> TaskState.DONE
     }
 
@@ -305,16 +337,24 @@ class SqlDelightChatRepository(
         null -> null
         TaskState.PLANNING -> AgentStage.PLANNING
         TaskState.EXECUTION -> AgentStage.EXECUTION
-        TaskState.VALIDATION -> AgentStage.REVIEW
+        TaskState.VERIFICATION -> AgentStage.REVIEW
         TaskState.DONE -> AgentStage.DONE
     }
 
     private fun mapToDomain(it: AgentStateEntity): AgentState {
+        val providerFromDb = it.llmProviderJson?.takeIf { j -> j.isNotBlank() }?.let { jsonStr ->
+            try {
+                json.decodeFromString(LLMProvider.serializer(), jsonStr)
+            } catch (_: Exception) {
+                null
+            }
+        }
         return AgentState(
             agentId = it.agentId,
             name = it.name,
             systemPrompt = it.systemPrompt,
             temperature = it.temperature,
+            provider = providerFromDb ?: LLMProvider.Yandex(),
             maxTokens = it.maxTokens.toInt(),
             stopWord = it.stopWord,
             currentStage = it.currentStage,
@@ -350,11 +390,13 @@ class SqlDelightChatRepository(
     }
 
     private fun mapTaskToDomain(it: TaskEntity): TaskContext {
+        val persistedTaskState = TaskState.fromPersisted(it.taskState)
+        val runtimeState = TaskRuntimeStatePersistence.decode(it.taskId, persistedTaskState, it.runtimeStateJson)
         return TaskContext(
             taskId = it.taskId,
             title = it.title,
             state = AgentTaskState(
-                taskState = TaskState.valueOf(it.taskState),
+                taskState = persistedTaskState,
                 agent = Agent(id = "temp", name = "Temp", systemPrompt = "", temperature = 0.7, provider = LLMProvider.Yandex(), stopWord = "", maxTokens = 2000, memoryStrategy = ChatMemoryStrategy.SlidingWindow(10), workingMemory = WorkingMemory(), messages = emptyList())
             ),
             isPaused = it.isPaused,
@@ -368,7 +410,8 @@ class SqlDelightChatRepository(
             validatorAgentId = it.validatorAgentId,
             architectColor = it.architectColor,
             executorColor = it.executorColor,
-            validatorColor = it.validatorColor
+            validatorColor = it.validatorColor,
+            runtimeState = runtimeState
         )
     }
 

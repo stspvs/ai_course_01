@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -19,13 +20,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.TaskViewModel
 import com.example.ai_develop.presentation.TaskEvent
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun TaskManagementContent(viewModel: TaskViewModel) {
@@ -106,6 +112,8 @@ fun TaskSettings(
             modifier = Modifier.fillMaxWidth()
         )
 
+        TaskStateMachineLimitsCard(task, onUpdate)
+
         HorizontalDivider()
         Text("Настройка ролей", style = MaterialTheme.typography.titleMedium)
 
@@ -132,7 +140,7 @@ fun TaskSettings(
         )
         
         RoleSettingRow(
-            label = "Оценщик (VALIDATION)",
+            label = "Оценщик (VERIFICATION)",
             role = ValidatorRole(),
             task = task,
             agents = agents,
@@ -142,6 +150,113 @@ fun TaskSettings(
             onColorSelected = { onUpdate(task.copy(validatorColor = it.value.toLong())) }
         )
     }
+}
+
+@Composable
+private fun TaskStateMachineLimitsCard(
+    task: TaskContext,
+    onUpdate: (TaskContext) -> Unit
+) {
+    val rs = task.runtimeState
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Стейт-машина", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            RuntimeIntField(
+                taskId = task.taskId,
+                label = "Макс. шагов итераций (maxSteps)",
+                value = rs.maxSteps,
+                onCommit = { v -> onUpdate(task.copy(runtimeState = rs.copy(maxSteps = v))) }
+            )
+            Text(
+                "Текущий счётчик итераций (stepCount): ${rs.stepCount}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Text(
+                "Лимиты вызовов LLM по этапам",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            RuntimeIntField(
+                taskId = task.taskId,
+                label = "PLANNING (maxPlanningSteps)",
+                value = rs.maxPlanningSteps,
+                onCommit = { v -> onUpdate(task.copy(runtimeState = rs.copy(maxPlanningSteps = v))) }
+            )
+            RuntimeIntField(
+                taskId = task.taskId,
+                label = "EXECUTION (maxExecutionSteps)",
+                value = rs.maxExecutionSteps,
+                onCommit = { v -> onUpdate(task.copy(runtimeState = rs.copy(maxExecutionSteps = v))) }
+            )
+            RuntimeIntField(
+                taskId = task.taskId,
+                label = "VERIFICATION (maxVerificationSteps)",
+                value = rs.maxVerificationSteps,
+                onCommit = { v -> onUpdate(task.copy(runtimeState = rs.copy(maxVerificationSteps = v))) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RuntimeIntField(
+    taskId: String,
+    label: String,
+    value: Int,
+    onCommit: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    range: IntRange = 1..10_000
+) {
+    var text by remember(taskId) { mutableStateOf(value.toString()) }
+    LaunchedEffect(taskId, value) {
+        text = value.toString()
+    }
+    val scope = rememberCoroutineScope()
+    var debounceJob by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(taskId) {
+        onDispose { debounceJob?.cancel() }
+    }
+
+    fun commitIfParsedDiffers() {
+        val v = text.toIntOrNull()?.coerceIn(range) ?: return
+        if (v != value) onCommit(v)
+    }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { new ->
+            text = new.filter { it.isDigit() }.take(6)
+            debounceJob?.cancel()
+            debounceJob = scope.launch {
+                delay(450)
+                commitIfParsedDiffers()
+            }
+        },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier
+            .fillMaxWidth()
+            .onFocusChanged { focusState ->
+                if (!focusState.isFocused) {
+                    debounceJob?.cancel()
+                    val v = text.toIntOrNull()?.coerceIn(range) ?: value
+                    text = v.toString()
+                    if (v != value) onCommit(v)
+                }
+            }
+    )
 }
 
 @Composable

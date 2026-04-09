@@ -11,12 +11,36 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.*
 import kotlin.math.round
+
+/**
+ * Перехватывает Enter до обработки [androidx.compose.foundation.text.BasicTextField], иначе
+ * в многострочном поле вставляется перевод строки и отправка не срабатывает.
+ * Shift+Enter оставляем для новой строки.
+ */
+internal fun Modifier.sendMessageOnEnter(
+    input: String,
+    onSend: () -> Unit,
+): Modifier = onPreviewKeyEvent { keyEvent ->
+    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+    if (keyEvent.key != Key.Enter && keyEvent.key != Key.NumPadEnter) return@onPreviewKeyEvent false
+    if (keyEvent.isShiftPressed) return@onPreviewKeyEvent false
+    if (input.isNotBlank()) {
+        onSend()
+    }
+    true
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

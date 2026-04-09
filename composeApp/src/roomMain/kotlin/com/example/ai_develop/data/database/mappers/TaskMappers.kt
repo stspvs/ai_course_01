@@ -2,6 +2,7 @@ package com.example.ai_develop.data.database.mappers
 
 import com.example.ai_develop.data.database.TaskEntity
 import com.example.ai_develop.domain.TaskContext
+import com.example.ai_develop.domain.TaskRuntimeStatePersistence
 
 fun TaskEntity.toDomain() = TaskContext(
     taskId = taskId,
@@ -18,7 +19,8 @@ fun TaskEntity.toDomain() = TaskContext(
     validatorAgentId = validatorAgentId,
     architectColor = architectColor,
     executorColor = executorColor,
-    validatorColor = validatorColor
+    validatorColor = validatorColor,
+    runtimeState = TaskRuntimeStatePersistence.decode(taskId, state.taskState, runtimeStateJson)
 )
 
 fun TaskContext.toEntity() = TaskEntity(
@@ -36,5 +38,6 @@ fun TaskContext.toEntity() = TaskEntity(
     validatorAgentId = validatorAgentId,
     architectColor = architectColor,
     executorColor = executorColor,
-    validatorColor = validatorColor
+    validatorColor = validatorColor,
+    runtimeStateJson = TaskRuntimeStatePersistence.encode(runtimeState)
 )

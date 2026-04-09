@@ -24,6 +24,7 @@ import kotlinx.serialization.json.Json
 import org.koin.core.context.startKoin
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.singleOf
+import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.core.qualifier.named
 import org.koin.dsl.KoinAppDeclaration
@@ -96,12 +97,14 @@ val commonModule = module {
 
     // Managers & Factories
     singleOf(::ChatMemoryManager)
+    singleOf(::TaskSagaCoordinator)
     singleOf(::DefaultAgentFactory)
     singleOf(::StrategyDelegateFactory)
     singleOf(::AgentManager)
 
     // Use Cases
     singleOf(::GetTasksUseCase)
+    singleOf(::GetTaskUseCase)
     singleOf(::CreateTaskUseCase)
     singleOf(::UpdateTaskUseCase)
     singleOf(::DeleteTaskUseCase)
@@ -122,7 +125,21 @@ val commonModule = module {
 
     // ViewModels
     viewModelOf(::LLMViewModel)
-    viewModelOf(::TaskViewModel)
+    viewModel {
+        TaskViewModel(
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get<TaskSagaCoordinator>()
+        )
+    }
 }
 
 expect val platformModule: Module

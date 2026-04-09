@@ -65,6 +65,8 @@ data class AgentState(
     val name: String = "",
     val systemPrompt: String = "You are a helpful assistant.",
     val temperature: Double = 0.7,
+    /** Основная модель для чата (отдельно от [UserProfile.memoryModelProvider] для памяти). */
+    val provider: LLMProvider = LLMProvider.Yandex(),
     val maxTokens: Int = 2000,
     val stopWord: String = "",
     val currentStage: AgentStage = AgentStage.PLANNING,

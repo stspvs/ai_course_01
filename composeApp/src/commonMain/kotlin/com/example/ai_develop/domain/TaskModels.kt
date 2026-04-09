@@ -4,7 +4,14 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 enum class TaskState {
-    PLANNING, EXECUTION, VALIDATION, DONE
+    PLANNING, EXECUTION, VERIFICATION, DONE;
+
+    companion object {
+        fun fromPersisted(value: String): TaskState = when (value) {
+            "VALIDATION" -> VERIFICATION
+            else -> runCatching { valueOf(value) }.getOrDefault(PLANNING)
+        }
+    }
 }
 
 @Serializable
@@ -29,7 +36,8 @@ data class TaskContext(
     val validatorAgentId: String? = null,
     val architectColor: Long = 0xFF2196F3,
     val executorColor: Long = 0xFF4CAF50,
-    val validatorColor: Long = 0xFF9C27B0
+    val validatorColor: Long = 0xFF9C27B0,
+    val runtimeState: TaskRuntimeState = TaskRuntimeState.defaultFor(taskId)
 ) {
     val isReadyToRun: Boolean
         get() = architectAgentId != null && executorAgentId != null && validatorAgentId != null

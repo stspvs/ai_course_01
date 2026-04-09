@@ -54,7 +54,7 @@ class Converters {
     fun fromTaskState(state: TaskState): String = state.name
 
     @TypeConverter
-    fun toTaskState(value: String): TaskState = TaskState.valueOf(value)
+    fun toTaskState(value: String): TaskState = TaskState.fromPersisted(value)
 
     @TypeConverter
     fun fromStringList(list: List<String>): String = json.encodeToString(list)
