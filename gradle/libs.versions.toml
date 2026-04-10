@@ -1,13 +1,13 @@
 [versions]
-compose-multiplatform = "1.7.3"
+compose-multiplatform = "1.10.3"
 junit = "4.13.2"
 junit-jupiter = "5.10.2"
-kotlin = "2.1.0"
-kotlinx-coroutines = "1.10.1"
-kotlinx-serialization = "1.8.0"
-ktor = "3.1.0"
+kotlin = "2.3.10"
+kotlinx-coroutines = "1.10.2"
+kotlinx-serialization = "1.10.0"
+ktor = "3.3.3"
+mcp-kotlin-sdk = "0.11.0"
 koin = "4.0.0"
-ksp = "2.1.0-1.0.29"
 androidx-lifecycle = "2.8.4"
 sqldelight = "2.0.2"
 mockk = "1.13.12"
@@ -45,10 +45,19 @@ sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", versi
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 mockk-common = { module = "io.mockk:mockk-common", version.ref = "mockk" }
 
+ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
+ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+
+mcp-kotlin-sdk-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", version.ref = "mcp-kotlin-sdk" }
+mcp-kotlin-sdk-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcp-kotlin-sdk" }
+
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version = "2.0.17" }
+
 [plugins]
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }

@@ -71,6 +71,14 @@ kotlin {
                 implementation(libs.junit.jupiter.api)
                 runtimeOnly(libs.junit.jupiter.engine)
                 implementation(libs.mockk)
+
+                implementation(libs.mcp.kotlin.sdk.client)
+                implementation(libs.mcp.kotlin.sdk.server)
+                implementation(libs.ktor.server.netty)
+                implementation(libs.ktor.server.cors)
+                implementation(libs.ktor.server.content.negotiation)
+                implementation(libs.ktor.client.cio)
+                implementation(libs.slf4j.simple)
             }
         }
     }
