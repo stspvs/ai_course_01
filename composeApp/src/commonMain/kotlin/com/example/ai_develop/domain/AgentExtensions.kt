@@ -94,3 +94,11 @@ fun createChatMessage(
 )
 
 fun estimateTokens(text: String): Int = (text.length / 4).coerceAtLeast(1)
+
+/**
+ * Оценка токенов для UI: сохранённое значение из БД, иначе эвристика по тексту (как в [createChatMessage]).
+ */
+fun ChatMessage.estimatedTokenCount(): Int {
+    val stored = tokensUsed
+    return if (stored != null && stored > 0) stored else estimateTokens(message)
+}

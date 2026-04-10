@@ -245,9 +245,9 @@ internal fun MessageBubble(message: ChatMessage) {
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
-                if (message.tokenCount > 0) {
+                if (message.message.isNotBlank()) {
                     Text(
-                        text = "${message.tokenCount} токенов",
+                        text = "${message.estimatedTokenCount()} токенов",
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.align(Alignment.End).padding(end = 8.dp, bottom = 4.dp),
                         color = if (isUser) Color.White.copy(alpha = 0.7f) else Color.Gray

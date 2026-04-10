@@ -34,7 +34,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.ChatMessage
+import com.example.ai_develop.domain.estimatedTokenCount
+import com.example.ai_develop.domain.estimateTokens
 import com.example.ai_develop.domain.LlmRequestSnapshot
 import com.example.ai_develop.domain.SourceType
 import com.example.ai_develop.domain.TaskContext
@@ -58,6 +61,13 @@ fun TaskChatContent(viewModel: TaskViewModel) {
     var logTargetMessage by remember { mutableStateOf<ChatMessage?>(null) }
     val logSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val taskTokensUsed = remember(messages, streamingDraft, taskContext?.taskId) {
+        if (taskContext == null) return@remember 0
+        var sum = messages.sumOf { it.estimatedTokenCount() }
+        if (streamingDraft.isNotBlank()) sum += estimateTokens(streamingDraft)
+        sum
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         // Header with Task Selection and Controls
         Surface(
@@ -78,6 +88,23 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                     )
 
                     Spacer(modifier = Modifier.weight(1f))
+
+                    if (taskContext != null) {
+                        Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 8.dp)) {
+                            Text(
+                                text = "$taskTokensUsed",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF4A148C)
+                            )
+                            Text(
+                                text = "токенов",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
                     taskContext?.let { task ->
                         if (!task.isReadyToRun) {
@@ -726,6 +753,17 @@ private fun TaskMessageBubbleFrame(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
+            }
+            if (message.message.isNotBlank()) {
+                Text(
+                    text = "${message.estimatedTokenCount()} токенов",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    textAlign = TextAlign.End
+                )
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),

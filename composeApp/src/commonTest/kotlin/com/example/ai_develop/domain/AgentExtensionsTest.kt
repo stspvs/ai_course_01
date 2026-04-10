@@ -72,4 +72,12 @@ class AgentExtensionsTest {
         assertEquals(1, estimateTokens("abc"))
         assertEquals(2, estimateTokens("12345678"))
     }
+
+    @Test
+    fun testEstimatedTokenCountUsesStoredOrHeuristic() {
+        val withStored = ChatMessage(message = "x", tokensUsed = 42)
+        assertEquals(42, withStored.estimatedTokenCount())
+        val noStored = ChatMessage(message = "12345678")
+        assertEquals(2, noStored.estimatedTokenCount())
+    }
 }
