@@ -71,6 +71,9 @@ const val MAX_TASK_INVARIANT_TEXT_LENGTH = 80
 const val INVARIANT_OVERRIDE_ISSUE_MESSAGE =
     "The plan-step inspector accepted this step, but one or more task invariants failed; address only the invariant feedback below."
 
+const val PLAN_INVARIANT_OVERRIDE_ISSUE_MESSAGE =
+    "The plan inspector accepted this plan, but one or more task invariants failed; address only the invariant feedback below."
+
 @Serializable
 enum class InvariantPolarity {
     /** Описание — то, что должно выполняться / присутствовать. */
@@ -125,13 +128,16 @@ data class TaskRuntimeState(
     val awaitingPlanConfirmation: Boolean = false,
     val executionRetryCount: Int = 0,
     val verificationRetryCount: Int = 0,
+    val planVerificationRetryCount: Int = 0,
     val planningLlmCalls: Int = 0,
     val executionLlmCalls: Int = 0,
     val verificationLlmCalls: Int = 0,
+    val planVerificationLlmCalls: Int = 0,
     val maxRetries: Int = 3,
     val maxPlanningSteps: Int = 50,
     val maxExecutionSteps: Int = 50,
     val maxVerificationSteps: Int = 50,
+    val maxPlanVerificationSteps: Int = 50,
     val autoCompress: Boolean = true,
     val compressAfterMessages: Int = 20,
     val planningMessagesSinceCompress: Int = 0,
@@ -164,13 +170,16 @@ data class TaskRuntimeState(
                 awaitingPlanConfirmation = false,
                 executionRetryCount = 0,
                 verificationRetryCount = 0,
+                planVerificationRetryCount = 0,
                 planningLlmCalls = 0,
                 executionLlmCalls = 0,
                 verificationLlmCalls = 0,
+                planVerificationLlmCalls = 0,
                 maxRetries = previous.maxRetries,
                 maxPlanningSteps = previous.maxPlanningSteps,
                 maxExecutionSteps = previous.maxExecutionSteps,
                 maxVerificationSteps = previous.maxVerificationSteps,
+                maxPlanVerificationSteps = previous.maxPlanVerificationSteps,
                 autoCompress = previous.autoCompress,
                 compressAfterMessages = previous.compressAfterMessages,
                 planningMessagesSinceCompress = 0,
@@ -193,7 +202,8 @@ data class TaskRuntimeState(
  */
 fun VerificationResult.mergedWithInvariantResults(
     invariants: List<TaskInvariant>,
-    invariantResults: List<InvariantVerificationResult>
+    invariantResults: List<InvariantVerificationResult>,
+    invariantOverrideIssueMessage: String = INVARIANT_OVERRIDE_ISSUE_MESSAGE
 ): VerificationResult {
     require(invariants.size == invariantResults.size)
     val allInvOk = invariantResults.all { it.success }
@@ -220,7 +230,7 @@ fun VerificationResult.mergedWithInvariantResults(
     if (success && !allInvOk) {
         return VerificationResult(
             success = false,
-            issues = listOf(INVARIANT_OVERRIDE_ISSUE_MESSAGE),
+            issues = listOf(invariantOverrideIssueMessage),
             suggestions = extraSuggestions.takeIf { it.isNotEmpty() }
         )
     }

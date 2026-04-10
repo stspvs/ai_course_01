@@ -8,10 +8,19 @@ import kotlin.test.assertTrue
 class AutonomousTaskStateMachineTest {
 
     @Test
-    fun planningToExecutionOrDone() {
-        assertTrue(AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.EXECUTION))
+    fun planningToPlanVerificationOrDone() {
+        assertTrue(AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.PLAN_VERIFICATION))
         assertTrue(AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.DONE))
+        assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.EXECUTION))
         assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.VERIFICATION))
+    }
+
+    @Test
+    fun planVerificationToExecutionPlanningOrDone() {
+        assertTrue(AutonomousTaskStateMachine.canTransition(TaskState.PLAN_VERIFICATION, TaskState.EXECUTION))
+        assertTrue(AutonomousTaskStateMachine.canTransition(TaskState.PLAN_VERIFICATION, TaskState.PLANNING))
+        assertTrue(AutonomousTaskStateMachine.canTransition(TaskState.PLAN_VERIFICATION, TaskState.DONE))
+        assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.PLAN_VERIFICATION, TaskState.VERIFICATION))
     }
 
     @Test
@@ -31,6 +40,7 @@ class AutonomousTaskStateMachineTest {
     @Test
     fun doneIsTerminal() {
         assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.DONE, TaskState.PLANNING))
+        assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.DONE, TaskState.PLAN_VERIFICATION))
         assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.DONE, TaskState.EXECUTION))
         assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.DONE, TaskState.VERIFICATION))
         assertFalse(AutonomousTaskStateMachine.canTransition(TaskState.DONE, TaskState.DONE))
@@ -39,6 +49,7 @@ class AutonomousTaskStateMachineTest {
     @Test
     fun forceDoneFromActiveStages() {
         assertTrue(AutonomousTaskStateMachine.canForceDone(TaskState.PLANNING))
+        assertTrue(AutonomousTaskStateMachine.canForceDone(TaskState.PLAN_VERIFICATION))
         assertTrue(AutonomousTaskStateMachine.canForceDone(TaskState.EXECUTION))
         assertTrue(AutonomousTaskStateMachine.canForceDone(TaskState.VERIFICATION))
         assertFalse(AutonomousTaskStateMachine.canForceDone(TaskState.DONE))
@@ -79,6 +90,13 @@ class AutonomousTaskStateMachineTest {
     }
 
     @Test
+    fun shouldTimeoutPlanVerification_boundary() {
+        val base = TaskRuntimeState.defaultFor("t").copy(maxPlanVerificationSteps = 50)
+        assertFalse(AutonomousTaskStateMachine.shouldTimeoutPlanVerification(base.copy(planVerificationLlmCalls = 49)))
+        assertTrue(AutonomousTaskStateMachine.shouldTimeoutPlanVerification(base.copy(planVerificationLlmCalls = 50)))
+    }
+
+    @Test
     fun mergeRuntime_setsStageAndOptionalOutcome() {
         val r = TaskRuntimeState.defaultFor("t").copy(stage = TaskState.PLANNING, outcome = null)
         val m = AutonomousTaskStateMachine.mergeRuntime(r, TaskState.EXECUTION, incrementStepCount = false, outcome = TaskOutcome.FAILED)
@@ -101,7 +119,11 @@ class AutonomousTaskStateMachineTest {
             for (to in all) {
                 val allowed = AutonomousTaskStateMachine.canTransition(from, to)
                 when (from) {
-                    TaskState.PLANNING -> assertEquals(to == TaskState.EXECUTION || to == TaskState.DONE, allowed)
+                    TaskState.PLANNING -> assertEquals(to == TaskState.PLAN_VERIFICATION || to == TaskState.DONE, allowed)
+                    TaskState.PLAN_VERIFICATION -> assertEquals(
+                        to == TaskState.EXECUTION || to == TaskState.PLANNING || to == TaskState.DONE,
+                        allowed
+                    )
                     TaskState.EXECUTION -> assertEquals(to == TaskState.VERIFICATION || to == TaskState.DONE, allowed)
                     TaskState.VERIFICATION -> assertEquals(to == TaskState.EXECUTION || to == TaskState.DONE, allowed)
                     TaskState.DONE -> assertFalse(allowed)

@@ -159,7 +159,7 @@ class TaskSagaDetailedTest {
         assertEquals(
             3,
             chatRepo.systemPrompts.size,
-            "Expected PLANNING→EXECUTION→VERIFICATION LLM calls. Got:\n${chatRepo.systemPrompts.joinToString("\n---\n")}"
+            "Expected PLANNING→EXECUTION→VERIFICATION (no task invariants: plan verification skips LLM). Got:\n${chatRepo.systemPrompts.joinToString("\n---\n")}"
         )
         assertTrue(chatRepo.systemPrompts.any { it.contains("PLANNING stage") }, "Should have called PLANNING stage")
         assertTrue(chatRepo.systemPrompts.any { it.contains("EXECUTION stage") }, "Should have called EXECUTION stage")
@@ -247,6 +247,7 @@ class TaskSagaDetailedTest {
         localRepo.saveTask(context)
 
         val saga = TaskSaga(chatRepo, localRepo, agent, agent, agent, context, memoryManager, testDispatcher)
+        chatRepo.responseQueue.add("""{"success":true,"issues":null,"suggestions":null}""")
         chatRepo.responseQueue.add("""{"success":true,"output":"x","errors":null}""")
         chatRepo.responseQueue.add("""{"success":true,"issues":null,"suggestions":null}""")
 

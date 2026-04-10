@@ -27,7 +27,7 @@ import kotlinx.serialization.json.Json
 private const val DEFAULT_LLM_TIMEOUT_MS = 120_000L
 
 /**
- * Оркестратор этапов задачи (PLANNING → EXECUTION → VERIFICATION → DONE).
+ * Оркестратор этапов задачи (PLANNING → PLAN_VERIFICATION → EXECUTION → VERIFICATION → DONE).
  * Слои FSM vs лента чата: [TaskSagaDomainLayer].
  */
 @OptIn(ExperimentalUuidApi::class)
@@ -149,6 +149,7 @@ class TaskSaga(
     private fun getRoleForState(state: TaskState): TaskRole {
         return when (state) {
             TaskState.PLANNING -> ArchitectRole()
+            TaskState.PLAN_VERIFICATION -> ValidatorRole()
             TaskState.EXECUTION -> ExecutorRole()
             TaskState.VERIFICATION -> ValidatorRole()
             TaskState.DONE -> throw IllegalStateException("No role for DONE state")
@@ -172,7 +173,8 @@ class TaskSaga(
             maxSteps = src.maxSteps,
             maxPlanningSteps = src.maxPlanningSteps,
             maxExecutionSteps = src.maxExecutionSteps,
-            maxVerificationSteps = src.maxVerificationSteps
+            maxVerificationSteps = src.maxVerificationSteps,
+            maxPlanVerificationSteps = src.maxPlanVerificationSteps
         )
         if (merged != cur.runtimeState) {
             _context.value = cur.copy(runtimeState = merged)
@@ -234,7 +236,7 @@ class TaskSaga(
             if (ctx.state.taskState != TaskState.PLANNING) return@launch
             if (!ctx.runtimeState.awaitingPlanConfirmation && ctx.runtimeState.planResult == null) return@launch
             val plan = ctx.runtimeState.planResult ?: return@launch
-            if (!AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.EXECUTION)) return@launch
+            if (!AutonomousTaskStateMachine.canTransition(TaskState.PLANNING, TaskState.PLAN_VERIFICATION)) return@launch
             if (AutonomousTaskStateMachine.isGlobalStepLimitExceeded(ctx.runtimeState)) {
                 stageMutex.withLock { finishWithOutcome(TaskOutcome.FAILED) }
                 return@launch
@@ -248,7 +250,7 @@ class TaskSaga(
                 transitionToNextState(
                     sourceAgentId = ctx2.architectAgentId ?: return@withLock,
                     from = TaskState.PLANNING,
-                    to = TaskState.EXECUTION,
+                    to = TaskState.PLAN_VERIFICATION,
                     planResult = plan2,
                     notification = "--- PLAN CONFIRMED ---\n${plan2.goal}"
                 )
@@ -310,6 +312,7 @@ class TaskSaga(
         val role = getRoleForState(currentContext.state.taskState)
         val agent = when (currentContext.state.taskState) {
             TaskState.PLANNING -> architect
+            TaskState.PLAN_VERIFICATION -> validator
             TaskState.EXECUTION -> executor
             TaskState.VERIFICATION -> validator
             TaskState.DONE -> null
@@ -317,6 +320,7 @@ class TaskSaga(
 
         when (currentContext.state.taskState) {
             TaskState.PLANNING -> runPlanningStage(agent, role as ArchitectRole)
+            TaskState.PLAN_VERIFICATION -> runPlanVerificationStage(agent, role as ValidatorRole)
             TaskState.EXECUTION -> runExecutionStage(agent, role as ExecutorRole)
             TaskState.VERIFICATION -> runVerificationStage(agent, role as ValidatorRole)
             TaskState.DONE -> {}
@@ -354,6 +358,18 @@ class TaskSaga(
         return base.copy(messages = msgs)
     }
 
+    /** Память планировщика: только пользователь/архитектор и сжатый хвост проверки плана — см. [TaskPlanningMemoryFilter]. */
+    private suspend fun agentWithArchitectPlanningMemory(base: Agent): Agent {
+        val msgs = localRepository.getMessagesForTask(_context.value.taskId).first()
+        val afterInspector = _context.value.runtimeState.lastVerification != null
+        return base.copy(
+            messages = TaskPlanningMemoryFilter.filterForArchitect(
+                msgs,
+                stalePlannerJsonAfterInspectorRejection = afterInspector
+            )
+        )
+    }
+
     private suspend fun runPlanningStageLocked(agent: Agent, role: ArchitectRole) {
         val currentContext = _context.value
         if (currentContext.isPaused) return
@@ -372,7 +388,7 @@ class TaskSaga(
 
         maybeCompressPlanningDuringDialog(agent)
 
-        val agentForLlm = agentWithCurrentTaskMessages(agent)
+        val agentForLlm = agentWithArchitectPlanningMemory(agent)
         val finalHistory = role.processHistory(agentForLlm, memoryManager)
         val systemInstruction = role.getSystemInstruction(currentContext)
         val fullSystemPrompt = systemPromptWithTaskInvariants(
@@ -389,7 +405,8 @@ class TaskSaga(
             inputMessages = contextMessages,
             agent = agentForLlm,
             agentStageLabel = currentContext.state.taskState.name,
-            isJsonMode = role.isJsonMode()
+            isJsonMode = role.isJsonMode(),
+            planningInspectorRevisionMode = currentContext.runtimeState.lastVerification != null
         )
 
         var fullResponse = ""
@@ -486,7 +503,9 @@ class TaskSaga(
             return
         }
         val plan = resolvePlanFromPlannerOutput(ctx, out, raw, sagaResp)
-        if (out.requiresUserConfirmation) {
+        val afterInspectorRevision = ctx.runtimeState.lastVerification != null
+        val waitForUserConfirm = out.requiresUserConfirmation && !afterInspectorRevision
+        if (waitForUserConfirm) {
             updateStateInDb { TaskSagaReducer.setPlanAwaitingUserConfirmation(it, plan) }
             logVerbose("Awaiting plan confirmation")
             return
@@ -495,7 +514,7 @@ class TaskSaga(
         transitionToNextState(
             sourceAgentId = sourceAgentId,
             from = TaskState.PLANNING,
-            to = TaskState.EXECUTION,
+            to = TaskState.PLAN_VERIFICATION,
             planResult = plan,
             notification = "--- PLAN READY ---\n${plan.goal}"
         )
@@ -523,6 +542,183 @@ class TaskSaga(
                 logVerbose("Legacy SUCCESS — awaiting confirmPlan()")
             }
             else -> {}
+        }
+    }
+
+    private fun runPlanVerificationStage(agent: Agent?, role: ValidatorRole) {
+        if (agent == null) {
+            scope.launch { handleStageError(null, Exception("Агент для PLAN_VERIFICATION не назначен")) }
+            return
+        }
+        scope.launch {
+            stageMutex.withLock {
+                if (isStageRunning) return@launch
+                isStageRunning = true
+            }
+            try {
+                runPlanVerificationStageLocked(agent, role)
+            } catch (e: APIException) {
+                handleStageError(agent, e.error)
+            } catch (e: Exception) {
+                handleStageError(agent, e)
+            } finally {
+                isStageRunning = false
+            }
+        }
+    }
+
+    private suspend fun runPlanVerificationStageLocked(agent: Agent, role: ValidatorRole) {
+        val ctx = _context.value
+        if (ctx.isPaused) return
+
+        val snap = resolvedTaskContext()
+        val invariants = snap.runtimeState.invariants
+        val planForInspector = snap.runtimeState.planResult ?: PlanResult(
+            goal = snap.title,
+            steps = snap.plan,
+            successCriteria = "",
+            constraints = null,
+            contextSummary = null
+        )
+
+        // Проверка плана только по инвариантам: общий WholePlan-инспектор не вызывается.
+        if (invariants.isEmpty()) {
+            val verResult = VerificationResult(success = true, issues = null, suggestions = null)
+            updateStateInDb {
+                it.copy(
+                    runtimeState = it.runtimeState.copy(
+                        lastVerification = verResult,
+                        planVerificationRetryCount = 0
+                    )
+                )
+            }
+            if (verResult.success) {
+                transitionToNextState(
+                    sourceAgentId = agent.id,
+                    from = TaskState.PLAN_VERIFICATION,
+                    to = TaskState.EXECUTION,
+                    planResult = planForInspector,
+                    notification = "--- PLAN APPROVED ---\n${planForInspector.goal}"
+                )
+            }
+            return
+        }
+
+        val agentForLlm = agentWithCurrentTaskMessages(agent)
+        val rs = ctx.runtimeState
+        val newRs = rs.copy(
+            planVerificationLlmCalls = rs.planVerificationLlmCalls + 1,
+            planVerificationRetryCount = rs.planVerificationRetryCount
+        )
+        updateStateInDb { it.copy(runtimeState = newRs) }
+
+        if (AutonomousTaskStateMachine.shouldTimeoutPlanVerification(newRs)) {
+            finishWithOutcome(TaskOutcome.TIMEOUT)
+            return
+        }
+
+        val planForInvariants = planForInspector
+
+        val invariantSystemInstruction =
+            role.getValidatorInstruction(ctx, ValidatorInstructionKind.TaskInvariantPlan)
+        val fullInvariantSystemPrompt = systemPromptWithTaskInvariants(
+            role.buildSystemPrompt(
+                agentForLlm,
+                invariantSystemInstruction,
+                memoryManager,
+                includeUserProfile = false,
+                includeAgentWorkingMemoryInSystem = false
+            ),
+            invariants,
+            appendTaskInvariantsBlock = false
+        )
+        val invariantResults = mutableListOf<InvariantVerificationResult>()
+        val maxInvAttempts = _context.value.runtimeState.maxRetries
+        for (inv in invariants) {
+            if (_context.value.isPaused) return
+            val rsBeforeInv = _context.value.runtimeState
+            val bumped = rsBeforeInv.copy(planVerificationLlmCalls = rsBeforeInv.planVerificationLlmCalls + 1)
+            updateStateInDb { it.copy(runtimeState = bumped) }
+            if (AutonomousTaskStateMachine.shouldTimeoutPlanVerification(bumped)) {
+                finishWithOutcome(TaskOutcome.TIMEOUT)
+                return
+            }
+            var invParsed: InvariantVerificationResult? = null
+            var invAttempt = 0
+            while (invParsed == null && invAttempt < maxInvAttempts) {
+                invAttempt++
+                if (_context.value.isPaused) return
+                val invUser = TaskOrchestratorPrompts.invariantPlanInspectorUserContent(inv, planForInvariants)
+                val invMessages = listOf(
+                    ChatMessage(
+                        id = Uuid.random().toString(),
+                        role = "user",
+                        message = invUser,
+                        timestamp = System.currentTimeMillis(),
+                        taskId = ctx.taskId,
+                        taskState = TaskState.PLAN_VERIFICATION
+                    )
+                )
+                var invResponse = ""
+                try {
+                    withTimeout(DEFAULT_LLM_TIMEOUT_MS) {
+                        repository.chatStreaming(
+                            messages = invMessages,
+                            systemPrompt = fullInvariantSystemPrompt,
+                            maxTokens = agent.maxTokens,
+                            temperature = agent.temperature,
+                            stopWord = agent.stopWord,
+                            isJsonMode = true,
+                            provider = agent.provider
+                        ).collect { result ->
+                            result.onSuccess { chunk -> invResponse += chunk }
+                                .onFailure { throw APIException(it) }
+                        }
+                    }
+                } catch (_: TimeoutCancellationException) {
+                    finishWithOutcome(TaskOutcome.TIMEOUT)
+                    return
+                }
+                invParsed = AutonomousTaskJsonParsers.parseInvariantVerificationResult(invResponse)
+            }
+            invariantResults.add(
+                invParsed
+                    ?: InvariantVerificationResult(
+                        success = false,
+                        reason = "Invalid or empty JSON from inspector for invariant check."
+                    )
+            )
+        }
+
+        val baseOk = VerificationResult(success = true, issues = null, suggestions = null)
+        val verResult = baseOk.mergedWithInvariantResults(
+            invariants,
+            invariantResults,
+            invariantOverrideIssueMessage = PLAN_INVARIANT_OVERRIDE_ISSUE_MESSAGE
+        )
+
+        updateStateInDb {
+            it.copy(
+                runtimeState = it.runtimeState.copy(
+                    lastVerification = verResult,
+                    planVerificationRetryCount = if (verResult.success) 0 else it.runtimeState.planVerificationRetryCount
+                )
+            )
+        }
+
+        if (verResult.success) {
+            transitionToNextState(
+                sourceAgentId = agent.id,
+                from = TaskState.PLAN_VERIFICATION,
+                to = TaskState.EXECUTION,
+                planResult = planForInspector,
+                notification = "--- PLAN APPROVED ---\n${planForInspector.goal}"
+            )
+        } else {
+            isStageRunning = false
+            val failNext = TaskSagaReducer.planVerificationFailToPlanning(_context.value) ?: return
+            updateStateInDb { failNext }
+            notifyStageEntry(TaskState.PLANNING)
         }
     }
 
@@ -961,9 +1157,10 @@ class TaskSaga(
         if (verResult.success) {
             if (stepIndex >= lastIndex) {
                 if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.DONE)) {
+                    val finalExecution = postVerify.runtimeState.lastExecution
                     val successNext = TaskSagaReducer.verificationSuccessTerminal(_context.value) ?: return
                     updateStateInDb { successNext }
-                    notifySystem("--- TASK SUCCESS ---", TaskState.VERIFICATION)
+                    notifySystem(TaskCompletionMessages.taskSuccessWithExecutorResult(finalExecution), TaskState.DONE)
                 }
             } else {
                 val nextIndex = stepIndex + 1
@@ -1024,6 +1221,7 @@ class TaskSaga(
         if (!AutonomousTaskStateMachine.canTransition(from, to)) return
         val currentAgent = when (from) {
             TaskState.PLANNING -> architect
+            TaskState.PLAN_VERIFICATION -> validator
             TaskState.EXECUTION -> executor
             TaskState.VERIFICATION -> validator
             else -> null
@@ -1050,7 +1248,8 @@ class TaskSaga(
         notifyStageEntry(
             stage = to,
             executionPlan = if (to == TaskState.EXECUTION) planResult else null,
-            executionStepIndexOverride = if (to == TaskState.EXECUTION) 0 else null
+            executionStepIndexOverride = if (to == TaskState.EXECUTION) 0 else null,
+            planForBanner = planResult
         )
 
         val next = TaskSagaReducer.stageTransition(_context.value, from, to, planResult) ?: return
@@ -1090,10 +1289,27 @@ class TaskSaga(
     private suspend fun notifyStageEntry(
         stage: TaskState,
         executionPlan: PlanResult? = null,
-        executionStepIndexOverride: Int? = null
+        executionStepIndexOverride: Int? = null,
+        planForBanner: PlanResult? = null
     ) {
         val text = when (stage) {
             TaskState.PLANNING -> "▶ Начинается этап: планирование (архитектор)"
+            TaskState.PLAN_VERIFICATION -> {
+                val plan = planForBanner ?: _context.value.runtimeState.planResult
+                    ?: PlanResult(
+                        goal = _context.value.title,
+                        steps = _context.value.plan,
+                        successCriteria = "",
+                        constraints = null,
+                        contextSummary = null
+                    )
+                buildString {
+                    appendLine("▶ Начинается этап: проверка плана (инспектор)")
+                    appendLine()
+                    appendLine("Проверяется согласованный план (${plan.steps.size} шаг.) перед исполнением.")
+                    appendLine("Цель: ${plan.goal.trim().ifBlank { "(нет)" }}")
+                }
+            }
             TaskState.EXECUTION -> {
                 val plan = executionPlan ?: _context.value.runtimeState.planResult
                     ?: PlanResult(
@@ -1148,7 +1364,7 @@ class TaskSaga(
 
     private suspend fun forceCompressPlanningContext() {
         val architectAgent = architect ?: return
-        val withTaskMessages = agentWithCurrentTaskMessages(architectAgent)
+        val withTaskMessages = agentWithArchitectPlanningMemory(architectAgent)
         val summaryInstr = (withTaskMessages.memoryStrategy as? ChatMemoryStrategy.Summarization)?.summaryPrompt
             ?: "Summarize the planning conversation: goals, constraints, and agreed steps briefly."
         val result = repository.summarize(

@@ -211,4 +211,66 @@ class TaskOrchestratorPromptsTest {
         )
         assertContains(prompt, "(empty invariant)")
     }
+
+    @Test
+    fun planInspectorUserContent_includesStructuredPlanAndRules() {
+        val p = TaskOrchestratorPrompts.planInspectorUserContent(samplePlan)
+        assertContains(p, "=== PLAN (structured) — verify this entire plan before execution ===")
+        assertContains(p, "=== VERIFICATION RULES ===")
+        assertContains(p, "Do NOT require executor deliverables")
+        assertFalse(p.contains("=== EXECUTION RESULT"))
+    }
+
+    @Test
+    fun planInspectorUserContent_withPreviousVerification_includesBlock() {
+        val prev = VerificationResult(false, issues = listOf("vague steps"), suggestions = null)
+        val p = TaskOrchestratorPrompts.planInspectorUserContent(samplePlan, lastVerification = prev)
+        assertContains(p, "=== PREVIOUS PLAN VERIFICATION")
+        assertContains(p, "vague steps")
+    }
+
+    @Test
+    fun planInspectorUserContent_withLastPlannerMessage_includesPlannerBlock() {
+        val p = TaskOrchestratorPrompts.planInspectorUserContent(
+            samplePlan,
+            lastPlannerAssistantMessage = "Plain rationale before JSON."
+        )
+        assertContains(p, "=== PLANNER LAST MESSAGE")
+        assertContains(p, "Plain rationale before JSON.")
+        assertContains(p, "=== PLAN (structured)")
+    }
+
+    @Test
+    fun lastPlannerAssistantMessageForInspector_picksLastPlanningAssistant() {
+        val msgs = listOf(
+            ChatMessage(
+                id = "a1",
+                role = "assistant",
+                message = "first",
+                timestamp = 1L,
+                source = SourceType.AI,
+                taskId = "t",
+                taskState = TaskState.PLANNING
+            ),
+            ChatMessage(
+                id = "a2",
+                role = "assistant",
+                message = "last planner",
+                timestamp = 2L,
+                source = SourceType.AI,
+                taskId = "t",
+                taskState = TaskState.PLANNING
+            )
+        )
+        assertEquals("last planner", TaskOrchestratorPrompts.lastPlannerAssistantMessageForInspector(msgs))
+    }
+
+    @Test
+    fun invariantPlanInspectorUserContent_embedsPlanJson() {
+        val inv = TaskInvariant("id", "Must include tests step")
+        val p = TaskOrchestratorPrompts.invariantPlanInspectorUserContent(inv, samplePlan)
+        assertContains(p, "=== DATA (structured plan as JSON) ===")
+        assertContains(p, "\"goal\":\"g\"")
+        assertContains(p, "Must include tests step")
+    }
 }

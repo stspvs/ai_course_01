@@ -1,12 +1,13 @@
 package com.example.ai_develop.domain
 
 /**
- * Строгие переходы task-level FSM (PLANNING → EXECUTION → VERIFICATION → DONE).
+ * Строгие переходы task-level FSM (PLANNING → PLAN_VERIFICATION → EXECUTION → VERIFICATION → DONE).
  */
 object AutonomousTaskStateMachine {
 
     fun canTransition(from: TaskState, to: TaskState): Boolean = when (from) {
-        TaskState.PLANNING -> to == TaskState.EXECUTION || to == TaskState.DONE
+        TaskState.PLANNING -> to == TaskState.PLAN_VERIFICATION || to == TaskState.DONE
+        TaskState.PLAN_VERIFICATION -> to == TaskState.EXECUTION || to == TaskState.PLANNING || to == TaskState.DONE
         TaskState.EXECUTION -> to == TaskState.VERIFICATION || to == TaskState.DONE
         TaskState.VERIFICATION -> to == TaskState.EXECUTION || to == TaskState.DONE
         TaskState.DONE -> false
@@ -28,6 +29,9 @@ object AutonomousTaskStateMachine {
 
     fun shouldTimeoutVerification(runtime: TaskRuntimeState): Boolean =
         runtime.verificationLlmCalls >= runtime.maxVerificationSteps
+
+    fun shouldTimeoutPlanVerification(runtime: TaskRuntimeState): Boolean =
+        runtime.planVerificationLlmCalls >= runtime.maxPlanVerificationSteps
 
     fun mergeRuntime(
         runtime: TaskRuntimeState,

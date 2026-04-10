@@ -4,9 +4,31 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 object TaskOrchestratorPrompts {
+
+    private const val MAX_PLANNER_SNIPPET_CHARS = 24_000
+
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+    }
+
+    /**
+     * Последний ответ архитектора в чате задачи на этапе планирования — для блока в user-сообщении инспектора плана
+     * (виден в логах LLM и даёт модели пояснения помимо структурированного [PlanResult]).
+     */
+    fun lastPlannerAssistantMessageForInspector(messages: List<ChatMessage>): String? {
+        val sorted = messages.sortedWith(compareBy({ it.timestamp }, { it.id }))
+        val last = sorted.lastOrNull { m ->
+            !m.isSystemNotification &&
+                m.role != "system" &&
+                m.role == "assistant" &&
+                (m.source == SourceType.AI || m.source == SourceType.ASSISTANT) &&
+                when (m.taskState) {
+                    null, TaskState.PLANNING -> true
+                    else -> false
+                }
+        }
+        return last?.message?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_PLANNER_SNIPPET_CHARS)
     }
 
     /**
@@ -175,6 +197,47 @@ object TaskOrchestratorPrompts {
         appendLine("Respond with JSON: {\"success\":true/false,\"issues\":[\"...\"],\"suggestions\":[\"...\"]}")
     }
 
+    /**
+     * User message for [ValidatorInstructionKind.WholePlan]: full [PlanResult] only, optional previous verdict on re-check.
+     *
+     * @param lastPlannerAssistantMessage последний ответ архитектора из чата (plain text и/или JSON) — дублирует контекст
+     * для логов и опционально для модели; источник истины по шагам — блок structured plan ниже.
+     */
+    fun planInspectorUserContent(
+        plan: PlanResult,
+        lastVerification: VerificationResult? = null,
+        lastPlannerAssistantMessage: String? = null
+    ): String = buildString {
+        if (!lastPlannerAssistantMessage.isNullOrBlank()) {
+            appendLine("=== PLANNER LAST MESSAGE (from task chat; may repeat JSON from structured plan below) ===")
+            appendLine(lastPlannerAssistantMessage.trim())
+            appendLine()
+        }
+        appendLine("=== PLAN (structured) — verify this entire plan before execution ===")
+        appendLine(json.encodeToString(PlanResult.serializer(), plan))
+        appendLine()
+        if (lastVerification != null) {
+            appendLine("=== PREVIOUS PLAN VERIFICATION (last inspector verdict on this plan, JSON) ===")
+            appendLine(json.encodeToString(VerificationResult.serializer(), lastVerification))
+            appendLine()
+        }
+        appendLine("=== VERIFICATION RULES ===")
+        appendLine(
+            "- Check that plan.steps is a non-empty list of concrete, actionable items (not a vague single paragraph)."
+        )
+        appendLine(
+            "- Check that the goal and successCriteria align with the steps and are achievable in the step-by-step pipeline."
+        )
+        appendLine(
+            "- Do NOT require executor deliverables or code — execution has not started."
+        )
+        appendLine(
+            "- If steps omit obvious prerequisites for the stated goal (e.g. tests, config, platform splits), list that in issues."
+        )
+        appendLine()
+        appendLine("Respond with JSON: {\"success\":true/false,\"issues\":[\"...\"],\"suggestions\":[\"...\"]}")
+    }
+
     fun invariantInspectorUserContent(invariant: TaskInvariant, execution: ExecutionResult): String = buildString {
         appendLine("=== SCOPE (single invariant only) ===")
         appendLine(
@@ -199,6 +262,33 @@ object TaskOrchestratorPrompts {
         appendLine()
         appendLine("=== DATA (Executor deliverable as JSON; primary content is usually \"output\") ===")
         appendLine(json.encodeToString(ExecutionResult.serializer(), execution))
+        appendLine()
+        appendLine("Respond with JSON only: {\"success\":true/false,\"reason\":\"...\"}")
+    }
+
+    fun invariantPlanInspectorUserContent(invariant: TaskInvariant, plan: PlanResult): String = buildString {
+        appendLine("=== SCOPE (single invariant only) ===")
+        appendLine(
+            "Evaluate only this one invariant against the structured plan. Do not reference other task invariants."
+        )
+        appendLine()
+        appendLine("=== POLARITY (how to interpret INVARIANT below) ===")
+        when (invariant.polarity) {
+            InvariantPolarity.POSITIVE ->
+                appendLine(
+                    "POSITIVE: DATA (the plan) must satisfy the description — the described property should hold in the plan."
+                )
+            InvariantPolarity.NEGATIVE ->
+                appendLine(
+                    "NEGATIVE: DATA (the plan) must NOT match the forbidden description."
+                )
+        }
+        appendLine()
+        appendLine("=== INVARIANT (rule to check) ===")
+        appendLine(invariant.text.trim().ifBlank { "(empty invariant)" })
+        appendLine()
+        appendLine("=== DATA (structured plan as JSON) ===")
+        appendLine(json.encodeToString(PlanResult.serializer(), plan))
         appendLine()
         appendLine("Respond with JSON only: {\"success\":true/false,\"reason\":\"...\"}")
     }

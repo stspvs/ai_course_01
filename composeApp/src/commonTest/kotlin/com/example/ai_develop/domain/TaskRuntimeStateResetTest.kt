@@ -15,6 +15,7 @@ class TaskRuntimeStateResetTest {
             maxPlanningSteps = 11,
             maxExecutionSteps = 22,
             maxVerificationSteps = 33,
+            maxPlanVerificationSteps = 44,
             autoCompress = false,
             compressAfterMessages = 15,
             verbose = true,
@@ -27,6 +28,7 @@ class TaskRuntimeStateResetTest {
         assertEquals(11, next.maxPlanningSteps)
         assertEquals(22, next.maxExecutionSteps)
         assertEquals(33, next.maxVerificationSteps)
+        assertEquals(44, next.maxPlanVerificationSteps)
         assertEquals(false, next.autoCompress)
         assertEquals(15, next.compressAfterMessages)
         assertEquals(true, next.verbose)
@@ -46,9 +48,11 @@ class TaskRuntimeStateResetTest {
             awaitingPlanConfirmation = true,
             executionRetryCount = 1,
             verificationRetryCount = 2,
+            planVerificationRetryCount = 3,
             planningLlmCalls = 3,
             executionLlmCalls = 4,
             verificationLlmCalls = 5,
+            planVerificationLlmCalls = 6,
             planningMessagesSinceCompress = 8,
             cancelled = true
         )
@@ -63,9 +67,11 @@ class TaskRuntimeStateResetTest {
         assertEquals(false, next.awaitingPlanConfirmation)
         assertEquals(0, next.executionRetryCount)
         assertEquals(0, next.verificationRetryCount)
+        assertEquals(0, next.planVerificationRetryCount)
         assertEquals(0, next.planningLlmCalls)
         assertEquals(0, next.executionLlmCalls)
         assertEquals(0, next.verificationLlmCalls)
+        assertEquals(0, next.planVerificationLlmCalls)
         assertEquals(0, next.planningMessagesSinceCompress)
         assertEquals(false, next.cancelled)
     }

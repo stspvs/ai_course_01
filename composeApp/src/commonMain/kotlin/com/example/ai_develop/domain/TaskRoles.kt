@@ -18,8 +18,14 @@ enum class ValidatorInstructionKind {
     /** Full inspector prompt: plan, CURRENT STEP, execution, VERIFICATION RULES in user message. */
     PlanStep,
 
+    /** Inspect the full structured plan before any execution (no executor output). */
+    WholePlan,
+
     /** Narrow check: invariant text + execution DATA only in user message; no plan. */
-    TaskInvariant
+    TaskInvariant,
+
+    /** Narrow check: invariant text + structured plan (PlanResult JSON) as DATA. */
+    TaskInvariantPlan
 }
 
 interface TaskRole {
@@ -68,23 +74,68 @@ interface TaskRole {
 class ArchitectRole : TaskRole {
     override val taskState = TaskState.PLANNING
 
-    override fun getSystemInstruction(context: TaskContext): String =
-        "\n\n[SCOPE] This block is appended to your system prompt for the **next** LLM call only — the assistant reply you are generating in this step. It does not replace your base agent instructions; it adds task-stage rules for this inference.\n\n" +
-        "IMPORTANT: You are currently in the PLANNING stage of the task: '${context.title}'.\n" +
-        "Your goal is to work with the user to produce a clear plan for the next execution phase — " +
-        "concrete steps the executor will run one at a time (not a vague overview).\n" +
-        "RULES:\n" +
-        "1. Break down the task into logical steps or components.\n" +
-        "2. Ask the user questions ONE BY ONE to clarify details. Do not ask multiple questions at once.\n" +
-        "3. Wait for the user's response after each question before moving to the next one.\n" +
-        "4. When the plan is ready, present it to the user and ask for explicit confirmation to proceed to execution.\n" +
-        "5. Until the user explicitly confirms (e.g. \"готово\", \"да\", \"подтверждаю\"), communicate in plain text only — no planning JSON.\n" +
-        "6. When the user has explicitly confirmed and is ready for execution, respond with ONE JSON object only — no markdown, no extra text — using this exact PlannerOutput shape:\n" +
-        "{\"success\":true,\"plan\":{\"goal\":\"short goal\",\"steps\":[\"step 1 — concrete deliverable\",\"step 2 — ...\"],\"successCriteria\":\"how we know it is done\"},\"questions\":[],\"requiresUserConfirmation\":false}\n" +
-        "- Field plan.steps MUST be a JSON array of strings: one string per step. Each step must be actionable (what to build or change), not a vague summary.\n" +
-        "- For software tasks, include separate steps for shared code, platform-specific UI, Gradle/config, tests — so the executor can output real source code per step.\n" +
-        "- Do NOT use the legacy format {\"status\":\"SUCCESS\",\"result\":\"...\"} for the final handoff; it loses structured steps and breaks execution.\n" +
-        "- If you cannot produce plan.steps as an array, the automated pipeline will treat the whole plan as a single vague step."
+    override fun getSystemInstruction(context: TaskContext): String {
+        val title = context.title
+        val scopeHeader =
+            "\n\n[SCOPE] This block is appended to your system prompt for the **next** LLM call only — the assistant reply you are generating in this step. It does not replace your base agent instructions; it adds task-stage rules for this inference.\n\n" +
+            "IMPORTANT: You are currently in the PLANNING stage of the task: '$title'.\n" +
+            "Your goal is to work with the user to produce a clear plan for the next execution phase — " +
+            "concrete steps the executor will run one at a time (not a vague overview).\n" +
+            "RULES:\n" +
+            "1. Break down the task into logical steps or components.\n" +
+            "2. Ask the user questions ONE BY ONE to clarify details. Do not ask multiple questions at once.\n" +
+            "3. Wait for the user's response after each question before moving to the next one.\n"
+
+        val plannerOutputShapeDetails =
+            "{\"success\":true,\"plan\":{\"goal\":\"short goal\",\"steps\":[\"step 1 — concrete deliverable\",\"step 2 — ...\"],\"successCriteria\":\"how we know it is done\"},\"questions\":[],\"requiresUserConfirmation\":false}\n" +
+                "- Field plan.steps MUST be a JSON array of strings: one string per step. Each step must be actionable (what to build or change), not a vague summary.\n" +
+                "- For software tasks, include separate steps for shared code, platform-specific UI, Gradle/config, tests — so the executor can output real source code per step.\n" +
+                "- Do NOT use the legacy format {\"status\":\"SUCCESS\",\"result\":\"...\"} for the final handoff; it loses structured steps and breaks execution.\n" +
+                "- If you cannot produce plan.steps as an array, the automated pipeline will treat the whole plan as a single vague step."
+
+        val jsonShapeNormal =
+            "6. When the user has explicitly confirmed and is ready for execution, respond with ONE JSON object only — no markdown, no extra text — using this exact PlannerOutput shape:\n" +
+                plannerOutputShapeDetails
+
+        val v = context.runtimeState.lastVerification
+        if (v == null) {
+            return scopeHeader +
+                "4. When the plan is ready, present it to the user and ask for explicit confirmation to proceed to execution.\n" +
+                "5. Until the user explicitly confirms (e.g. \"готово\", \"да\", \"подтверждаю\"), communicate in plain text only — no planning JSON.\n" +
+                jsonShapeNormal
+        }
+
+        return buildString {
+            append(scopeHeader)
+            appendLine("4. The **plan inspector** (automated check before execution) rejected the plan. See the block below — this is your source of truth for what to fix.")
+            appendLine("5. Do **not** ask the user for permission or approval to apply these fixes. Revise the plan autonomously.")
+            appendLine("6. Ask the user a question **only** if you still lack information about the **task requirements** (one question at a time). Do not ask \"may I fix\" / \"do you approve the changes\" — fix first.")
+            appendLine("7. When the revised plan is ready to be submitted to **automated plan verification** (the next pipeline step), output ONE PlannerOutput JSON with `\"requiresUserConfirmation\": false` and `\"questions\": []` so the run can proceed without an extra confirmation round for inspector-driven edits.")
+            appendLine("8. Plain text until you emit that JSON, unless you are asking one clarifying question (rule 6).")
+            appendLine(
+                "9. If the user asks to continue / start the next stage / run verification (e.g. \"продолжай\", " +
+                    "\"начинай следующий этап\", \"приступай к проверке\", \"далее\") and you already have enough task requirements, " +
+                    "respond with **only** that PlannerOutput JSON in this turn — no chaser questions, no \"уточните\" unless a blocking detail is missing."
+            )
+            appendLine("10. Use exactly this PlannerOutput shape for the JSON handoff (see rules 7–9):\n$plannerOutputShapeDetails")
+            appendLine()
+            appendLine("=== PLAN INSPECTOR FEEDBACK (from last automated plan verification) ===")
+            appendLine("Inspector success flag: ${v.success}")
+            val issues = v.issues.orEmpty()
+            if (issues.isNotEmpty()) {
+                appendLine("Issues:")
+                issues.forEach { appendLine("- $it") }
+            }
+            val sugg = v.suggestions.orEmpty()
+            if (sugg.isNotEmpty()) {
+                appendLine("Suggestions:")
+                sugg.forEach { appendLine("- $it") }
+            }
+            if (issues.isEmpty() && sugg.isEmpty() && !v.success) {
+                appendLine("(No structured issues/suggestions; improve plan concreteness, step count, and alignment with success criteria.)")
+            }
+        }
+    }
 
     override fun isJsonMode(): Boolean = false
 
@@ -133,8 +184,25 @@ class ValidatorRole : TaskRole {
 
     fun getValidatorInstruction(context: TaskContext, kind: ValidatorInstructionKind): String = when (kind) {
         ValidatorInstructionKind.PlanStep -> planStepVerificationInstruction(context)
+        ValidatorInstructionKind.WholePlan -> wholePlanVerificationInstruction(context)
         ValidatorInstructionKind.TaskInvariant -> taskInvariantVerificationInstruction()
+        ValidatorInstructionKind.TaskInvariantPlan -> taskInvariantPlanVerificationInstruction()
     }
+
+    private fun wholePlanVerificationInstruction(context: TaskContext): String =
+        "\n\nIMPORTANT: You are in **plan verification** (before any execution).\n" +
+        "Your job is to review the **entire** structured plan in the user message (goal, steps, success criteria). " +
+        "No executor output exists yet — judge only whether the plan is actionable, complete enough to execute step-by-step, " +
+        "and consistent with the VERIFICATION RULES block.\n" +
+        "If the plan is acceptable for execution, return success:true. If not, return success:false with concrete issues " +
+        "for the **architect** to fix when revising the plan (not for a code executor).\n" +
+        "Use only the blocks in the user message (structured plan, optional \"PLANNER LAST MESSAGE\", previous verdict if any, rules). " +
+        "Do not assume extra planning-chat context beyond those blocks.\n" +
+        "Do not refer to the task by its title.\n" +
+        "Return JSON only in this shape:\n" +
+        "{\"success\":true/false,\"issues\":[\"concrete problem 1\", \"...\"],\"suggestions\":[\"optional improvement\", \"...\"]}\n" +
+        "When success is false, issues MUST be a non-empty list of actionable items.\n" +
+        "Legacy {\"status\":\"SUCCESS\",\"result\":\"...\"} is discouraged."
 
     private fun planStepVerificationInstruction(context: TaskContext): String =
         "\n\nIMPORTANT: You are currently in the VERIFICATION stage.\n" +
@@ -167,6 +235,23 @@ class ValidatorRole : TaskRole {
         "Return JSON only, no markdown outside JSON:\n" +
         "{\"success\":true/false,\"reason\":\"...\"}\n" +
         "When success is false, \"reason\" MUST be a non-empty actionable explanation for the Executor.\n" +
+        "Legacy {\"status\":\"SUCCESS\",\"result\":\"...\"} is discouraged."
+
+    private fun taskInvariantPlanVerificationInstruction(): String =
+        "\n\nIMPORTANT: **Plan-level invariant** check (this request has NO executor output).\n" +
+        "The user message contains **POLARITY** (POSITIVE vs NEGATIVE), then:\n" +
+        "- **INVARIANT**: a short description of a property or constraint.\n" +
+        "- **DATA**: the structured plan as JSON ([PlanResult]: goal, steps, successCriteria, …).\n" +
+        "Interpretation:\n" +
+        "- **POSITIVE**: return success:true only if the plan (as a whole) satisfies the invariant.\n" +
+        "- **NEGATIVE**: return success:true only if the plan does **not** violate the forbidden description.\n" +
+        "Evaluate the plan text and structure — not hypothetical code the executor might write later.\n" +
+        "This call checks **one** invariant only — do not mention or compare other invariants.\n" +
+        "If the check passes, return success:true. If it fails, return success:false and explain briefly in \"reason\".\n" +
+        "Do not refer to the task title.\n" +
+        "Return JSON only, no markdown outside JSON:\n" +
+        "{\"success\":true/false,\"reason\":\"...\"}\n" +
+        "When success is false, \"reason\" MUST be a non-empty actionable explanation for the architect revising the plan.\n" +
         "Legacy {\"status\":\"SUCCESS\",\"result\":\"...\"} is discouraged."
 
     override fun isJsonMode(): Boolean = true

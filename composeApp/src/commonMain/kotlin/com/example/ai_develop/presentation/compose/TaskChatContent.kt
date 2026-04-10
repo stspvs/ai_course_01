@@ -404,8 +404,18 @@ private fun LlmRequestSnapshot.fullLogTextForCopy(): String = buildString {
     appendLine()
     appendLine("Сообщения в запросе")
     when (agentStage) {
+        TaskState.PLANNING.name ->
+            appendLine(
+                if (planningInspectorRevisionMode) {
+                    "(оркестратор: режим правок по замечаниям инспектора плана — в **системном промпте** блок «=== PLAN INSPECTOR FEEDBACK (from last automated plan verification) ===» с issues/suggestions; подтверждение пользователя на исправления не требуется — см. правила в system)"
+                } else {
+                    "(оркестратор: история чата задачи в сообщениях; инварианты задачи — в system; финальный PlannerOutput после явного подтверждения пользователя)"
+                }
+            )
         TaskState.EXECUTION.name ->
             appendLine("(оркестратор: индекс шага, CURRENT STEP, затем JSON плана, при наличии TASK WORKING MEMORY — всё в одном [user] ниже)")
+        TaskState.PLAN_VERIFICATION.name ->
+            appendLine("(оркестратор: проверка плана только по инвариантам задачи — в system/user запросах к инспектору плана; общий WholePlan-обзор не вызывается)")
         TaskState.VERIFICATION.name ->
             appendLine("(оркестратор: структурированный план, шаг, при необходимости прошлый вердикт инспектора, последние ответы исполнителя, EXECUTION RESULT — в [user] ниже; чат планирования в запрос не входит)")
         else -> {}
@@ -451,9 +461,25 @@ private fun TaskLlmSnapshotDetails(snap: LlmRequestSnapshot) {
     Spacer(Modifier.height(12.dp))
     Text("Сообщения в запросе", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
     when (snap.agentStage) {
+        TaskState.PLANNING.name ->
+            Text(
+                if (snap.planningInspectorRevisionMode) {
+                    "Планирование (правки по инспектору плана): в **системном промпте** — блок «PLAN INSPECTOR FEEDBACK» с вердиктом; в сообщениях — история чата. Подтверждение на сами правки не запрашивается (см. правила в system)."
+                } else {
+                    "Планирование: в сообщениях — история чата задачи; в system — инварианты и правила; финальный JSON после подтверждения пользователя."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         TaskState.EXECUTION.name ->
             Text(
                 "Исполнение: в одном [user] — «CURRENT STEP INDEX», «CURRENT STEP», «PLAN (structured)» (JSON плана), затем при наличии «TASK WORKING MEMORY», далее при повторе шага «LAST EXECUTION RESULT» и «INSPECTOR FEEDBACK».",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        TaskState.PLAN_VERIFICATION.name ->
+            Text(
+                "Проверка плана: только инварианты (план как DATA в user по одному инварианту за вызов). Без инвариантов — этап проходит без LLM. Ответы инспектора по инвариантам в ленту не дублируются.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -739,6 +765,7 @@ fun TaskMessageBubble(
 
 fun getStageColor(state: TaskState, task: TaskContext): Color = when(state) {
     TaskState.PLANNING -> Color(task.architectColor)
+    TaskState.PLAN_VERIFICATION -> Color(task.validatorColor)
     TaskState.EXECUTION -> Color(task.executorColor)
     TaskState.VERIFICATION -> Color(task.validatorColor)
     TaskState.DONE -> Color(0xFF607D8B)

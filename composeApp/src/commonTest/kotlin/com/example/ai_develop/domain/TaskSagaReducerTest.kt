@@ -38,7 +38,7 @@ class TaskSagaReducerTest {
     private val sampleExec = ExecutionResult(true, "out", null)
 
     @Test
-    fun stageTransition_planningToExecution_updatesPlanAndStepCount() {
+    fun stageTransition_planningToPlanVerification_updatesPlanAndStepCount() {
         val plan = PlanResult(
             goal = "g",
             steps = listOf("s1", "s2"),
@@ -47,15 +47,35 @@ class TaskSagaReducerTest {
             contextSummary = null
         )
         val before = ctx(TaskState.PLANNING) { copy(stepCount = 1) }
-        val after = TaskSagaReducer.stageTransition(before, TaskState.PLANNING, TaskState.EXECUTION, plan)
+        val after = TaskSagaReducer.stageTransition(before, TaskState.PLANNING, TaskState.PLAN_VERIFICATION, plan)
         assertNotNull(after)
-        assertEquals(TaskState.EXECUTION, after.state.taskState)
-        assertEquals(TaskState.EXECUTION, after.runtimeState.stage)
+        assertEquals(TaskState.PLAN_VERIFICATION, after.state.taskState)
+        assertEquals(TaskState.PLAN_VERIFICATION, after.runtimeState.stage)
         assertEquals(listOf("s1", "s2"), after.plan)
         assertEquals("s1", after.currentPlanStep)
         assertEquals(2, after.runtimeState.stepCount)
         assertEquals(0, after.runtimeState.currentPlanStepIndex)
         assertEquals(false, after.runtimeState.awaitingPlanConfirmation)
+        assertNull(after.runtimeState.lastVerification)
+    }
+
+    @Test
+    fun stageTransition_planVerificationToExecution_clearsCountersAndVerification() {
+        val plan = PlanResult("g", listOf("s1"), "sc", null, null)
+        val before = ctx(TaskState.PLAN_VERIFICATION) {
+            copy(
+                planResult = plan,
+                planVerificationRetryCount = 2,
+                planVerificationLlmCalls = 3,
+                lastVerification = VerificationResult(false, listOf("x"), null)
+            )
+        }
+        val after = TaskSagaReducer.stageTransition(before, TaskState.PLAN_VERIFICATION, TaskState.EXECUTION, plan)
+        assertNotNull(after)
+        assertEquals(TaskState.EXECUTION, after.state.taskState)
+        assertNull(after.runtimeState.lastVerification)
+        assertEquals(0, after.runtimeState.planVerificationRetryCount)
+        assertEquals(0, after.runtimeState.planVerificationLlmCalls)
     }
 
     @Test
@@ -146,9 +166,9 @@ class TaskSagaReducerTest {
         val c = ctx(TaskState.PLANNING)
         val e1 = TaskSagaReducer.reduce(
             c,
-            TaskSagaReducer.Event.StageTransition(TaskState.PLANNING, TaskState.EXECUTION, plan)
+            TaskSagaReducer.Event.StageTransition(TaskState.PLANNING, TaskState.PLAN_VERIFICATION, plan)
         )
-        val e2 = TaskSagaReducer.stageTransition(c, TaskState.PLANNING, TaskState.EXECUTION, plan)
+        val e2 = TaskSagaReducer.stageTransition(c, TaskState.PLANNING, TaskState.PLAN_VERIFICATION, plan)
         assertEquals(e1, e2)
     }
 
@@ -215,6 +235,7 @@ class TaskSagaReducerTest {
     fun stageTransition_illegalPair_returnsNull() {
         val p = ctx(TaskState.PLANNING)
         assertNull(TaskSagaReducer.stageTransition(p, TaskState.PLANNING, TaskState.VERIFICATION, null))
+        assertNull(TaskSagaReducer.stageTransition(p, TaskState.PLANNING, TaskState.EXECUTION, null))
         val e = ctx(TaskState.EXECUTION)
         assertNull(TaskSagaReducer.stageTransition(e, TaskState.EXECUTION, TaskState.EXECUTION, null))
         val v = ctx(TaskState.VERIFICATION)
@@ -222,9 +243,9 @@ class TaskSagaReducerTest {
     }
 
     @Test
-    fun stageTransition_planningToExecution_nullPlanResult_keepsExistingPlan_currentPlanStepFromPlanResultOnly() {
+    fun stageTransition_planningToPlanVerification_nullPlanResult_keepsExistingPlan_currentPlanStepFromPlanResultOnly() {
         val before = ctx(TaskState.PLANNING).copy(plan = listOf("p1", "p2"))
-        val after = TaskSagaReducer.stageTransition(before, TaskState.PLANNING, TaskState.EXECUTION, null)
+        val after = TaskSagaReducer.stageTransition(before, TaskState.PLANNING, TaskState.PLAN_VERIFICATION, null)
         assertNotNull(after)
         assertEquals(listOf("p1", "p2"), after.plan)
         assertNull(after.currentPlanStep)
@@ -258,7 +279,7 @@ class TaskSagaReducerTest {
 
     @Test
     fun finishOutcome_eachOutcome() {
-        val stages = listOf(TaskState.PLANNING, TaskState.EXECUTION, TaskState.VERIFICATION)
+        val stages = listOf(TaskState.PLANNING, TaskState.PLAN_VERIFICATION, TaskState.EXECUTION, TaskState.VERIFICATION)
         val outcomes = listOf(
             TaskOutcome.SUCCESS,
             TaskOutcome.FAILED,
@@ -287,6 +308,7 @@ class TaskSagaReducerTest {
     @Test
     fun verificationSuccessTerminal_wrongState_returnsNull() {
         assertNull(TaskSagaReducer.verificationSuccessTerminal(ctx(TaskState.PLANNING)))
+        assertNull(TaskSagaReducer.verificationSuccessTerminal(ctx(TaskState.PLAN_VERIFICATION)))
         assertNull(TaskSagaReducer.verificationSuccessTerminal(ctx(TaskState.EXECUTION)))
         assertNull(TaskSagaReducer.verificationSuccessTerminal(ctx(TaskState.DONE)))
     }
@@ -294,11 +316,27 @@ class TaskSagaReducerTest {
     @Test
     fun verificationSuccessNextStep_wrongState_returnsNull() {
         assertNull(TaskSagaReducer.verificationSuccessNextStep(ctx(TaskState.PLANNING), 0, null))
+        assertNull(TaskSagaReducer.verificationSuccessNextStep(ctx(TaskState.PLAN_VERIFICATION), 0, null))
     }
 
     @Test
     fun verificationFailToExecution_wrongState_returnsNull() {
         assertNull(TaskSagaReducer.verificationFailToExecution(ctx(TaskState.EXECUTION), 0))
+        assertNull(TaskSagaReducer.verificationFailToExecution(ctx(TaskState.PLAN_VERIFICATION), 0))
+    }
+
+    @Test
+    fun planVerificationFailToPlanning() {
+        val v = VerificationResult(false, listOf("gap"), listOf("fix"))
+        val before = ctx(TaskState.PLAN_VERIFICATION) {
+            copy(lastVerification = v, awaitingPlanConfirmation = true, planVerificationRetryCount = 1)
+        }
+        val after = TaskSagaReducer.planVerificationFailToPlanning(before)
+        assertNotNull(after)
+        assertEquals(TaskState.PLANNING, after.state.taskState)
+        assertEquals(v, after.runtimeState.lastVerification)
+        assertEquals(0, after.runtimeState.planVerificationRetryCount)
+        assertEquals(false, after.runtimeState.awaitingPlanConfirmation)
     }
 
     @Test
@@ -306,7 +344,7 @@ class TaskSagaReducerTest {
         val plan = samplePlan
         val cPlan = ctx(TaskState.PLANNING)
         assertNotNull(
-            TaskSagaReducer.reduce(cPlan, TaskSagaReducer.Event.StageTransition(TaskState.PLANNING, TaskState.EXECUTION, plan))
+            TaskSagaReducer.reduce(cPlan, TaskSagaReducer.Event.StageTransition(TaskState.PLANNING, TaskState.PLAN_VERIFICATION, plan))
         )
         assertNotNull(TaskSagaReducer.reduce(cPlan, TaskSagaReducer.Event.Finish(TaskOutcome.FAILED)))
         assertNotNull(TaskSagaReducer.reduce(cPlan, TaskSagaReducer.Event.FinishCancelled))

@@ -23,20 +23,51 @@ object TaskSagaReducer {
         if (ctx.state.taskState != from) return null
         if (!AutonomousTaskStateMachine.canTransition(from, to)) return null
         val newPlan = planResult?.steps ?: ctx.plan
+        val rs = ctx.runtimeState
         val next = ctx.copy(
             state = ctx.state.copy(taskState = to),
             plan = newPlan,
             currentPlanStep = planResult?.steps?.firstOrNull(),
             step = ctx.step + 1,
-            runtimeState = ctx.runtimeState.copy(
-                planResult = planResult ?: ctx.runtimeState.planResult,
-                lastExecution = ctx.runtimeState.lastExecution,
+            runtimeState = rs.copy(
+                planResult = planResult ?: rs.planResult,
+                lastExecution = rs.lastExecution,
+                lastVerification = when {
+                    from == TaskState.PLANNING && to == TaskState.PLAN_VERIFICATION -> null
+                    from == TaskState.PLAN_VERIFICATION && to == TaskState.EXECUTION -> null
+                    else -> rs.lastVerification
+                },
                 awaitingPlanConfirmation = false,
                 currentPlanStepIndex = when (from) {
-                    TaskState.EXECUTION -> ctx.runtimeState.currentPlanStepIndex
+                    TaskState.EXECUTION -> rs.currentPlanStepIndex
                     else -> 0
                 },
-                stepCount = ctx.runtimeState.stepCount + 1
+                stepCount = rs.stepCount + 1,
+                planVerificationRetryCount = when {
+                    from == TaskState.PLAN_VERIFICATION && to == TaskState.EXECUTION -> 0
+                    else -> rs.planVerificationRetryCount
+                },
+                planVerificationLlmCalls = when {
+                    from == TaskState.PLAN_VERIFICATION && to == TaskState.EXECUTION -> 0
+                    else -> rs.planVerificationLlmCalls
+                }
+            )
+        )
+        return syncRuntimeStage(next)
+    }
+
+    /**
+     * Проверка плана провалена (или инварианты) — возврат к архитектору с [TaskRuntimeState.lastVerification].
+     */
+    fun planVerificationFailToPlanning(ctx: TaskContext): TaskContext? {
+        if (ctx.state.taskState != TaskState.PLAN_VERIFICATION) return null
+        if (!AutonomousTaskStateMachine.canTransition(TaskState.PLAN_VERIFICATION, TaskState.PLANNING)) return null
+        val rs = ctx.runtimeState
+        val next = ctx.copy(
+            state = ctx.state.copy(taskState = TaskState.PLANNING),
+            runtimeState = rs.copy(
+                awaitingPlanConfirmation = false,
+                planVerificationRetryCount = 0
             )
         )
         return syncRuntimeStage(next)

@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 enum class TaskState {
-    PLANNING, EXECUTION, VERIFICATION, DONE;
+    PLANNING, PLAN_VERIFICATION, EXECUTION, VERIFICATION, DONE;
 
     companion object {
         fun fromPersisted(value: String): TaskState = when (value) {

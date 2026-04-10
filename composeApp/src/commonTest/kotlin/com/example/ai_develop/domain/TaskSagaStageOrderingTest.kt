@@ -214,6 +214,7 @@ class TaskSagaStageOrderingTest {
 
     private fun stageEntryMarker(to: TaskState): String = when (to) {
         TaskState.PLANNING -> "▶ Начинается этап: планирование"
+        TaskState.PLAN_VERIFICATION -> "проверка плана"
         TaskState.EXECUTION -> "▶ Начинается этап: исполнение"
         TaskState.VERIFICATION -> "▶ Начинается этап: проверка"
         TaskState.DONE -> "▶ Задача завершена"
@@ -306,9 +307,11 @@ class TaskSagaStageOrderingTest {
 
         val planJson =
             """{"success":true,"plan":{"goal":"g","steps":["one"],"successCriteria":"c"},"questions":[],"requiresUserConfirmation":false}"""
+        val planVerJson = """{"success":true,"issues":null,"suggestions":null}"""
         val execJson = """{"success":true,"output":"done","errors":null}"""
         val verJson = """{"success":true,"issues":null,"suggestions":null}"""
         chat.responseQueue.add(planJson)
+        chat.responseQueue.add(planVerJson)
         chat.responseQueue.add(execJson)
         chat.responseQueue.add(verJson)
 
@@ -317,6 +320,7 @@ class TaskSagaStageOrderingTest {
         advanceUntilIdle()
 
         assertTrue(local.ledger.any { it is LedgerEvent.Message && (it as LedgerEvent.Message).text.contains("проверка") })
+        assertTrue(local.ledger.any { it is LedgerEvent.Message && (it as LedgerEvent.Message).text.contains("проверка плана") })
         assertStageEntryBeforeTaskPersistOnStateChange(local.ledger)
     }
 
@@ -366,6 +370,7 @@ class TaskSagaStageOrderingTest {
             listOf(
                 TaskState.PLANNING,
                 TaskState.PLANNING,
+                TaskState.PLAN_VERIFICATION,
                 TaskState.EXECUTION,
                 TaskState.VERIFICATION,
                 TaskState.EXECUTION,
@@ -390,6 +395,7 @@ class TaskSagaStageOrderingTest {
     fun `stress - many synthetic transition chains satisfy invariant`() {
         val pattern = listOf(
             TaskState.PLANNING,
+            TaskState.PLAN_VERIFICATION,
             TaskState.EXECUTION,
             TaskState.VERIFICATION,
             TaskState.EXECUTION,
@@ -411,6 +417,7 @@ class TaskSagaStageOrderingTest {
     fun `stress - repeated single-step integration runs preserve ordering`() = runTest {
         val planJson =
             """{"success":true,"plan":{"goal":"g","steps":["one"],"successCriteria":"c"},"questions":[],"requiresUserConfirmation":false}"""
+        val planVerJson = """{"success":true,"issues":null,"suggestions":null}"""
         val execJson = """{"success":true,"output":"done","errors":null}"""
         val verJson = """{"success":true,"issues":null,"suggestions":null}"""
         val dispatcher = UnconfinedTestDispatcher(testScheduler)
@@ -431,6 +438,7 @@ class TaskSagaStageOrderingTest {
             )
             local.saveTask(ctx)
             chat.responseQueue.add(planJson)
+            chat.responseQueue.add(planVerJson)
             chat.responseQueue.add(execJson)
             chat.responseQueue.add(verJson)
             val saga = TaskSaga(chat, local, agent, agent, agent, ctx, memoryManager, dispatcher)
@@ -454,8 +462,10 @@ class TaskSagaStageOrderingTest {
             """{"success":true,"plan":{"goal":"g","steps":["only"],"successCriteria":"c"},"questions":[],"requiresUserConfirmation":false}"""
         val execMarker = "LAST_EXEC_MARKER_SINGLE"
         val execJson = """{"success":true,"output":"$execMarker","errors":null}"""
+        val planVerJson = """{"success":true,"issues":null,"suggestions":null}"""
         val verJson = """{"success":true,"issues":null,"suggestions":null}"""
         chat.responseQueue.add(planJson)
+        chat.responseQueue.add(planVerJson)
         chat.responseQueue.add(execJson)
         chat.responseQueue.add(verJson)
 

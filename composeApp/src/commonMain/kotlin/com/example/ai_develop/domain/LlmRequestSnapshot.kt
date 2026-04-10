@@ -15,7 +15,9 @@ data class LlmRequestSnapshot(
     val temperature: Double,
     val maxTokens: Int,
     val isJsonMode: Boolean,
-    val stopWord: String = ""
+    val stopWord: String = "",
+    /** PLANNING: в системном промпте есть блок замечаний инспектора плана (после отката из PLAN_VERIFICATION). */
+    val planningInspectorRevisionMode: Boolean = false
 )
 
 fun formatLlmInputMessagesText(messages: List<ChatMessage>): String =
@@ -29,7 +31,8 @@ fun buildLlmRequestSnapshot(
     inputMessages: List<ChatMessage>,
     agent: Agent,
     agentStageLabel: String,
-    isJsonMode: Boolean
+    isJsonMode: Boolean,
+    planningInspectorRevisionMode: Boolean = false
 ): LlmRequestSnapshot = LlmRequestSnapshot(
     effectiveSystemPrompt = effectiveSystemPrompt,
     inputMessagesText = formatLlmInputMessagesText(inputMessages),
@@ -39,5 +42,6 @@ fun buildLlmRequestSnapshot(
     temperature = agent.temperature,
     maxTokens = agent.maxTokens,
     isJsonMode = isJsonMode,
-    stopWord = agent.stopWord
+    stopWord = agent.stopWord,
+    planningInspectorRevisionMode = planningInspectorRevisionMode
 )

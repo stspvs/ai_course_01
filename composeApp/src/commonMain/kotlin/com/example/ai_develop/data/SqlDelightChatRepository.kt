@@ -336,6 +336,7 @@ class SqlDelightChatRepository(
     private fun taskStateToAgentStage(taskState: TaskState?): AgentStage? = when (taskState) {
         null -> null
         TaskState.PLANNING -> AgentStage.PLANNING
+        TaskState.PLAN_VERIFICATION -> AgentStage.REVIEW
         TaskState.EXECUTION -> AgentStage.EXECUTION
         TaskState.VERIFICATION -> AgentStage.REVIEW
         TaskState.DONE -> AgentStage.DONE
