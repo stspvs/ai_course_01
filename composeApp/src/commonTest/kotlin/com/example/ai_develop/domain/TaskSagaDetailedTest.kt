@@ -138,7 +138,8 @@ class TaskSagaDetailedTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         localRepo.saveAgent(agent)
         localRepo.saveTask(context)
@@ -192,6 +193,7 @@ class TaskSagaDetailedTest {
                 architectAgentId = "a1",
                 validatorAgentId = "a1",
                 isPaused = false,
+                isStarted = true,
                 plan = planResult.steps,
                 runtimeState = TaskRuntimeState.defaultFor("t1").copy(
                     stage = TaskState.EXECUTION,
@@ -238,6 +240,7 @@ class TaskSagaDetailedTest {
             executorAgentId = "a1",
             validatorAgentId = "a1",
             isPaused = false,
+            isStarted = true,
             runtimeState = TaskRuntimeState.defaultFor("t1").copy(
                 awaitingPlanConfirmation = true,
                 planResult = PlanResult("Task Title", listOf("s1"), "c")
@@ -284,7 +287,8 @@ class TaskSagaDetailedTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         localRepo.saveAgent(agent)
         localRepo.saveTask(context)
@@ -323,6 +327,7 @@ class TaskSagaDetailedTest {
             executorAgentId = "a1",
             validatorAgentId = "a1",
             isPaused = false,
+            isStarted = true,
             plan = pr.steps,
             runtimeState = TaskRuntimeState.defaultFor("t1").copy(stage = TaskState.EXECUTION, planResult = pr)
         )

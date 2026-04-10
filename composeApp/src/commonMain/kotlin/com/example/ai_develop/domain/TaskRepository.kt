@@ -7,4 +7,7 @@ interface TaskRepository {
     suspend fun getTask(taskId: String): TaskContext?
     suspend fun saveTask(task: TaskContext): Result<Unit>
     suspend fun deleteTask(task: TaskContext): Result<Unit>
+
+    /** Холодный старт: все задачи в паузе, чтобы не показывать «в работе» до явного продолжения. */
+    suspend fun pauseAllTasksOnAppLaunch(): Result<Unit>
 }

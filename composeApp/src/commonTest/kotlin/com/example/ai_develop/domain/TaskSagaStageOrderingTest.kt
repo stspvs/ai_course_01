@@ -301,7 +301,8 @@ class TaskSagaStageOrderingTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         local.saveTask(context)
 
@@ -341,6 +342,7 @@ class TaskSagaStageOrderingTest {
             executorAgentId = "a1",
             validatorAgentId = "a1",
             isPaused = false,
+            isStarted = true,
             plan = plan.steps,
             runtimeState = TaskRuntimeState.defaultFor("t_fail").copy(
                 stage = TaskState.EXECUTION,
@@ -434,7 +436,8 @@ class TaskSagaStageOrderingTest {
                 architectAgentId = "a1",
                 executorAgentId = "a1",
                 validatorAgentId = "a1",
-                isPaused = false
+                isPaused = false,
+                isStarted = true
             )
             local.saveTask(ctx)
             chat.responseQueue.add(planJson)
@@ -476,7 +479,8 @@ class TaskSagaStageOrderingTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         local.saveTask(ctx)
 
@@ -515,6 +519,7 @@ class TaskSagaStageOrderingTest {
             executorAgentId = "a1",
             validatorAgentId = "a1",
             isPaused = false,
+            isStarted = true,
             plan = plan.steps,
             runtimeState = TaskRuntimeState.defaultFor("t_insp_chain").copy(
                 stage = TaskState.EXECUTION,
@@ -567,6 +572,7 @@ class TaskSagaStageOrderingTest {
             executorAgentId = "a1",
             validatorAgentId = "a1",
             isPaused = false,
+            isStarted = true,
             plan = plan.steps,
             runtimeState = TaskRuntimeState.defaultFor("t_insp_retry").copy(
                 stage = TaskState.EXECUTION,

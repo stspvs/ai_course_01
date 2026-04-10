@@ -87,7 +87,8 @@ class TaskSagaErrorTest {
             architectAgentId = "agent_1",
             executorAgentId = "agent_1",
             validatorAgentId = "agent_1",
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         localRepo.saveTask(context)
         

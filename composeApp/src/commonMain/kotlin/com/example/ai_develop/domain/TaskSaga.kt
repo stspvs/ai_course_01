@@ -65,6 +65,7 @@ class TaskSaga(
      */
     private var lastTaskStateFromFlow: TaskState? = null
     private var lastPausedFromFlow: Boolean? = null
+    private var lastStartedFromFlow: Boolean? = null
 
     private class APIException(val error: Throwable) : Exception(error.message)
 
@@ -108,15 +109,18 @@ class TaskSaga(
                 .distinctUntilChanged()
                 .collect { updatedContext ->
                     val wasPaused = lastPausedFromFlow ?: _context.value.isPaused
+                    val wasStarted = lastStartedFromFlow ?: _context.value.isStarted
                     val oldState = lastTaskStateFromFlow ?: _context.value.state.taskState
                     lastTaskStateFromFlow = updatedContext.state.taskState
                     lastPausedFromFlow = updatedContext.isPaused
+                    lastStartedFromFlow = updatedContext.isStarted
                     _context.value = reconcileTaskContextFromDb(_context.value, updatedContext)
 
                     val becameUnpaused = wasPaused && !updatedContext.isPaused
+                    val becameStarted = !wasStarted && updatedContext.isStarted
                     val stateChangedWhileRunning = !updatedContext.isPaused && oldState != updatedContext.state.taskState
 
-                    if (becameUnpaused || stateChangedWhileRunning) {
+                    if (becameUnpaused || becameStarted || stateChangedWhileRunning) {
                         scheduleProcessCurrentState()
                     }
                 }
@@ -124,14 +128,28 @@ class TaskSaga(
 
         scope.launch {
             localRepository.getAgents().collect { allAgents ->
-                val newArchitect = allAgents.find { it.id == _context.value.architectAgentId }
+                val ctx = _context.value
+                val hadArchitect = architect != null
+                val hadExecutor = executor != null
+                val hadValidator = validator != null
+
+                val newArchitect = allAgents.find { it.id == ctx.architectAgentId }
                 if (newArchitect != null) architect = newArchitect
 
-                val newExecutor = allAgents.find { it.id == _context.value.executorAgentId }
+                val newExecutor = allAgents.find { it.id == ctx.executorAgentId }
                 if (newExecutor != null) executor = newExecutor
 
-                val newValidator = allAgents.find { it.id == _context.value.validatorAgentId }
+                val newValidator = allAgents.find { it.id == ctx.validatorAgentId }
                 if (newValidator != null) validator = newValidator
+
+                val agentBecameAvailable =
+                    (!hadArchitect && architect != null && ctx.architectAgentId != null) ||
+                    (!hadExecutor && executor != null && ctx.executorAgentId != null) ||
+                    (!hadValidator && validator != null && ctx.validatorAgentId != null)
+
+                if (agentBecameAvailable && ctx.isStarted && !ctx.isPaused && ctx.state.taskState != TaskState.DONE) {
+                    scheduleProcessCurrentState()
+                }
             }
         }
     }
@@ -220,7 +238,8 @@ class TaskSaga(
                     plan = emptyList(),
                     planDone = emptyList(),
                     currentPlanStep = null,
-                    isPaused = true,
+                    isPaused = false,
+                    isStarted = false,
                     runtimeState = TaskRuntimeState.resetProgressPreservingUserSettings(it.runtimeState)
                 )
             }
@@ -300,6 +319,7 @@ class TaskSaga(
     private fun processCurrentState() {
         val currentContext = _context.value
         if (currentContext.isPaused || currentContext.state.taskState == TaskState.DONE) return
+        if (!currentContext.isStarted) return
         if (!currentContext.isReadyToRun) {
             pause()
             return
@@ -329,6 +349,10 @@ class TaskSaga(
 
     private fun runPlanningStage(agent: Agent?, role: ArchitectRole) {
         if (agent == null) {
+            if (_context.value.architectAgentId != null) {
+                // ID есть, но getAgents() ещё не отдал объект — не ставим паузу (см. collect getAgents).
+                return
+            }
             scope.launch { handleStageError(null, Exception("Агент для этапа PLANNING не назначен")) }
             return
         }
@@ -547,6 +571,9 @@ class TaskSaga(
 
     private fun runPlanVerificationStage(agent: Agent?, role: ValidatorRole) {
         if (agent == null) {
+            if (_context.value.validatorAgentId != null) {
+                return
+            }
             scope.launch { handleStageError(null, Exception("Агент для PLAN_VERIFICATION не назначен")) }
             return
         }
@@ -724,6 +751,9 @@ class TaskSaga(
 
     private fun runExecutionStage(agent: Agent?, role: ExecutorRole) {
         if (agent == null) {
+            if (_context.value.executorAgentId != null) {
+                return
+            }
             scope.launch { handleStageError(null, Exception("Агент для EXECUTION не назначен")) }
             return
         }
@@ -907,6 +937,9 @@ class TaskSaga(
 
     private fun runVerificationStage(agent: Agent?, role: ValidatorRole) {
         if (agent == null) {
+            if (_context.value.validatorAgentId != null) {
+                return
+            }
             scope.launch { handleStageError(null, Exception("Агент для VERIFICATION не назначен")) }
             return
         }

@@ -22,6 +22,10 @@ class DeleteTaskUseCase(private val repository: TaskRepository) {
     suspend operator fun invoke(task: TaskContext): Result<Unit> = repository.deleteTask(task)
 }
 
+class PauseAllTasksOnAppLaunchUseCase(private val repository: TaskRepository) {
+    suspend operator fun invoke(): Result<Unit> = repository.pauseAllTasksOnAppLaunch()
+}
+
 class ResetTaskUseCase(
     private val chatRepository: ChatRepository,
     private val chatStreamingUseCase: ChatStreamingUseCase

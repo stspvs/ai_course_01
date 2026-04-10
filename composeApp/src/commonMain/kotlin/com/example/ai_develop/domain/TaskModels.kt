@@ -26,6 +26,8 @@ data class TaskContext(
     val title: String,
     val state: AgentTaskState,
     val isPaused: Boolean = false,
+    /** После первого «запуска» true; сброс/новая задача — false (не путать с [isPaused]). */
+    val isStarted: Boolean = false,
     val step: Int = 0,
     val plan: List<String> = emptyList(),
     val planDone: List<String> = emptyList(),

@@ -11,7 +11,7 @@ import androidx.sqlite.execSQL
 
 @Database(
     entities = [AgentEntity::class, MessageEntity::class, TaskEntity::class], 
-    version = 22,
+    version = 24,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -56,6 +56,26 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
 val MIGRATION_21_22 = object : Migration(21, 22) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL("ALTER TABLE tasks ADD COLUMN runtimeStateJson TEXT NOT NULL DEFAULT '{}'")
+    }
+}
+
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE tasks ADD COLUMN isStarted INTEGER NOT NULL DEFAULT 0")
+        connection.execSQL("UPDATE tasks SET isStarted = 1 WHERE isPaused = 0")
+    }
+}
+
+/** Сбрасывает ошибочный isStarted у задач без сообщений (см. миграцию 23). */
+val MIGRATION_23_24 = object : Migration(23, 24) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            """
+            UPDATE tasks SET isStarted = 0
+            WHERE isStarted = 1 AND isPaused = 0
+            AND NOT EXISTS (SELECT 1 FROM messages WHERE messages.taskId = tasks.taskId)
+            """.trimIndent()
+        )
     }
 }
 

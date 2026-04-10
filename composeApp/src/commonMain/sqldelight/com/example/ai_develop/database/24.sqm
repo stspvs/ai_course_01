@@ -1,0 +1,7 @@
+-- Исправление миграции 23: isStarted=1 для всех «не на паузе» ошибочно помечало задачи без переписки как «запущенные».
+UPDATE TaskEntity SET isStarted = 0
+WHERE isStarted = 1
+  AND isPaused = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM AgentMessageEntity WHERE AgentMessageEntity.taskId = TaskEntity.taskId
+  );

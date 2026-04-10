@@ -31,6 +31,11 @@ class TaskViewModelTest {
             tasks.value = tasks.value.filterNot { it.taskId == task.taskId }
             return Result.success(Unit)
         }
+
+        override suspend fun pauseAllTasksOnAppLaunch(): Result<Unit> {
+            tasks.value = tasks.value.map { it.copy(isPaused = true) }
+            return Result.success(Unit)
+        }
     }
 
     private class FakeMessageRepository : MessageRepository {
@@ -237,6 +242,66 @@ class TaskViewModelTest {
     }
 
     @Test
+    fun activeSagaContext_matchesDbAfterSelect_notStalePauseState() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        backgroundScope.launch { viewModel.activeSagaContext.collect() }
+
+        val taskId = "fresh-task"
+        taskRepo.saveTask(
+            TaskContext(
+                taskId = taskId,
+                title = "Fresh",
+                state = AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()),
+                isPaused = false,
+                isStarted = false
+            )
+        )
+        advanceUntilIdle()
+
+        viewModel.onEvent(TaskEvent.SelectTask(taskId))
+        advanceUntilIdle()
+
+        val ctx = viewModel.activeSagaContext.value
+        assertNotNull(ctx)
+        val showsAsRunning = ctx.isStarted && !ctx.isPaused && ctx.state.taskState != TaskState.DONE
+        assertFalse(showsAsRunning, "Незапущенная задача не должна показывать кнопку паузы (состояние из БД)")
+    }
+
+    @Test
+    fun selectTask_switchingFromRunningTask_pausesPrevious() = runTest {
+        backgroundScope.launch { viewModel.tasks.collect() }
+        backgroundScope.launch { viewModel.activeSagaContext.collect() }
+
+        val running = TaskContext(
+            taskId = "t-run",
+            title = "Running",
+            state = AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()),
+            isPaused = false,
+            isStarted = true
+        )
+        val other = TaskContext(
+            taskId = "t-other",
+            title = "Other",
+            state = AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()),
+            isPaused = false,
+            isStarted = false
+        )
+        taskRepo.saveTask(running)
+        taskRepo.saveTask(other)
+        advanceUntilIdle()
+
+        viewModel.onEvent(TaskEvent.SelectTask("t-run"))
+        advanceUntilIdle()
+        viewModel.onEvent(TaskEvent.SelectTask("t-other"))
+        advanceUntilIdle()
+
+        val pausedRun = viewModel.tasks.value.find { it.taskId == "t-run" }
+        assertNotNull(pausedRun)
+        assertTrue(pausedRun.isPaused, "При выборе другой задачи предыдущая активная должна быть на паузе")
+        assertEquals("t-other", viewModel.selectedTaskId.value)
+    }
+
+    @Test
     fun testSendMessage_EmptyText_Ignored() = runTest {
         viewModel.onEvent(TaskEvent.SendMessage("id", "   "))
         advanceUntilIdle()
@@ -291,8 +356,18 @@ class TaskViewModelTest {
 
         val id1 = "id1"
         val id2 = "id2"
-        taskRepo.saveTask(TaskContext(id1, "T1", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()), isPaused = true))
-        taskRepo.saveTask(TaskContext(id2, "T2", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()), isPaused = true))
+        taskRepo.saveTask(
+            TaskContext(
+                id1, "T1", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()),
+                isPaused = true, isStarted = true
+            )
+        )
+        taskRepo.saveTask(
+            TaskContext(
+                id2, "T2", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()),
+                isPaused = true, isStarted = true
+            )
+        )
         advanceUntilIdle()
 
         viewModel.onEvent(TaskEvent.TogglePause(id1))
@@ -338,6 +413,7 @@ class TaskViewModelTest {
                 "Title",
                 AgentTaskState(TaskState.EXECUTION, DefaultAgentFactory().create()),
                 isPaused = false,
+                isStarted = true,
                 step = 3,
                 plan = listOf("step"),
                 planDone = listOf("done"),
@@ -366,7 +442,8 @@ class TaskViewModelTest {
         val task = viewModel.tasks.value.find { it.taskId == taskId }
         assertNotNull(task)
         assertEquals(TaskState.PLANNING, task.state.taskState)
-        assertTrue(task.isPaused)
+        assertFalse(task.isPaused)
+        assertFalse(task.isStarted)
         assertEquals(0, task.step)
         assertTrue(task.plan.isEmpty())
         assertTrue(task.planDone.isEmpty())
@@ -395,7 +472,7 @@ class TaskViewModelTest {
 
         val taskId = "welcome-task"
         taskRepo.saveTask(
-            TaskContext(taskId, "T", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()), isPaused = true)
+            TaskContext(taskId, "T", AgentTaskState(TaskState.PLANNING, DefaultAgentFactory().create()), isPaused = false, isStarted = false)
         )
         advanceUntilIdle()
         viewModel.onEvent(TaskEvent.SelectTask(taskId))
@@ -463,6 +540,7 @@ class TaskViewModelTest {
                 "S",
                 AgentTaskState(TaskState.EXECUTION, DefaultAgentFactory().create()),
                 isPaused = true,
+                isStarted = true,
                 step = 2,
                 runtimeState = TaskRuntimeState.defaultFor(taskId).copy(maxSteps = 100, stepCount = 5)
             )

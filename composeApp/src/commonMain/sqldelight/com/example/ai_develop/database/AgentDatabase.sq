@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS TaskEntity (
     title TEXT NOT NULL,
     taskState TEXT NOT NULL, -- TaskState enum name
     isPaused INTEGER AS Boolean NOT NULL DEFAULT 0,
+    isStarted INTEGER AS Boolean NOT NULL DEFAULT 0,
     step INTEGER NOT NULL DEFAULT 0,
     planJson TEXT NOT NULL, -- JSON List<String>
     planDoneJson TEXT NOT NULL, -- JSON List<String>
@@ -115,12 +116,12 @@ DELETE FROM AgentStateEntity WHERE agentId = ?;
 -- Task Queries
 saveTask:
 INSERT OR REPLACE INTO TaskEntity(
-    taskId, title, taskState, isPaused, step, planJson, planDoneJson,
+    taskId, title, taskState, isPaused, isStarted, step, planJson, planDoneJson,
     currentPlanStep, totalCount, architectAgentId, executorAgentId,
     validatorAgentId, architectColor, executorColor, validatorColor, createdAt,
     runtimeStateJson
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getTask:
 SELECT * FROM TaskEntity WHERE taskId = ?;
@@ -130,3 +131,7 @@ SELECT * FROM TaskEntity ORDER BY createdAt DESC;
 
 deleteTask:
 DELETE FROM TaskEntity WHERE taskId = ?;
+
+-- После перезапуска приложения автономный конвейер не продолжается, пока пользователь не нажмёт «продолжить».
+pauseAllTasksOnAppLaunch:
+UPDATE TaskEntity SET isPaused = 1;

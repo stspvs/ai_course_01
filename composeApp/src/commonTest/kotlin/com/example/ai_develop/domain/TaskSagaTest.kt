@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -109,7 +110,8 @@ class TaskSagaTest {
             title = "T",
             state = AgentTaskState(TaskState.PLANNING, agent),
             architectAgentId = "a1", // Только один агент
-            isPaused = true
+            isPaused = true,
+            isStarted = true
         )
         localRepo.saveTask(context)
 
@@ -139,7 +141,8 @@ class TaskSagaTest {
             title = "No Agent Task",
             state = AgentTaskState(TaskState.PLANNING, Agent(name="D", systemPrompt="", provider=LLMProvider.DeepSeek(), temperature = 0.7, stopWord = "", maxTokens = 2000)),
             architectAgentId = null,
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         localRepo.saveTask(context)
 
@@ -170,7 +173,8 @@ class TaskSagaTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         localRepo.saveTask(context)
         
@@ -205,7 +209,8 @@ class TaskSagaTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused=true
+            isPaused = true,
+            isStarted = true
         )
         localRepo.saveTask(context)
         
@@ -217,5 +222,99 @@ class TaskSagaTest {
         
         // Saga должна была "проснуться" и вызвать чат
         assertTrue(saga.context.value.isPaused == false)
+    }
+
+    /**
+     * Регрессия: при старте приложения getAgents() может отдать список позже, чем первый тик FSM.
+     * Раньше при null-архитекторе вызывался handleStageError → isPaused=true. Теперь пауза не ставится.
+     */
+    @Test
+    fun agentNotHydratedYet_startDoesNotPauseTask() = runTest {
+        val localRepo = FakeLocalRepository()
+        val chatRepo = FakeChatRepository()
+        val memoryManager = ChatMemoryManager()
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
+
+        val agent = Agent(
+            id = "a1",
+            name = "A",
+            systemPrompt = "",
+            provider = LLMProvider.DeepSeek(),
+            temperature = 0.7,
+            stopWord = "",
+            maxTokens = 2000
+        )
+
+        val context = TaskContext(
+            taskId = "t1",
+            title = "T",
+            state = AgentTaskState(TaskState.PLANNING, agent),
+            architectAgentId = "a1",
+            executorAgentId = "a1",
+            validatorAgentId = "a1",
+            isPaused = false,
+            isStarted = true
+        )
+        localRepo.saveTask(context)
+
+        val saga = TaskSaga(chatRepo, localRepo, null, null, null, context, memoryManager, testDispatcher)
+        saga.start()
+        advanceUntilIdle()
+
+        assertFalse(saga.context.value.isPaused, "Пока объекты агентов не подгружены из getAgents(), задача не должна уходить в паузу")
+        val messages = localRepo.getMessagesForTask("t1").first()
+        assertTrue(
+            messages.none { it.message.contains("Агент для этапа PLANNING не назначен") },
+            "Не должно быть фатальной ошибки «агент не назначен» при отложенной гидратации"
+        )
+    }
+
+    @Test
+    fun whenAgentsEmitAfterStart_taskRunsPlanningWithoutSpuriousPause() = runTest {
+        val localRepo = FakeLocalRepository()
+        val chatRepo = FakeChatRepository()
+        val memoryManager = ChatMemoryManager()
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
+
+        val agent = Agent(
+            id = "a1",
+            name = "A",
+            systemPrompt = "",
+            provider = LLMProvider.DeepSeek(),
+            temperature = 0.7,
+            stopWord = "",
+            maxTokens = 2000
+        )
+
+        val context = TaskContext(
+            taskId = "t1",
+            title = "T",
+            state = AgentTaskState(TaskState.PLANNING, agent),
+            architectAgentId = "a1",
+            executorAgentId = "a1",
+            validatorAgentId = "a1",
+            isPaused = false,
+            isStarted = true
+        )
+        localRepo.saveTask(context)
+
+        val saga = TaskSaga(chatRepo, localRepo, null, null, null, context, memoryManager, testDispatcher)
+        saga.start()
+        advanceUntilIdle()
+        assertFalse(saga.context.value.isPaused)
+
+        // requiresUserConfirmation: true — иначе пайплайн уйдёт в EXECUTION и с тем же JSON сорвёт парсинг
+        // ExecutionResult → finishOutcome(FAILED) и isPaused=true (не баг гидратации).
+        val planJson =
+            """{"success":true,"plan":{"goal":"g","steps":["one"],"successCriteria":"c"},"questions":[],"requiresUserConfirmation":true}"""
+        chatRepo.nextResponse = planJson
+        localRepo.saveAgent(agent)
+        advanceUntilIdle()
+
+        assertFalse(saga.context.value.isPaused, "После появления агентов в потоке задача не должна оказаться на паузе без ошибки")
+        assertTrue(
+            localRepo.getMessagesForTask("t1").first().isNotEmpty(),
+            "После гидратации агентов должен отработать планировщик и появиться сообщение в чате задачи"
+        )
     }
 }

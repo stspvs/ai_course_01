@@ -110,6 +110,37 @@ class SqlDelightChatRepositoryTest {
     }
 
     @Test
+    fun pauseAllTasksOnAppLaunch_setsPausedOnAllRows() = runTest {
+        val factory = DefaultAgentFactory()
+        repository.saveTask(
+            TaskContext(
+                taskId = "pause-a",
+                title = "A",
+                state = AgentTaskState(TaskState.PLANNING, factory.create()),
+                isPaused = false,
+                isStarted = true,
+                runtimeState = TaskRuntimeState.defaultFor("pause-a")
+            )
+        ).getOrThrow()
+        repository.saveTask(
+            TaskContext(
+                taskId = "pause-b",
+                title = "B",
+                state = AgentTaskState(TaskState.PLANNING, factory.create()),
+                isPaused = false,
+                isStarted = false,
+                runtimeState = TaskRuntimeState.defaultFor("pause-b")
+            )
+        ).getOrThrow()
+
+        repository.pauseAllTasksOnAppLaunch().getOrThrow()
+
+        val list = repository.getTasks().first()
+        assertEquals(2, list.size)
+        assertTrue(list.all { it.isPaused }, "После старта приложения все задачи должны быть на паузе")
+    }
+
+    @Test
     fun resetTaskConversation_clearsArchitectWorkingMemoryWhenArchitectIdDiffersFromTaskId() = runTest {
         val taskId = "task-1"
         val architectId = "arch-1"

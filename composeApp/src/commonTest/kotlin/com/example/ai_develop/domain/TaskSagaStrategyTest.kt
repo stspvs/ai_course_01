@@ -102,6 +102,7 @@ class TaskSagaStrategyTest {
             state = AgentTaskState(TaskState.EXECUTION, agent),
             architectAgentId = "a1",
             isPaused = false,
+            isStarted = true,
             runtimeState = TaskRuntimeState.defaultFor("t1").copy(
                 maxSteps = 88,
                 stepCount = 5,
@@ -117,7 +118,8 @@ class TaskSagaStrategyTest {
         advanceUntilIdle()
 
         assertEquals(TaskState.PLANNING, saga.context.value.state.taskState)
-        assertTrue(saga.context.value.isPaused)
+        assertFalse(saga.context.value.isPaused)
+        assertFalse(saga.context.value.isStarted)
         assertEquals(0, localRepo.messages.value.size, "Messages should be deleted")
         assertEquals(88, saga.context.value.runtimeState.maxSteps, "user limits must survive saga.reset")
         assertEquals(0, saga.context.value.runtimeState.stepCount)
@@ -135,7 +137,8 @@ class TaskSagaStrategyTest {
             architectAgentId = "a1",
             executorAgentId = "a1",
             validatorAgentId = "a1",
-            isPaused = false
+            isPaused = false,
+            isStarted = true
         )
         
         chatRepo.responseFlows.add(flowOf(Result.failure(Exception("Network Timeout"))))

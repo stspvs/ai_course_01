@@ -21,6 +21,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.runBlocking
+import org.koin.core.Koin
 import org.koin.core.context.startKoin
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.singleOf
@@ -35,6 +37,13 @@ fun initKoin(appDeclaration: KoinAppDeclaration = {}) =
         appDeclaration()
         modules(commonModule, platformModule)
     }
+
+/** После холодного старта все задачи в паузе (автономный конвейер не продолжается сам). Синхронно до UI. */
+fun Koin.pauseAllTasksOnAppLaunch() {
+    runBlocking {
+        get<PauseAllTasksOnAppLaunchUseCase>()().onFailure { it.printStackTrace() }
+    }
+}
 
 val commonModule = module {
     single {
@@ -108,6 +117,7 @@ val commonModule = module {
     singleOf(::CreateTaskUseCase)
     singleOf(::UpdateTaskUseCase)
     singleOf(::DeleteTaskUseCase)
+    singleOf(::PauseAllTasksOnAppLaunchUseCase)
     singleOf(::ResetTaskUseCase)
     singleOf(::GetMessagesUseCase)
     singleOf(::GetAgentsUseCase)

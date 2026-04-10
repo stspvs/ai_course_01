@@ -23,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
@@ -93,19 +94,20 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                             }
                         }
 
-                        Button(
+                        IconButton(
                             onClick = { viewModel.togglePause(task.taskId) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (task.isPaused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-                            )
+                            enabled = task.state.taskState != TaskState.DONE
                         ) {
                             Icon(
-                                if (task.isPaused) Icons.Default.PlayArrow else Icons.Default.Close,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
+                                imageVector = taskRunControlIcon(task),
+                                contentDescription = taskRunControlContentDescription(task),
+                                modifier = Modifier.size(26.dp),
+                                tint = if (taskRunControlUsePrimaryTint(task)) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.secondary
+                                }
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (task.isPaused) "Старт" else "Пауза")
                         }
 
                         OutlinedButton(
@@ -115,15 +117,6 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                             Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text("Сброс")
-                        }
-
-                        if (task.state.taskState != TaskState.DONE) {
-                            OutlinedButton(
-                                onClick = { viewModel.cancelAutonomousTask(task.taskId) },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text("Отменить задачу")
-                            }
                         }
                     }
                 }
@@ -231,9 +224,21 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                 }
             }
 
-            // Input
+            // Input: только на этапе PLANNING, пока задача запущена (не на паузе) и назначены агенты
             val isPlanning = task.state.taskState == TaskState.PLANNING
-            val isInputEnabled = isPlanning
+            val isInputEnabled = isPlanning && task.isStarted && !task.isPaused && task.isReadyToRun
+            val inputPlaceholder = when {
+                !task.isReadyToRun && isPlanning ->
+                    "Назначьте агентов задаче в настройках"
+                !task.isStarted && isPlanning ->
+                    "Нажмите ▶, чтобы запустить задачу"
+                task.isPaused && isPlanning ->
+                    "Нажмите ▶, чтобы продолжить"
+                isPlanning ->
+                    "Введите сообщение Архитектору..."
+                else ->
+                    "Ввод доступен только на этапе PLANNING"
+            }
             val trySendTaskMessage = {
                 if (isInputEnabled && input.isNotBlank()) {
                     viewModel.sendUserMessage(task.taskId, input)
@@ -257,12 +262,7 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                             .weight(1f)
                             .sendMessageOnEnter(input) { trySendTaskMessage() },
                         enabled = isInputEnabled,
-                        placeholder = {
-                            Text(
-                                if (isPlanning) "Введите сообщение Архитектору..."
-                                else "Ввод доступен только на этапе PLANNING"
-                            )
-                        },
+                        placeholder = { Text(inputPlaceholder) },
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = { trySendTaskMessage() })
@@ -271,7 +271,12 @@ fun TaskChatContent(viewModel: TaskViewModel) {
                         onClick = { trySendTaskMessage() },
                         containerColor = if (isInputEnabled && input.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp),
-                        modifier = Modifier.size(52.dp)
+                        modifier = Modifier
+                            .size(52.dp)
+                            .then(
+                                if (!isInputEnabled || input.isBlank()) Modifier.alpha(0.38f)
+                                else Modifier
+                            )
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Отправить")
                     }

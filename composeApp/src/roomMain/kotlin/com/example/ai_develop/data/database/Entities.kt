@@ -59,6 +59,7 @@ data class TaskEntity(
     val title: String,
     val state: AgentTaskState,
     val isPaused: Boolean,
+    val isStarted: Boolean = false,
     val step: Int,
     val plan: List<String>,
     val planDone: List<String>,

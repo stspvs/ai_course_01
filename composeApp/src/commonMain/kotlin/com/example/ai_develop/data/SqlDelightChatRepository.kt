@@ -11,6 +11,7 @@ import com.example.aidevelop.database.AgentStateEntity
 import com.example.aidevelop.database.TaskEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.serialization.json.Json
@@ -197,6 +198,7 @@ class SqlDelightChatRepository(
             title = task.title,
             taskState = task.state.taskState.name,
             isPaused = task.isPaused,
+            isStarted = task.isStarted,
             step = task.step.toLong(),
             planJson = json.encodeToString(ListSerializer(String.serializer()), task.plan),
             planDoneJson = json.encodeToString(ListSerializer(String.serializer()), task.planDone),
@@ -215,6 +217,12 @@ class SqlDelightChatRepository(
 
     override suspend fun deleteTask(task: TaskContext): Result<Unit> = runCatching {
         queries.deleteTask(task.taskId)
+    }
+
+    override suspend fun pauseAllTasksOnAppLaunch(): Result<Unit> = runCatching {
+        withContext(Dispatchers.Default) {
+            queries.pauseAllTasksOnAppLaunch()
+        }
     }
 
     override suspend fun getTask(taskId: String): TaskContext? {
@@ -401,6 +409,7 @@ class SqlDelightChatRepository(
                 agent = Agent(id = "temp", name = "Temp", systemPrompt = "", temperature = 0.7, provider = LLMProvider.Yandex(), stopWord = "", maxTokens = 2000, memoryStrategy = ChatMemoryStrategy.SlidingWindow(10), workingMemory = WorkingMemory(), messages = emptyList())
             ),
             isPaused = it.isPaused,
+            isStarted = it.isStarted,
             step = it.step.toInt(),
             plan = try { json.decodeFromString(ListSerializer(String.serializer()), it.planJson) } catch(e: Exception) { emptyList() },
             planDone = try { json.decodeFromString(ListSerializer(String.serializer()), it.planDoneJson) } catch(e: Exception) { emptyList() },

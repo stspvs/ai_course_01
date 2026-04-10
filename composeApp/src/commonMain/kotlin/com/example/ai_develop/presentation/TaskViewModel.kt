@@ -70,9 +70,15 @@ class TaskViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
-    val activeSagaContext: StateFlow<TaskContext?> = combine(_selectedTaskId, tasks) { id, tasks ->
-        tasks.find { it.taskId == id }
-    }.stateIn(viewModelScope, sharing, null)
+    /**
+     * Снимок выбранной задачи из потока БД, а не из [tasks] (stateIn может отставать на тик после save / смены выбора).
+     */
+    val activeSagaContext: StateFlow<TaskContext?> = _selectedTaskId
+        .flatMapLatest { id ->
+            if (id == null) flowOf(null)
+            else getTasksUseCase().map { list -> list.find { it.taskId == id } }
+        }
+        .stateIn(viewModelScope, sharing, null)
 
     val taskMessages: StateFlow<List<ChatMessage>> = _selectedTaskId
         .filterNotNull()
@@ -97,6 +103,21 @@ class TaskViewModel(
 
     fun selectTask(taskId: String?) {
         _streamingDraft.value = ""
+        val previousId = _selectedTaskId.value
+        if (previousId != null && previousId != taskId) {
+            viewModelScope.launch {
+                try {
+                    val previous = latestTask(previousId) ?: return@launch
+                    if (previous.isStarted && !previous.isPaused) {
+                        val paused = previous.copy(isPaused = true)
+                        updateTaskUseCase(paused).getOrThrow()
+                        taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(paused)
+                    }
+                } catch (e: Exception) {
+                    _uiState.update { it.copy(error = e) }
+                }
+            }
+        }
         _selectedTaskId.value = taskId
     }
 
@@ -108,7 +129,8 @@ class TaskViewModel(
                     taskId = taskId,
                     title = title,
                     state = AgentTaskState(TaskState.PLANNING, agentFactory.create()),
-                    isPaused = true
+                    isPaused = false,
+                    isStarted = false
                 )
                 createTaskUseCase(newTask).getOrThrow()
                 selectTask(taskId)
@@ -151,6 +173,7 @@ class TaskViewModel(
             val task = latestTask(taskId)
             if (task != null &&
                 task.isReadyToRun &&
+                task.isStarted &&
                 !task.isPaused &&
                 task.state.taskState == TaskState.PLANNING
             ) {
@@ -205,33 +228,83 @@ class TaskViewModel(
         }
     }
 
-    fun cancelAutonomousTask(taskId: String) {
-        viewModelScope.launch {
-            try {
-                val task = latestTask(taskId) ?: return@launch
-                taskSagaCoordinator.getOrCreateSaga(task).cancelTask()
-            } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
-                _effects.emit(TaskEffect.ShowError(e.message ?: "cancel failed"))
-            }
-        }
-    }
-
     fun togglePause(taskId: String) {
         viewModelScope.launch {
             try {
                 val task = latestTask(taskId) ?: return@launch
-                val wasPaused = task.isPaused
-                val messagesBeforeUnpause =
-                    if (wasPaused) getMessagesUseCase(taskId).first() else emptyList()
-                updateTaskUseCase(task.copy(isPaused = !task.isPaused)).getOrThrow()
+
+                if (!task.isStarted) {
+                    updateTaskUseCase(task.copy(isStarted = true)).getOrThrow()
+                    val refreshed = latestTask(taskId) ?: return@launch
+                    val saga = taskSagaCoordinator.getOrCreateSaga(refreshed)
+                    taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(refreshed)
+                    val messages = getMessagesUseCase(taskId).first()
+                    if (messages.isEmpty()) {
+                        if (refreshed.isReadyToRun) {
+                            _uiState.update { it.copy(isSending = true, error = null) }
+                            try {
+                                saga.start()
+                            } catch (e: Exception) {
+                                _uiState.update { it.copy(error = e) }
+                                _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga start failed"))
+                            } finally {
+                                _uiState.update { it.copy(isSending = false) }
+                            }
+                        } else {
+                            _uiState.update { it.copy(isSending = true, error = null) }
+                            _streamingDraft.value = ""
+                            val buffer = StringBuilder()
+                            var lastUiUpdateMillis = 0L
+                            try {
+                                val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
+                                agent.sendWelcomeMessage().collect { chunk ->
+                                    buffer.append(chunk)
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastUiUpdateMillis >= 48) {
+                                        _streamingDraft.value = buffer.toString()
+                                        lastUiUpdateMillis = now
+                                    }
+                                }
+                                if (buffer.isNotEmpty()) {
+                                    _streamingDraft.value = buffer.toString()
+                                }
+                            } catch (e: Exception) {
+                                _uiState.update { it.copy(error = e) }
+                                _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send welcome"))
+                            } finally {
+                                _streamingDraft.value = ""
+                                _uiState.update { it.copy(isSending = false) }
+                            }
+                        }
+                    } else if (refreshed.isReadyToRun) {
+                        _uiState.update { it.copy(isSending = true, error = null) }
+                        try {
+                            saga.start()
+                        } catch (e: Exception) {
+                            _uiState.update { it.copy(error = e) }
+                            _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga resume failed"))
+                        } finally {
+                            _uiState.update { it.copy(isSending = false) }
+                        }
+                    }
+                    return@launch
+                }
+
+                if (!task.isPaused) {
+                    updateTaskUseCase(task.copy(isPaused = true)).getOrThrow()
+                    return@launch
+                }
+
+                val messagesBeforeUnpause = getMessagesUseCase(taskId).first()
+                updateTaskUseCase(task.copy(isPaused = false)).getOrThrow()
                 val refreshed = latestTask(taskId) ?: return@launch
-                if (wasPaused && messagesBeforeUnpause.isEmpty()) {
+                val saga = taskSagaCoordinator.getOrCreateSaga(refreshed)
+                taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(refreshed)
+
+                if (messagesBeforeUnpause.isEmpty()) {
                     if (refreshed.isReadyToRun) {
                         _uiState.update { it.copy(isSending = true, error = null) }
                         try {
-                            val saga = taskSagaCoordinator.getOrCreateSaga(refreshed)
-                            taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(refreshed)
                             saga.start()
                         } catch (e: Exception) {
                             _uiState.update { it.copy(error = e) }
@@ -265,6 +338,16 @@ class TaskViewModel(
                             _uiState.update { it.copy(isSending = false) }
                         }
                     }
+                } else if (refreshed.isReadyToRun) {
+                    _uiState.update { it.copy(isSending = true, error = null) }
+                    try {
+                        saga.start()
+                    } catch (e: Exception) {
+                        _uiState.update { it.copy(error = e) }
+                        _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga resume failed"))
+                    } finally {
+                        _uiState.update { it.copy(isSending = false) }
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e) }
@@ -282,7 +365,8 @@ class TaskViewModel(
                 updateTaskUseCase(
                     task.copy(
                         state = task.state.copy(taskState = TaskState.PLANNING),
-                        isPaused = true,
+                        isPaused = false,
+                        isStarted = false,
                         step = 0,
                         plan = emptyList(),
                         planDone = emptyList(),
