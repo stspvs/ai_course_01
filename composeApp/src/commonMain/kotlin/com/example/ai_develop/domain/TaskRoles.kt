@@ -14,6 +14,14 @@ sealed class RoleResult {
     object Partial : RoleResult() // Intermediate response, no transition
 }
 
+enum class ValidatorInstructionKind {
+    /** Full inspector prompt: plan, CURRENT STEP, execution, VERIFICATION RULES in user message. */
+    PlanStep,
+
+    /** Narrow check: invariant text + execution DATA only in user message; no plan. */
+    TaskInvariant
+}
+
 interface TaskRole {
     val taskState: TaskState
     
@@ -121,6 +129,14 @@ class ValidatorRole : TaskRole {
     override val taskState = TaskState.VERIFICATION
 
     override fun getSystemInstruction(context: TaskContext): String =
+        getValidatorInstruction(context, ValidatorInstructionKind.PlanStep)
+
+    fun getValidatorInstruction(context: TaskContext, kind: ValidatorInstructionKind): String = when (kind) {
+        ValidatorInstructionKind.PlanStep -> planStepVerificationInstruction(context)
+        ValidatorInstructionKind.TaskInvariant -> taskInvariantVerificationInstruction()
+    }
+
+    private fun planStepVerificationInstruction(context: TaskContext): String =
         "\n\nIMPORTANT: You are currently in the VERIFICATION stage.\n" +
         "Your job is to check whether the Executor's deliverable matches the structured plan and CURRENT STEP in the user message. " +
         "If it is acceptable, return success:true. If not, return success:false with concrete issues for the Executor to fix.\n" +
@@ -132,6 +148,25 @@ class ValidatorRole : TaskRole {
         "Return JSON only in this shape (so the executor can read issues on retry):\n" +
         "{\"success\":true/false,\"issues\":[\"concrete problem 1\", \"...\"],\"suggestions\":[\"optional improvement\", \"...\"]}\n" +
         "When success is false, issues MUST be a non-empty list of actionable items the executor must fix.\n" +
+        "Legacy {\"status\":\"SUCCESS\",\"result\":\"...\"} is discouraged."
+
+    private fun taskInvariantVerificationInstruction(): String =
+        "\n\nIMPORTANT: VERIFICATION mode — **task invariant** check (this request has NO plan and NO CURRENT STEP block).\n" +
+        "The user message contains **POLARITY** (POSITIVE vs NEGATIVE), then:\n" +
+        "- **INVARIANT**: a short description of a property or constraint.\n" +
+        "- **DATA**: the Executor's deliverable (JSON ExecutionResult), especially the \"output\" field.\n" +
+        "Interpretation:\n" +
+        "- **POSITIVE**: return success:true only if DATA satisfies the invariant (the described thing should hold).\n" +
+        "- **NEGATIVE**: return success:true only if DATA does **not** exhibit the forbidden thing described " +
+        "(e.g. text says \"MVI\" — success:true means the output is not MVI / does not match that forbidden case).\n" +
+        "Do not judge plan steps or full-plan success criteria. Use only POLARITY + INVARIANT + DATA.\n" +
+        "This call checks **one** invariant only — do not mention or compare other invariants, and do not claim " +
+        "this rule contradicts other task rules.\n" +
+        "If the check passes, return success:true. If it fails, return success:false and explain briefly in \"reason\".\n" +
+        "Do not refer to the task title.\n" +
+        "Return JSON only, no markdown outside JSON:\n" +
+        "{\"success\":true/false,\"reason\":\"...\"}\n" +
+        "When success is false, \"reason\" MUST be a non-empty actionable explanation for the Executor.\n" +
         "Legacy {\"status\":\"SUCCESS\",\"result\":\"...\"} is discouraged."
 
     override fun isJsonMode(): Boolean = true

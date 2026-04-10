@@ -17,7 +17,8 @@ class TaskRuntimeStateResetTest {
             maxVerificationSteps = 33,
             autoCompress = false,
             compressAfterMessages = 15,
-            verbose = true
+            verbose = true,
+            invariants = listOf(TaskInvariant("i1", "must use Kotlin"))
         )
         val next = TaskRuntimeState.resetProgressPreservingUserSettings(prev)
         assertEquals("tid", next.taskId)
@@ -29,6 +30,7 @@ class TaskRuntimeStateResetTest {
         assertEquals(false, next.autoCompress)
         assertEquals(15, next.compressAfterMessages)
         assertEquals(true, next.verbose)
+        assertEquals(listOf(TaskInvariant("i1", "must use Kotlin")), next.invariants)
     }
 
     @Test

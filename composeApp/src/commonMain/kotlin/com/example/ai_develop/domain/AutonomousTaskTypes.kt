@@ -56,6 +56,43 @@ data class VerificationResult(
     val suggestions: List<String>? = null
 )
 
+/** Максимальная длина текста условия инварианта (символов). */
+const val MAX_TASK_INVARIANT_TEXT_LENGTH = 80
+
+/**
+ * Строка для [VerificationResult.issues], когда инспектор шага плана вернул success, но хотя бы один
+ * пользовательский инвариант не прошёл: итоговая верификация считается неуспешной (нельзя переходить к DONE),
+ * исполнителю в [VerificationResult.suggestions] уходят только провалившиеся инварианты, без подсказок инспектора.
+ *
+ * Single [VerificationResult.issues] line when the plan-step inspector returned success but at least one
+ * task invariant failed: overall verification is invalid for completion; the executor should fix using
+ * invariant lines in [VerificationResult.suggestions] only.
+ */
+const val INVARIANT_OVERRIDE_ISSUE_MESSAGE =
+    "The plan-step inspector accepted this step, but one or more task invariants failed; address only the invariant feedback below."
+
+@Serializable
+enum class InvariantPolarity {
+    /** Описание — то, что должно выполняться / присутствовать. */
+    POSITIVE,
+
+    /** Описание — то, чего быть не должно (запрет). */
+    NEGATIVE
+}
+
+@Serializable
+data class TaskInvariant(
+    val id: String,
+    val text: String,
+    val polarity: InvariantPolarity = InvariantPolarity.POSITIVE
+)
+
+@Serializable
+data class InvariantVerificationResult(
+    val success: Boolean,
+    val reason: String? = null
+)
+
 @Serializable
 data class PlannerOutput(
     val success: Boolean,
@@ -75,6 +112,13 @@ data class TaskRuntimeState(
     val planResult: PlanResult? = null,
     val lastExecution: ExecutionResult? = null,
     val lastVerification: VerificationResult? = null,
+    /**
+     * После успешной верификации шага [lastExecution]/[lastVerification] обнуляются при переходе к следующему шагу,
+     * иначе инспектор следующего шага увидел бы чужой вердикт. Эти поля копируют последний результат и вердикт
+     * **завершённого** шага только для **первого** промпта исполнителя на новом шаге (см. [TaskSaga]).
+     */
+    val executorCarryExecution: ExecutionResult? = null,
+    val executorCarryVerification: VerificationResult? = null,
     val workingMemory: String? = null,
 
     val outcome: TaskOutcome? = null,
@@ -92,7 +136,8 @@ data class TaskRuntimeState(
     val compressAfterMessages: Int = 20,
     val planningMessagesSinceCompress: Int = 0,
     val cancelled: Boolean = false,
-    val verbose: Boolean = false
+    val verbose: Boolean = false,
+    val invariants: List<TaskInvariant> = emptyList()
 ) {
     companion object {
         fun defaultFor(taskId: String): TaskRuntimeState = TaskRuntimeState(taskId = taskId)
@@ -112,6 +157,8 @@ data class TaskRuntimeState(
                 planResult = null,
                 lastExecution = null,
                 lastVerification = null,
+                executorCarryExecution = null,
+                executorCarryVerification = null,
                 workingMemory = null,
                 outcome = null,
                 awaitingPlanConfirmation = false,
@@ -128,8 +175,60 @@ data class TaskRuntimeState(
                 compressAfterMessages = previous.compressAfterMessages,
                 planningMessagesSinceCompress = 0,
                 cancelled = false,
-                verbose = previous.verbose
+                verbose = previous.verbose,
+                invariants = previous.invariants
             )
         }
     }
+}
+
+/**
+ * Сливает основной вердикт инспектора по шагу плана с результатами проверок пользовательских инвариантов.
+ *
+ * Если инспектор вернул [VerificationResult.success] `true`, но хотя бы один инвариант не прошёл, итоговая
+ * верификация считается проваленной: [VerificationResult.issues] — [INVARIANT_OVERRIDE_ISSUE_MESSAGE],
+ * [VerificationResult.suggestions] — только строки по провалившимся инвариантам (подсказки инспектора не передаются).
+ *
+ * В остальных случаях провалы инвариантов добавляются к [VerificationResult.suggestions]; [issues] без подмены.
+ */
+fun VerificationResult.mergedWithInvariantResults(
+    invariants: List<TaskInvariant>,
+    invariantResults: List<InvariantVerificationResult>
+): VerificationResult {
+    require(invariants.size == invariantResults.size)
+    val allInvOk = invariantResults.all { it.success }
+    // Строки по каждому провалу инварианта (для исполнителя в suggestions).
+    val extraSuggestions = invariants.zip(invariantResults)
+        .filter { !it.second.success }
+        .map { (inv, r) ->
+            val head = inv.text.trim().let { t ->
+                if (t.length > MAX_TASK_INVARIANT_TEXT_LENGTH) {
+                    t.take(MAX_TASK_INVARIANT_TEXT_LENGTH) + "…"
+                } else {
+                    t
+                }
+            }
+            val pol = when (inv.polarity) {
+                InvariantPolarity.POSITIVE -> "позитивный"
+                InvariantPolarity.NEGATIVE -> "негативный"
+            }
+            val detail = r.reason?.trim().orEmpty().ifBlank { "Does not satisfy the invariant." }
+            "[Invariant, $pol] $head — $detail"
+        }
+    // Инспектор «дал добро» по шагу плана (this.success == true), но инвариант(ы) не прошли:
+    // итог — проверка не пройдена; подсказки самого инспектора сюда не смешиваем (только extraSuggestions).
+    if (success && !allInvOk) {
+        return VerificationResult(
+            success = false,
+            issues = listOf(INVARIANT_OVERRIDE_ISSUE_MESSAGE),
+            suggestions = extraSuggestions.takeIf { it.isNotEmpty() }
+        )
+    }
+    val finalSuccess = success && allInvOk
+    val mergedSugg = suggestions.orEmpty() + extraSuggestions
+    return VerificationResult(
+        success = finalSuccess,
+        issues = issues,
+        suggestions = mergedSugg.takeIf { it.isNotEmpty() }
+    )
 }

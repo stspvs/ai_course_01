@@ -104,11 +104,20 @@ class TaskSagaReducerTest {
         assertEquals(TaskState.DONE, after.state.taskState)
         assertEquals(TaskOutcome.SUCCESS, after.runtimeState.outcome)
         assertNull(after.runtimeState.lastVerification)
+        assertNull(after.runtimeState.lastExecution)
     }
 
     @Test
     fun verificationSuccessNextStep() {
-        val before = ctx(TaskState.VERIFICATION) { copy(currentPlanStepIndex = 0, stepCount = 2) }
+        val prevVer = VerificationResult(success = true, issues = null, suggestions = null)
+        val before = ctx(TaskState.VERIFICATION) {
+            copy(
+                currentPlanStepIndex = 0,
+                stepCount = 2,
+                lastExecution = sampleExec,
+                lastVerification = prevVer
+            )
+        }
         val after = TaskSagaReducer.verificationSuccessNextStep(before, 1, "step2")
         assertNotNull(after)
         assertEquals(TaskState.EXECUTION, after.state.taskState)
@@ -116,6 +125,10 @@ class TaskSagaReducerTest {
         assertEquals(3, after.runtimeState.stepCount)
         assertEquals("step2", after.currentPlanStep)
         assertEquals(0, after.runtimeState.executionRetryCount)
+        assertNull(after.runtimeState.lastExecution)
+        assertNull(after.runtimeState.lastVerification)
+        assertEquals(sampleExec, after.runtimeState.executorCarryExecution)
+        assertEquals(prevVer, after.runtimeState.executorCarryVerification)
     }
 
     @Test

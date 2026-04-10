@@ -68,6 +68,32 @@ class TaskSaga(
 
     private class APIException(val error: Throwable) : Exception(error.message)
 
+    /**
+     * Эмиссия [LocalChatRepository.getTasks] иногда приходит со снимком строки **до** последнего [saveTask];
+     * не затираем в памяти [TaskRuntimeState.lastVerification], [lastExecution] и carry-поля.
+     */
+    private fun reconcileTaskContextFromDb(memory: TaskContext, fromDb: TaskContext): TaskContext {
+        if (memory.taskId != fromDb.taskId) return fromDb
+        if (memory.state.taskState != fromDb.state.taskState) return fromDb
+        if (memory.state.taskState != TaskState.EXECUTION) return fromDb
+        val m = memory.runtimeState
+        val d = fromDb.runtimeState
+        var patch = d
+        if (m.lastVerification != null && d.lastVerification == null) {
+            patch = patch.copy(lastVerification = m.lastVerification)
+        }
+        if (m.lastExecution != null && d.lastExecution == null) {
+            patch = patch.copy(lastExecution = m.lastExecution)
+        }
+        if (m.executorCarryVerification != null && d.executorCarryVerification == null) {
+            patch = patch.copy(executorCarryVerification = m.executorCarryVerification)
+        }
+        if (m.executorCarryExecution != null && d.executorCarryExecution == null) {
+            patch = patch.copy(executorCarryExecution = m.executorCarryExecution)
+        }
+        return if (patch == d) fromDb else fromDb.copy(runtimeState = patch)
+    }
+
     init {
         scope.launch {
             for (ignored in sagaTickChannel) {
@@ -85,7 +111,7 @@ class TaskSaga(
                     val oldState = lastTaskStateFromFlow ?: _context.value.state.taskState
                     lastTaskStateFromFlow = updatedContext.state.taskState
                     lastPausedFromFlow = updatedContext.isPaused
-                    _context.value = updatedContext
+                    _context.value = reconcileTaskContextFromDb(_context.value, updatedContext)
 
                     val becameUnpaused = wasPaused && !updatedContext.isPaused
                     val stateChangedWhileRunning = !updatedContext.isPaused && oldState != updatedContext.state.taskState
@@ -254,6 +280,21 @@ class TaskSaga(
         return localRepository.getTasks().first().find { it.taskId == id } ?: _context.value
     }
 
+    /**
+     * @param appendTaskInvariantsBlock если false — только базовый системный промпт роли (для узкой проверки
+     * одного инварианта: иначе в system дублируется весь список, модель путает формулировки и «спорит сама с собой»).
+     */
+    private fun systemPromptWithTaskInvariants(
+        baseSystemPrompt: String,
+        invariants: List<TaskInvariant>,
+        appendTaskInvariantsBlock: Boolean = true
+    ): String =
+        if (appendTaskInvariantsBlock) {
+            baseSystemPrompt + TaskOrchestratorPrompts.taskInvariantsSystemAppendix(invariants)
+        } else {
+            baseSystemPrompt
+        }
+
     private fun processCurrentState() {
         val currentContext = _context.value
         if (currentContext.isPaused || currentContext.state.taskState == TaskState.DONE) return
@@ -334,7 +375,10 @@ class TaskSaga(
         val agentForLlm = agentWithCurrentTaskMessages(agent)
         val finalHistory = role.processHistory(agentForLlm, memoryManager)
         val systemInstruction = role.getSystemInstruction(currentContext)
-        val fullSystemPrompt = role.buildSystemPrompt(agentForLlm, systemInstruction, memoryManager, includeUserProfile = true)
+        val fullSystemPrompt = systemPromptWithTaskInvariants(
+            role.buildSystemPrompt(agentForLlm, systemInstruction, memoryManager, includeUserProfile = true),
+            currentContext.runtimeState.invariants
+        )
 
         val contextMessages = mutableListOf<ChatMessage>()
         memoryManager.getShortTermMemoryMessage(agentForLlm)?.let { contextMessages.add(it) }
@@ -529,23 +573,31 @@ class TaskSaga(
         val stepIndex = snap.runtimeState.currentPlanStepIndex.coerceIn(0, (plan.steps.size - 1).coerceAtLeast(0))
 
         val systemInstruction = role.getSystemInstruction(snap)
-        val fullSystemPrompt = role.buildSystemPrompt(
-            agentForLlm,
-            systemInstruction,
-            memoryManager,
-            includeUserProfile = false,
-            includeAgentWorkingMemoryInSystem = false
+        val fullSystemPrompt = systemPromptWithTaskInvariants(
+            role.buildSystemPrompt(
+                agentForLlm,
+                systemInstruction,
+                memoryManager,
+                includeUserProfile = false,
+                includeAgentWorkingMemoryInSystem = false
+            ),
+            snap.runtimeState.invariants
         )
 
-        // lastVerification / lastExecution / workingMemory — из _context: снимок из Flow/БД может отставать
-        // и приходить без только что записанного вердикта инспектора после провала верификации.
+        // lastVerification / lastExecution / workingMemory — из _context; carry — фидбек с только что
+        // завершённого шага после успешной верификации (первый промпт на новом шаге).
         val liveRs = _context.value.runtimeState
+        val effExec = liveRs.lastExecution ?: liveRs.executorCarryExecution
+        val effVer = liveRs.lastVerification ?: liveRs.executorCarryVerification
+        val fromPrevStep = liveRs.lastExecution == null && liveRs.lastVerification == null &&
+            (liveRs.executorCarryExecution != null || liveRs.executorCarryVerification != null)
         val userContent = TaskOrchestratorPrompts.executorUserContent(
             plan = plan,
             stepIndex = stepIndex,
-            lastVerification = liveRs.lastVerification,
+            lastVerification = effVer,
             workingMemory = liveRs.workingMemory,
-            lastExecution = liveRs.lastExecution
+            lastExecution = effExec,
+            isFeedbackFromPreviousCompletedStep = fromPrevStep
         )
         val contextMessages = listOf(
             ChatMessage(
@@ -627,6 +679,8 @@ class TaskSaga(
             it.copy(
                 runtimeState = it.runtimeState.copy(
                     lastExecution = execResult,
+                    executorCarryExecution = null,
+                    executorCarryVerification = null,
                     executionRetryCount = if (execResult.success) 0 else it.runtimeState.executionRetryCount,
                     workingMemory = listOfNotNull(it.runtimeState.workingMemory, execResult.output).joinToString("\n").take(8000)
                 )
@@ -690,17 +744,19 @@ class TaskSaga(
             return
         }
 
-        val systemInstruction = role.getSystemInstruction(ctx)
-        val fullSystemPrompt = role.buildSystemPrompt(
-            agentForLlm,
-            systemInstruction,
-            memoryManager,
-            includeUserProfile = false,
-            includeAgentWorkingMemoryInSystem = false
-        )
-
+        val systemInstruction = role.getValidatorInstruction(ctx, ValidatorInstructionKind.PlanStep)
         // Снимок из persist: план, lastExecution, lastVerification (ответ исполнителя — только в lastExecution).
         val snap = resolvedTaskContext()
+        val fullSystemPrompt = systemPromptWithTaskInvariants(
+            role.buildSystemPrompt(
+                agentForLlm,
+                systemInstruction,
+                memoryManager,
+                includeUserProfile = false,
+                includeAgentWorkingMemoryInSystem = false
+            ),
+            snap.runtimeState.invariants
+        )
         val planForInspector = snap.runtimeState.planResult ?: PlanResult(
             goal = snap.title,
             steps = snap.plan,
@@ -765,7 +821,7 @@ class TaskSaga(
 
         if (fullResponse.isBlank() || _context.value.isPaused) return
 
-        val verResult = AutonomousTaskJsonParsers.parseVerificationResult(fullResponse)
+        val mainVerification = AutonomousTaskJsonParsers.parseVerificationResult(fullResponse)
             ?: run {
                 val retry = _context.value.runtimeState.verificationRetryCount
                 val maxRetries = _context.value.runtimeState.maxRetries
@@ -796,6 +852,91 @@ class TaskSaga(
             taskId = ctx.taskId,
             taskState = TaskState.VERIFICATION
         )
+
+        val snapAfterMain = resolvedTaskContext()
+        val invariants = snapAfterMain.runtimeState.invariants
+        val execForInvariants = snapAfterMain.runtimeState.lastExecution
+            ?: ExecutionResult(false, "", listOf("No execution"))
+
+        val verResult: VerificationResult =
+            if (invariants.isNotEmpty() && mainVerification.success) {
+                val invariantSystemInstruction =
+                    role.getValidatorInstruction(ctx, ValidatorInstructionKind.TaskInvariant)
+                val fullInvariantSystemPrompt = systemPromptWithTaskInvariants(
+                    role.buildSystemPrompt(
+                        agentForLlm,
+                        invariantSystemInstruction,
+                        memoryManager,
+                        includeUserProfile = false,
+                        includeAgentWorkingMemoryInSystem = false
+                    ),
+                    invariants,
+                    appendTaskInvariantsBlock = false
+                )
+                val invariantResults = mutableListOf<InvariantVerificationResult>()
+                val maxInvAttempts = _context.value.runtimeState.maxRetries
+                for (inv in invariants) {
+                    if (_context.value.isPaused) return
+                    val rsBeforeInv = _context.value.runtimeState
+                    val bumped = rsBeforeInv.copy(verificationLlmCalls = rsBeforeInv.verificationLlmCalls + 1)
+                    updateStateInDb { it.copy(runtimeState = bumped) }
+                    if (AutonomousTaskStateMachine.shouldTimeoutVerification(bumped)) {
+                        finishWithOutcome(TaskOutcome.TIMEOUT)
+                        return
+                    }
+                    var invParsed: InvariantVerificationResult? = null
+                    var invAttempt = 0
+                    while (invParsed == null && invAttempt < maxInvAttempts) {
+                        invAttempt++
+                        if (_context.value.isPaused) return
+                        val invUser = TaskOrchestratorPrompts.invariantInspectorUserContent(inv, execForInvariants)
+                        val invMessages = listOf(
+                            ChatMessage(
+                                id = Uuid.random().toString(),
+                                role = "user",
+                                message = invUser,
+                                timestamp = System.currentTimeMillis(),
+                                taskId = ctx.taskId,
+                                taskState = TaskState.VERIFICATION
+                            )
+                        )
+                        var invResponse = ""
+                        try {
+                            withTimeout(DEFAULT_LLM_TIMEOUT_MS) {
+                                repository.chatStreaming(
+                                    messages = invMessages,
+                                    systemPrompt = fullInvariantSystemPrompt,
+                                    maxTokens = agent.maxTokens,
+                                    temperature = agent.temperature,
+                                    stopWord = agent.stopWord,
+                                    isJsonMode = true,
+                                    provider = agent.provider
+                                ).collect { result ->
+                                    result.onSuccess { chunk -> invResponse += chunk }
+                                        .onFailure { throw APIException(it) }
+                                }
+                            }
+                        } catch (_: TimeoutCancellationException) {
+                            finishWithOutcome(TaskOutcome.TIMEOUT)
+                            return
+                        }
+                        invParsed = AutonomousTaskJsonParsers.parseInvariantVerificationResult(invResponse)
+                    }
+                    invariantResults.add(
+                        invParsed
+                            ?: InvariantVerificationResult(
+                                success = false,
+                                reason = "Invalid or empty JSON from inspector for invariant check."
+                            )
+                    )
+                }
+                // См. [VerificationResult.mergedWithInvariantResults]: если mainVerification.success, но инвариант
+                // вернул false — итоговый verResult.success будет false, в lastVerification попадёт override-сообщение
+                // и только строки по провалившимся инвариантам (без смешивания с подсказками инспектора).
+                mainVerification.mergedWithInvariantResults(invariants, invariantResults)
+            } else {
+                mainVerification
+            }
 
         updateStateInDb {
             it.copy(
@@ -828,7 +969,7 @@ class TaskSaga(
                 val nextIndex = stepIndex + 1
                 if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
                     val nextStepText = planForStepDecision.steps.getOrNull(nextIndex)
-                    notifyStageEntry(TaskState.EXECUTION)
+                    notifyStageEntry(TaskState.EXECUTION, planForStepDecision, nextIndex)
                     notifySystem("--- NEXT STEP ---\n$nextStepText", TaskState.EXECUTION)
                     // До persist снимаем блокировку: иначе collect(processCurrentState) запускает EXECUTION,
                     // пока isStageRunning ещё true, launch отменяется; затем явный processCurrentState()
@@ -843,7 +984,7 @@ class TaskSaga(
             if (retry < _context.value.runtimeState.maxRetries) {
                 updateStateInDb { it.copy(runtimeState = it.runtimeState.copy(verificationRetryCount = retry + 1)) }
                 if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
-                    notifyStageEntry(TaskState.EXECUTION)
+                    notifyStageEntry(TaskState.EXECUTION, planForStepDecision, stepIndex)
                     isStageRunning = false
                     val failNext = TaskSagaReducer.verificationFailToExecution(
                         _context.value,
@@ -853,7 +994,7 @@ class TaskSaga(
                 }
             } else {
                 if (AutonomousTaskStateMachine.canTransition(TaskState.VERIFICATION, TaskState.EXECUTION)) {
-                    notifyStageEntry(TaskState.EXECUTION)
+                    notifyStageEntry(TaskState.EXECUTION, planForStepDecision, stepIndex)
                     isStageRunning = false
                     val failNext = TaskSagaReducer.verificationFailToExecution(
                         _context.value,
@@ -906,7 +1047,11 @@ class TaskSaga(
 
         // До persist: иначе saveTask синхронно эмитит getTasks → processCurrentState() и LLM
         // следующего этапа стартует раньше, чем появится «▶ Начинается этап…» в ленте.
-        notifyStageEntry(to)
+        notifyStageEntry(
+            stage = to,
+            executionPlan = if (to == TaskState.EXECUTION) planResult else null,
+            executionStepIndexOverride = if (to == TaskState.EXECUTION) 0 else null
+        )
 
         val next = TaskSagaReducer.stageTransition(_context.value, from, to, planResult) ?: return
         updateStateInDb { next }
@@ -942,10 +1087,25 @@ class TaskSaga(
      * Системное сообщение о входе в этап (видно в общей ленте задачи).
      * [taskState] — этап, который начинается (метка пузыря в UI).
      */
-    private suspend fun notifyStageEntry(stage: TaskState) {
+    private suspend fun notifyStageEntry(
+        stage: TaskState,
+        executionPlan: PlanResult? = null,
+        executionStepIndexOverride: Int? = null
+    ) {
         val text = when (stage) {
             TaskState.PLANNING -> "▶ Начинается этап: планирование (архитектор)"
-            TaskState.EXECUTION -> "▶ Начинается этап: исполнение (исполнитель)"
+            TaskState.EXECUTION -> {
+                val plan = executionPlan ?: _context.value.runtimeState.planResult
+                    ?: PlanResult(
+                        goal = _context.value.title,
+                        steps = _context.value.plan,
+                        successCriteria = "",
+                        constraints = null,
+                        contextSummary = null
+                    )
+                val idx = executionStepIndexOverride ?: _context.value.runtimeState.currentPlanStepIndex
+                TaskStageExecutionBanner.executionEntryMessage(plan, idx)
+            }
             TaskState.VERIFICATION -> "▶ Начинается этап: проверка (инспектор)"
             TaskState.DONE -> "▶ Задача завершена"
         }

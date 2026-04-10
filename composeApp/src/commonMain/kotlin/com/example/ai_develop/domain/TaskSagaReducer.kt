@@ -78,7 +78,10 @@ object TaskSagaReducer {
             runtimeState = ctx.runtimeState.copy(
                 stage = TaskState.DONE,
                 outcome = TaskOutcome.SUCCESS,
-                lastVerification = null
+                lastVerification = null,
+                lastExecution = null,
+                executorCarryExecution = null,
+                executorCarryVerification = null
             )
         )
         return syncRuntimeStage(next)
@@ -99,6 +102,9 @@ object TaskSagaReducer {
                 currentPlanStepIndex = nextIndex,
                 stepCount = ctx.runtimeState.stepCount + 1,
                 lastVerification = null,
+                lastExecution = null,
+                executorCarryExecution = ctx.runtimeState.lastExecution,
+                executorCarryVerification = ctx.runtimeState.lastVerification,
                 executionRetryCount = 0
             )
         )

@@ -2,6 +2,7 @@ package com.example.ai_develop.domain
 
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -107,6 +108,34 @@ class TaskOrchestratorPromptsTest {
     }
 
     @Test
+    fun executorUserContent_showsLastExecutionWithoutInspectorWhenVerificationMissing() {
+        val prompt = TaskOrchestratorPrompts.executorUserContent(
+            plan = samplePlan,
+            stepIndex = 0,
+            lastVerification = null,
+            workingMemory = null,
+            lastExecution = ExecutionResult(success = true, output = "only exec", errors = null)
+        )
+        assertContains(prompt, "=== LAST EXECUTION RESULT (most recent deliverable for this step, JSON) ===")
+        assertContains(prompt, "only exec")
+        assertFalse(prompt.contains("=== INSPECTOR FEEDBACK"))
+    }
+
+    @Test
+    fun executorUserContent_previousStepFeedback_usesDistinctHeaders() {
+        val prompt = TaskOrchestratorPrompts.executorUserContent(
+            plan = samplePlan,
+            stepIndex = 1,
+            lastVerification = VerificationResult(true),
+            workingMemory = null,
+            lastExecution = ExecutionResult(true, "prev step out", null),
+            isFeedbackFromPreviousCompletedStep = true
+        )
+        assertContains(prompt, "previous completed plan step")
+        assertContains(prompt, "prev step out")
+    }
+
+    @Test
     fun executorUserContent_failedVerification_listsIssuesAndPutsInspectorBelowWorkingMemory() {
         val prompt = TaskOrchestratorPrompts.executorUserContent(
             plan = samplePlan,
@@ -119,16 +148,67 @@ class TaskOrchestratorPromptsTest {
             workingMemory = "wm body",
             lastExecution = ExecutionResult(success = true, output = "prev code", errors = null)
         )
-        assertFalse(prompt.contains("=== PLAN (structured) ==="), "исполнителю не передаём полный план JSON")
+        assertContains(prompt, "=== PLAN (structured) ===")
+        assertContains(prompt, "\"goal\":\"g\"")
+        val idxPos = prompt.indexOf("=== CURRENT STEP INDEX ===")
+        val curStepPos = prompt.indexOf("=== CURRENT STEP (execute only this")
+        val planPos = prompt.indexOf("=== PLAN (structured) ===")
         val wmPos = prompt.indexOf("=== TASK WORKING MEMORY ===")
         val execPos = prompt.indexOf("=== LAST EXECUTION RESULT")
         val inspPos = prompt.indexOf("=== INSPECTOR FEEDBACK")
-        assertTrue(wmPos >= 0 && execPos > wmPos && inspPos > execPos, "порядок: WM → последнее исполнение → инспектор")
+        assertTrue(
+            idxPos < curStepPos && curStepPos < planPos && planPos < wmPos && wmPos < execPos && execPos < inspPos,
+            "порядок: индекс шага → CURRENT STEP → план → рабочая память → последнее исполнение → инспектор"
+        )
         assertContains(prompt, "prev code")
         assertContains(prompt, "Issues:")
         assertContains(prompt, "- fix me")
         assertContains(prompt, "Suggestions:")
         assertContains(prompt, "- try harder")
         assertFalse(prompt.contains("=== INSPECTOR: REQUIRED FIXES"))
+    }
+
+    @Test
+    fun taskInvariantsSystemAppendix_listsInvariantsForSystemPrompt() {
+        val inv = listOf(TaskInvariant("i1", "No nulls in public API"))
+        val block = TaskOrchestratorPrompts.taskInvariantsSystemAppendix(inv)
+        assertContains(block, "=== TASK INVARIANTS (fixed rules for this task; apply in planning, execution, and verification) ===")
+        assertContains(block, "логическое И")
+        assertContains(block, "No nulls in public API")
+        assertContains(block, "позитивный")
+    }
+
+    @Test
+    fun taskInvariantsSystemAppendix_negativePolarity_showsNegationHint() {
+        val inv = listOf(TaskInvariant("i1", "архитектура MVI", InvariantPolarity.NEGATIVE))
+        val block = TaskOrchestratorPrompts.taskInvariantsSystemAppendix(inv)
+        assertContains(block, "негативный")
+        assertContains(block, "архитектура MVI")
+    }
+
+    @Test
+    fun invariantInspectorUserContent_containsInvariantAndDataOnly() {
+        val inv = TaskInvariant("id", "Output must mention Kotlin")
+        val exec = ExecutionResult(true, "fun hello() = \"Kotlin\"", null)
+        val prompt = TaskOrchestratorPrompts.invariantInspectorUserContent(inv, exec)
+        assertContains(prompt, "=== INVARIANT (rule to check) ===")
+        assertContains(prompt, "Output must mention Kotlin")
+        assertContains(prompt, "=== DATA (Executor deliverable as JSON")
+        assertContains(prompt, "fun hello()")
+        assertFalse(prompt.contains("=== PLAN (structured) ==="), "узкий промпт без плана")
+    }
+
+    @Test
+    fun taskInvariantsSystemAppendix_emptyList_isEmptyString() {
+        assertEquals("", TaskOrchestratorPrompts.taskInvariantsSystemAppendix(emptyList()))
+    }
+
+    @Test
+    fun invariantInspectorUserContent_blankInvariant_showsPlaceholder() {
+        val prompt = TaskOrchestratorPrompts.invariantInspectorUserContent(
+            TaskInvariant("id", "   "),
+            sampleExecution
+        )
+        assertContains(prompt, "(empty invariant)")
     }
 }

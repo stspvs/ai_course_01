@@ -9,12 +9,47 @@ object TaskOrchestratorPrompts {
         encodeDefaults = true
     }
 
+    /**
+     * Отдельный блок для конца **системного** промпта планировщика, исполнителя и инспектора.
+     * Пустой список — пустая строка.
+     */
+    fun taskInvariantsSystemAppendix(invariants: List<TaskInvariant>): String {
+        if (invariants.isEmpty()) return ""
+        return buildString {
+            appendLine()
+            appendLine(
+                "=== TASK INVARIANTS (fixed rules for this task; apply in planning, execution, and verification) ==="
+            )
+            appendLine(
+                "Все правила действуют одновременно (логическое И). Негативный инвариант запрещает то, что в тексте; " +
+                    "позитивный — требует, чтобы формулировка была верна. Несколько инвариантов могут разными словами " +
+                    "описывать одно ограничение — это не противоречие, а разные углы проверки."
+            )
+            appendLine()
+            appendTaskInvariantNumberedLines(invariants)
+        }
+    }
+
+    private fun StringBuilder.appendTaskInvariantNumberedLines(invariants: List<TaskInvariant>) {
+        invariants.forEachIndexed { i, inv ->
+            val pol = when (inv.polarity) {
+                InvariantPolarity.POSITIVE ->
+                    "позитивный: описанное ниже должно выполняться (должно быть верно)"
+                InvariantPolarity.NEGATIVE ->
+                    "негативный: описанного ниже не должно быть (запрет; например, не та архитектура)"
+            }
+            appendLine("${i + 1}. ($pol) ${inv.text.trim()}")
+        }
+    }
+
     fun executorUserContent(
         plan: PlanResult,
         stepIndex: Int,
         lastVerification: VerificationResult?,
         workingMemory: String?,
-        lastExecution: ExecutionResult? = null
+        lastExecution: ExecutionResult? = null,
+        /** True when [lastExecution]/[lastVerification] describe the **previous** plan step (carry-over after success). */
+        isFeedbackFromPreviousCompletedStep: Boolean = false
     ): String = buildString {
         val totalSteps = plan.steps.size.coerceAtLeast(1)
         appendLine("=== CURRENT STEP INDEX ===")
@@ -24,21 +59,37 @@ object TaskOrchestratorPrompts {
         appendLine("=== CURRENT STEP (execute only this; deliverables go into JSON \"output\") ===")
         appendLine(if (stepText.isNotEmpty()) stepText else "(empty step at index $stepIndex)")
         appendLine()
+        appendLine("=== PLAN (structured) ===")
+        appendLine(json.encodeToString(PlanResult.serializer(), plan))
+        appendLine()
         if (!workingMemory.isNullOrBlank()) {
             appendLine("=== TASK WORKING MEMORY ===")
             appendLine(workingMemory)
             appendLine()
         }
-        if (lastVerification != null && lastExecution != null) {
-            appendLine(
-                "=== LAST EXECUTION RESULT (submitted before this feedback; what the inspector reviewed, JSON) ==="
-            )
+        // Блоки независимы: при повторе после провала верификации оба должны быть; при отсутствии одного из полей
+        // в состоянии второй блок всё равно показывается (не требуем lastVerification для вывода lastExecution).
+        if (lastExecution != null) {
+            val execHeader =
+                when {
+                    isFeedbackFromPreviousCompletedStep ->
+                        "=== LAST EXECUTION RESULT (previous completed plan step — context only; your assignment is CURRENT STEP above, JSON) ==="
+                    lastVerification != null ->
+                        "=== LAST EXECUTION RESULT (submitted before this feedback; what the inspector reviewed, JSON) ==="
+                    else ->
+                        "=== LAST EXECUTION RESULT (most recent deliverable for this step, JSON) ==="
+                }
+            appendLine(execHeader)
             appendLine(json.encodeToString(ExecutionResult.serializer(), lastExecution))
             appendLine()
         }
         if (lastVerification != null) {
             appendLine(
-                "=== INSPECTOR FEEDBACK (same plan step — address issues/suggestions before re-submitting if not successful) ==="
+                if (isFeedbackFromPreviousCompletedStep) {
+                    "=== INSPECTOR FEEDBACK (previous completed plan step — context only; your assignment is CURRENT STEP above) ==="
+                } else {
+                    "=== INSPECTOR FEEDBACK (same plan step — address issues/suggestions before re-submitting if not successful) ==="
+                }
             )
             appendLine("success: ${lastVerification.success}")
             val issues = lastVerification.issues.orEmpty()
@@ -122,5 +173,33 @@ object TaskOrchestratorPrompts {
         }
         appendLine()
         appendLine("Respond with JSON: {\"success\":true/false,\"issues\":[\"...\"],\"suggestions\":[\"...\"]}")
+    }
+
+    fun invariantInspectorUserContent(invariant: TaskInvariant, execution: ExecutionResult): String = buildString {
+        appendLine("=== SCOPE (single invariant only) ===")
+        appendLine(
+            "Evaluate only this one invariant. Do not reference other task invariants or state that they contradict each other."
+        )
+        appendLine()
+        appendLine("=== POLARITY (how to interpret INVARIANT below) ===")
+        when (invariant.polarity) {
+            InvariantPolarity.POSITIVE ->
+                appendLine(
+                    "POSITIVE: DATA must satisfy the description — the described property/state should hold."
+                )
+            InvariantPolarity.NEGATIVE ->
+                appendLine(
+                    "NEGATIVE: DATA must NOT match the forbidden description — " +
+                        "e.g. if the text says \"MVI architecture\", the deliverable must NOT be/use MVI."
+                )
+        }
+        appendLine()
+        appendLine("=== INVARIANT (rule to check) ===")
+        appendLine(invariant.text.trim().ifBlank { "(empty invariant)" })
+        appendLine()
+        appendLine("=== DATA (Executor deliverable as JSON; primary content is usually \"output\") ===")
+        appendLine(json.encodeToString(ExecutionResult.serializer(), execution))
+        appendLine()
+        appendLine("Respond with JSON only: {\"success\":true/false,\"reason\":\"...\"}")
     }
 }

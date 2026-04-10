@@ -22,9 +22,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.TaskViewModel
@@ -32,6 +34,8 @@ import com.example.ai_develop.presentation.TaskEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 @Composable
 fun TaskManagementContent(viewModel: TaskViewModel) {
@@ -114,6 +118,8 @@ fun TaskSettings(
 
         TaskStateMachineLimitsCard(task, onUpdate)
 
+        TaskInvariantsCard(task, onUpdate)
+
         HorizontalDivider()
         Text("Настройка ролей", style = MaterialTheme.typography.titleMedium)
 
@@ -149,6 +155,178 @@ fun TaskSettings(
             onAgentSelected = { onUpdate(task.copy(validatorAgentId = it)) },
             onColorSelected = { onUpdate(task.copy(validatorColor = it.value.toLong())) }
         )
+    }
+}
+
+private const val MAX_TASK_INVARIANTS = 20
+
+/**
+ * Локальный [TextFieldValue] удерживает selection/caret; при [value] как [String] из родителя
+ * после первого ввода курсор часто сбрасывается в начало (рекомпозиция после [onUpdate]).
+ */
+@Composable
+private fun InvariantConditionTextField(
+    invariantId: String,
+    text: String,
+    onTextChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    supportingText: @Composable () -> Unit
+) {
+    var fieldValue by remember(invariantId) { mutableStateOf(TextFieldValue(text)) }
+
+    LaunchedEffect(text) {
+        if (fieldValue.text != text) {
+            fieldValue = TextFieldValue(text, TextRange(text.length))
+        }
+    }
+
+    OutlinedTextField(
+        value = fieldValue,
+        onValueChange = { newValue ->
+            val clipped = newValue.text.take(MAX_TASK_INVARIANT_TEXT_LENGTH)
+            fieldValue = if (clipped.length == newValue.text.length) {
+                newValue.copy(text = clipped)
+            } else {
+                TextFieldValue(clipped, TextRange(clipped.length))
+            }
+            onTextChange(clipped)
+        },
+        modifier = modifier,
+        minLines = 1,
+        maxLines = 3,
+        label = { Text("Условие") },
+        supportingText = supportingText
+    )
+}
+
+@OptIn(ExperimentalUuidApi::class)
+@Composable
+private fun TaskInvariantsCard(
+    task: TaskContext,
+    onUpdate: (TaskContext) -> Unit
+) {
+    val rs = task.runtimeState
+    val invariants = rs.invariants
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Инварианты", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "До $MAX_TASK_INVARIANT_TEXT_LENGTH символов на условие. " +
+                    "Позитивный — описанное должно выполняться; негативный — описанного не должно быть (запрет). " +
+                    "Список добавляется отдельным блоком в системный промпт планировщика, исполнителя и инспектора. " +
+                    "Инспектор дополнительно проверяет каждый инвариант отдельно; провал — в рекомендациях исполнителю.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            invariants.forEach { inv ->
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        InvariantConditionTextField(
+                            invariantId = inv.id,
+                            text = inv.text,
+                            onTextChange = { clipped ->
+                                onUpdate(
+                                    task.copy(
+                                        runtimeState = rs.copy(
+                                            invariants = invariants.map {
+                                                if (it.id == inv.id) it.copy(text = clipped) else it
+                                            }
+                                        )
+                                    )
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            supportingText = {
+                                Text("${inv.text.length}/$MAX_TASK_INVARIANT_TEXT_LENGTH")
+                            }
+                        )
+                        IconButton(
+                            onClick = {
+                                onUpdate(
+                                    task.copy(
+                                        runtimeState = rs.copy(invariants = invariants.filter { it.id != inv.id })
+                                    )
+                                )
+                            }
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Удалить инвариант", tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = inv.polarity == InvariantPolarity.POSITIVE,
+                            onClick = {
+                                if (inv.polarity != InvariantPolarity.POSITIVE) {
+                                    onUpdate(
+                                        task.copy(
+                                            runtimeState = rs.copy(
+                                                invariants = invariants.map {
+                                                    if (it.id == inv.id) it.copy(polarity = InvariantPolarity.POSITIVE) else it
+                                                }
+                                            )
+                                        )
+                                    )
+                                }
+                            },
+                            label = { Text("Позитивный") }
+                        )
+                        FilterChip(
+                            selected = inv.polarity == InvariantPolarity.NEGATIVE,
+                            onClick = {
+                                if (inv.polarity != InvariantPolarity.NEGATIVE) {
+                                    onUpdate(
+                                        task.copy(
+                                            runtimeState = rs.copy(
+                                                invariants = invariants.map {
+                                                    if (it.id == inv.id) it.copy(polarity = InvariantPolarity.NEGATIVE) else it
+                                                }
+                                            )
+                                        )
+                                    )
+                                }
+                            },
+                            label = { Text("Негативный") }
+                        )
+                    }
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    if (invariants.size >= MAX_TASK_INVARIANTS) return@OutlinedButton
+                    onUpdate(
+                        task.copy(
+                            runtimeState = rs.copy(
+                                invariants = invariants + TaskInvariant(id = Uuid.random().toString(), text = "")
+                            )
+                        )
+                    )
+                },
+                enabled = invariants.size < MAX_TASK_INVARIANTS
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Добавить инвариант")
+            }
+        }
     }
 }
 

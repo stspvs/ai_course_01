@@ -193,4 +193,33 @@ object AutonomousTaskJsonParsers {
                 null
             }
         }
+
+    fun parseInvariantVerificationResult(text: String): InvariantVerificationResult? {
+        val candidates = extractAllTopLevelJsonObjects(text.trim())
+        val toTry = if (candidates.isNotEmpty()) {
+            candidates.asReversed()
+        } else {
+            val legacy = extractJsonSubstring(text) ?: return null
+            listOf(legacy)
+        }
+        for (jsonStr in toTry) {
+            decodeInvariantVerificationResult(jsonStr)?.let { return it }
+        }
+        return null
+    }
+
+    private fun decodeInvariantVerificationResult(jsonStr: String): InvariantVerificationResult? =
+        try {
+            json.decodeFromString<InvariantVerificationResult>(jsonStr)
+        } catch (_: Exception) {
+            try {
+                val s = json.decodeFromString<SagaResponse>(jsonStr)
+                InvariantVerificationResult(
+                    success = s.status.equals("SUCCESS", ignoreCase = true),
+                    reason = if (!s.status.equals("SUCCESS", ignoreCase = true)) s.result else null
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
 }

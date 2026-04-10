@@ -405,7 +405,7 @@ private fun LlmRequestSnapshot.fullLogTextForCopy(): String = buildString {
     appendLine("Сообщения в запросе")
     when (agentStage) {
         TaskState.EXECUTION.name ->
-            appendLine("(оркестратор: структурированный план, индекс шага, текст CURRENT STEP — всё в одном [user] ниже)")
+            appendLine("(оркестратор: индекс шага, CURRENT STEP, затем JSON плана, при наличии TASK WORKING MEMORY — всё в одном [user] ниже)")
         TaskState.VERIFICATION.name ->
             appendLine("(оркестратор: структурированный план, шаг, при необходимости прошлый вердикт инспектора, последние ответы исполнителя, EXECUTION RESULT — в [user] ниже; чат планирования в запрос не входит)")
         else -> {}
@@ -453,7 +453,7 @@ private fun TaskLlmSnapshotDetails(snap: LlmRequestSnapshot) {
     when (snap.agentStage) {
         TaskState.EXECUTION.name ->
             Text(
-                "Исполнение: в одном [user] — «CURRENT STEP INDEX», «CURRENT STEP», при наличии «TASK WORKING MEMORY», затем при повторе шага «LAST EXECUTION RESULT» (что проверял инспектор) и «INSPECTOR FEEDBACK». Полный план JSON исполнителю не передаётся.",
+                "Исполнение: в одном [user] — «CURRENT STEP INDEX», «CURRENT STEP», «PLAN (structured)» (JSON плана), затем при наличии «TASK WORKING MEMORY», далее при повторе шага «LAST EXECUTION RESULT» и «INSPECTOR FEEDBACK».",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
