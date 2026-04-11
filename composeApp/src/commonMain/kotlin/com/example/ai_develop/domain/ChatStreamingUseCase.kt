@@ -9,16 +9,12 @@ import kotlinx.coroutines.flow.*
 open class ChatStreamingUseCase(
     private val repository: ChatRepository,
     private val memoryManager: ChatMemoryManager,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val agentTools: List<AgentTool> = listOf(CalculatorTool()),
 ) {
     private val activeAgents = mutableMapOf<String, AutonomousAgent>()
     
-    // Подключаем тестовые инструменты
-    private val engine = AgentEngine(
-        repository, 
-        memoryManager, 
-        listOf(WeatherTool(), CalculatorTool())
-    )
+    private val engine = AgentEngine(repository, memoryManager, agentTools)
 
     /**
      * Получает или создает автономного агента.

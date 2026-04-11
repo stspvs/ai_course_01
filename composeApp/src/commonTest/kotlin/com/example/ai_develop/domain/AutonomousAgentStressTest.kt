@@ -54,13 +54,20 @@ class AutonomousAgentStressTest {
         advanceUntilIdle()
 
         fakeEngine.queueResponse(listOf("🚀 Привет! 你好! ", "TOOL_CALL: ghost_tool\nINPUT: test"))
-        fakeEngine.queueToolResult(null)
 
         val output = agent.sendMessage("Edge cases test").toList()
         advanceUntilIdle()
 
         assertTrue(output.any { it.contains("你好") }, "Should handle Chinese characters")
         assertTrue(output.any { it.contains("🚀") }, "Should handle emojis")
+        val messages = agent.agent.value?.messages ?: emptyList()
+        assertTrue(
+            messages.any { m ->
+                m.role == "system" && m.message.contains("ghost_tool") &&
+                    (m.message.contains("Tool error") || m.message.contains("unknown tool"))
+            },
+            "Unknown tool should produce explicit Tool Result text, got: $messages"
+        )
     }
 
     @Test
@@ -116,14 +123,73 @@ class AutonomousAgentStressTest {
         assertEquals(2, userMessages.size, "Both user messages should be present")
     }
 
-    class FakeAgentEngine(repo: ChatRepository, mem: ChatMemoryManager) : AgentEngine(repo, mem) {
+    @Test
+    fun testSuppressLlmFollowUpSkipsSecondStream() = runTest {
+        val newsStub = object : AgentTool {
+            override val name = "news_search"
+            override val description = "stub"
+            override val suppressLlmFollowUp = true
+            override suspend fun execute(input: String) = "Headlines: ok ($input)"
+        }
+        val engineWithNews = FakeAgentEngine(repository, memoryManager, listOf(newsStub))
+        engineWithNews.queueResponse(listOf("Calling MCP.\nTOOL_CALL: news_search\nINPUT: tech"))
+
+        val agent = AutonomousAgent(agentId, repository, engineWithNews, backgroundScope)
+        advanceUntilIdle()
+
+        agent.sendMessage("news please").collect()
+        advanceUntilIdle()
+
+        assertEquals(
+            1,
+            engineWithNews.streamFromPreparedCallCount,
+            "With suppressLlmFollowUp, second LLM stream must not run"
+        )
+        val messages = agent.agent.value?.messages ?: emptyList()
+        assertTrue(messages.any { it.message.contains("Headlines: ok") }, "Tool output should be in history")
+    }
+
+    @Test
+    fun testToolExecuteExceptionSurfacesAsToolError() = runTest {
+        val badTool = object : AgentTool {
+            override val name = "bad_tool"
+            override val description = "always fails"
+            override suspend fun execute(input: String): String = error("intentional failure")
+        }
+        val engineWithBad = FakeAgentEngine(repository, memoryManager, listOf(badTool))
+        engineWithBad.queueResponse(listOf("TOOL_CALL: bad_tool\nINPUT: x"))
+
+        val agent = AutonomousAgent(agentId, repository, engineWithBad, backgroundScope)
+        advanceUntilIdle()
+
+        agent.sendMessage("trigger").collect()
+        advanceUntilIdle()
+
+        val messages = agent.agent.value?.messages ?: emptyList()
+        assertTrue(
+            messages.any { m ->
+                m.role == "system" && m.message.contains("Tool error") && m.message.contains("intentional")
+            },
+            "Exception from execute should become Tool error message, got: $messages"
+        )
+    }
+
+    class FakeAgentEngine(
+        repo: ChatRepository,
+        mem: ChatMemoryManager,
+        tools: List<AgentTool> = emptyList()
+    ) : AgentEngine(repo, mem, tools) {
         private val responses = mutableListOf<List<String>>()
         private val toolResults = mutableListOf<String?>()
+
+        var streamFromPreparedCallCount = 0
+            private set
 
         fun queueResponse(chunks: List<String>) = responses.add(chunks)
         fun queueToolResult(res: String?) = toolResults.add(res)
 
         override fun streamFromPrepared(agent: Agent, prepared: PreparedLlmRequest): Flow<String> = flow {
+            streamFromPreparedCallCount++
             val chunks = if (responses.isNotEmpty()) responses.removeAt(0) else listOf("Default")
             for (chunk in chunks) {
                 emit(chunk)
@@ -131,11 +197,11 @@ class AutonomousAgentStressTest {
             }
         }
 
-        override suspend fun processTools(text: String): String? {
-            if (text.contains("TOOL_CALL:")) {
-                return if (toolResults.isNotEmpty()) toolResults.removeAt(0) else null
+        override suspend fun executeToolCall(call: ParsedToolCall): String? {
+            if (toolResults.isNotEmpty()) {
+                return toolResults.removeAt(0)
             }
-            return null
+            return super.executeToolCall(call)
         }
     }
 

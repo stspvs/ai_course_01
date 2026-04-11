@@ -55,6 +55,25 @@ class ChatMemoryManager {
         }
     }
 
+    /**
+     * История для UI: как [getBranchHistory], но если цепочка по [ChatMessage.parentId] оборвана
+     * (типичный случай — сообщения из БД без сохранённого parentId), показываем полный линейный
+     * порядок по [ChatMessage.timestamp]. Для режима ветвления без «дыр» в цепочке поведение совпадает с [getBranchHistory].
+     */
+    fun getDisplayHistory(
+        messages: List<ChatMessage>,
+        currentBranchId: String?,
+        agentBranches: List<ChatBranch>
+    ): List<ChatMessage> {
+        val linearSorted = messages.sortedWith(compareBy({ it.timestamp }, { it.id }))
+        val branchMessages = getBranchHistory(messages, currentBranchId, agentBranches)
+        val useLinearFallback =
+            agentBranches.isEmpty() &&
+                branchMessages.size < linearSorted.size &&
+                linearSorted.isNotEmpty()
+        return if (useLinearFallback) linearSorted else branchMessages
+    }
+
     private fun getMessagesForBranch(messages: List<ChatMessage>, branchLastMessageId: String): List<ChatMessage> {
         val messageMap = messages.associateBy { it.id }
         val result = mutableListOf<ChatMessage>()

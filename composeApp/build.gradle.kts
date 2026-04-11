@@ -60,7 +60,15 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
                 implementation(libs.ktor.client.okhttp)
+                implementation(libs.ktor.client.cio)
                 implementation(libs.sqldelight.sqlite.driver)
+
+                implementation(libs.mcp.kotlin.sdk.client)
+                implementation(libs.mcp.kotlin.sdk.server)
+                implementation(libs.ktor.server.netty)
+                implementation(libs.ktor.server.cors)
+                implementation(libs.ktor.server.content.negotiation)
+                implementation(libs.slf4j.simple)
             }
         }
 
@@ -71,14 +79,6 @@ kotlin {
                 implementation(libs.junit.jupiter.api)
                 runtimeOnly(libs.junit.jupiter.engine)
                 implementation(libs.mockk)
-
-                implementation(libs.mcp.kotlin.sdk.client)
-                implementation(libs.mcp.kotlin.sdk.server)
-                implementation(libs.ktor.server.netty)
-                implementation(libs.ktor.server.cors)
-                implementation(libs.ktor.server.content.negotiation)
-                implementation(libs.ktor.client.cio)
-                implementation(libs.slf4j.simple)
             }
         }
     }
@@ -134,4 +134,6 @@ buildConfig {
     buildConfigField("String", "YANDEX_KEY", "\"${getSecret("YANDEX_KEY")}\"")
     buildConfigField("String", "YANDEX_FOLDER_ID", "\"${getSecret("YANDEX_FOLDER_ID")}\"")
     buildConfigField("String", "OPENROUTER_KEY", "\"${getSecret("OPENROUTER_KEY")}\"")
+    buildConfigField("String", "NEWSAPI_KEY", "\"${getSecret("NEWSAPI_KEY")}\"")
+    buildConfigField("int", "NEWS_MCP_PORT", "${getSecret("NEWS_MCP_PORT").ifEmpty { "8765" }.toIntOrNull() ?: 8765}")
 }

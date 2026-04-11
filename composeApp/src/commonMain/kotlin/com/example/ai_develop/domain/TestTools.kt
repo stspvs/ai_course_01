@@ -2,13 +2,16 @@ package com.example.ai_develop.domain
 
 import kotlinx.coroutines.delay
 
+/** Демо-погода по городу (без внешнего API). Имя `weather` должно совпадать с тем, что выводит модель в `[TOOL: weather(...)]`. */
 class WeatherTool : AgentTool {
     override val name: String = "weather"
-    override val description: String = "Returns the current weather for a city. Input: city name."
+    override val description: String =
+        "Returns the current weather for a city. Input: city name (e.g. Paris)."
 
     override suspend fun execute(input: String): String {
-        delay(1000) // Симуляция сетевого запроса
-        return "The weather in $input is 22°C, Sunny."
+        delay(300)
+        val city = input.trim().ifEmpty { "unknown city" }
+        return "The weather in $city is 22°C, Sunny. (demo)"
     }
 }
 

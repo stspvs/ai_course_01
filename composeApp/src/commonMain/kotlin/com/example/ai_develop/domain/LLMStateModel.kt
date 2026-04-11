@@ -37,7 +37,7 @@ data class LLMStateModel(
     val currentMessages: List<ChatMessage>
         get() {
             val agent = selectedAgent ?: return emptyList()
-            return memoryManager.getBranchHistory(
+            return memoryManager.getDisplayHistory(
                 messages = agent.messages,
                 currentBranchId = agent.currentBranchId,
                 agentBranches = agent.branches

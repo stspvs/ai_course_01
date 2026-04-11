@@ -11,7 +11,16 @@ interface AgentTool {
     val name: String
     val description: String
     suspend fun execute(input: String): String
+
+    /**
+     * Если true — после выполнения этого инструмента повторный вызов LLM для того же пользовательского сообщения
+     * не выполняется (ответ считается полностью заданным инструментом, например MCP).
+     */
+    val suppressLlmFollowUp: Boolean get() = false
 }
+
+/** Распознанный вызов инструмента из ответа модели ([parseToolCall]). */
+data class ParsedToolCall(val toolName: String, val input: String)
 
 data class PreparedLlmRequest(
     val systemPrompt: String,
@@ -84,31 +93,37 @@ open class AgentEngine(
     ): Flow<String> = streamFromPrepared(agent, prepareChatRequest(agent, stage, isJsonMode = false))
 
     /**
+     * Извлекает первый вызов инструмента из текста модели (два поддерживаемых формата).
+     */
+    open fun parseToolCall(text: String): ParsedToolCall? {
+        val regex1 = "\\[TOOL: (\\w+)\\((.*)\\)\\]".toRegex()
+        regex1.find(text)?.let { m ->
+            return ParsedToolCall(m.groupValues[1], m.groupValues[2])
+        }
+        val regex2 = "TOOL_CALL: (\\w+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL)
+        regex2.find(text)?.let { m ->
+            return ParsedToolCall(m.groupValues[1], m.groupValues[2].trim())
+        }
+        return null
+    }
+
+    open suspend fun executeToolCall(call: ParsedToolCall): String? =
+        tools.find { it.name == call.toolName }?.execute(call.input)
+
+    /** Список имён зарегистрированных инструментов (для сообщений об ошибках). */
+    open fun registeredToolNames(): List<String> = tools.map { it.name }
+
+    /** После такого инструмента не вызывать LLM повторно (см. [AgentTool.suppressLlmFollowUp]). */
+    open fun toolSuppressesLlmFollowUp(toolName: String): Boolean =
+        tools.find { it.name == toolName }?.suppressLlmFollowUp == true
+
+    /**
      * Анализирует сообщение на наличие вызовов инструментов (Tool Calling).
      * В реальном мире тут был бы парсинг JSON или специальных тегов.
      */
     open suspend fun processTools(text: String): String? {
-        // Поддержка двух форматов:
-        // 1. [TOOL: name(input)]
-        // 2. TOOL_CALL: name\nINPUT: input (из промпта пользователя)
-
-        val regex1 = "\\[TOOL: (\\w+)\\((.*)\\)\\]".toRegex()
-        val match1 = regex1.find(text)
-        if (match1 != null) {
-            val toolName = match1.groupValues[1]
-            val input = match1.groupValues[2]
-            return tools.find { it.name == toolName }?.execute(input)
-        }
-
-        val regex2 = "TOOL_CALL: (\\w+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL)
-        val match2 = regex2.find(text)
-        if (match2 != null) {
-            val toolName = match2.groupValues[1]
-            val input = match2.groupValues[2].trim()
-            return tools.find { it.name == toolName }?.execute(input)
-        }
-
-        return null
+        val call = parseToolCall(text) ?: return null
+        return executeToolCall(call)
     }
 
     private fun prepareSystemPrompt(agent: Agent, stage: AgentStage): String {

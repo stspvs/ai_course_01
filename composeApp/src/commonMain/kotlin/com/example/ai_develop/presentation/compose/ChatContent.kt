@@ -154,6 +154,7 @@ internal fun ChatContent(
                 items(messages, key = { it.id }) { message ->
                     MessageItem(
                         message = message,
+                        isBranchingMode = isBranchingMode,
                         onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) }
                     )
                 }
@@ -498,21 +499,26 @@ private fun BranchesPanel(
 @Composable
 private fun MessageItem(
     message: ChatMessage,
+    isBranchingMode: Boolean,
     onCreateBranch: (String) -> Unit
 ) {
     var showBranchDialog by remember { mutableStateOf(false) }
     var branchName by remember { mutableStateOf("") }
 
     Box(
-        modifier = Modifier.combinedClickable(
-            onLongClick = { showBranchDialog = true },
-            onClick = {}
-        )
+        modifier = if (isBranchingMode) {
+            Modifier.combinedClickable(
+                onLongClick = { showBranchDialog = true },
+                onClick = {}
+            )
+        } else {
+            Modifier
+        }
     ) {
         MessageBubble(message = message)
     }
 
-    if (showBranchDialog) {
+    if (showBranchDialog && isBranchingMode) {
         AlertDialog(
             onDismissRequest = { showBranchDialog = false },
             title = { Text("Создать новую ветку?") },

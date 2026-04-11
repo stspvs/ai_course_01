@@ -10,6 +10,19 @@ class ChatMemoryManagerTest {
     private val manager = ChatMemoryManager()
 
     @Test
+    fun testDisplayHistoryFallsBackWhenParentIdsMissingLikeAfterDbLoad() {
+        val messages = listOf(
+            ChatMessage(id = "a", message = "first", timestamp = 100L, source = SourceType.USER),
+            ChatMessage(id = "b", message = "second", timestamp = 200L, source = SourceType.ASSISTANT),
+            ChatMessage(id = "c", message = "third", timestamp = 300L, source = SourceType.USER)
+        )
+        val display = manager.getDisplayHistory(messages, null, emptyList())
+        assertEquals(3, display.size)
+        assertEquals(listOf("first", "second", "third"), display.map { it.message })
+        assertEquals(1, manager.getBranchHistory(messages, null, emptyList()).size)
+    }
+
+    @Test
     fun testBrokenParentChainFallsBackToChronologicalWindow() {
         val messages = listOf(
             ChatMessage(id = "1", message = "M1", timestamp = 100L, source = SourceType.USER),

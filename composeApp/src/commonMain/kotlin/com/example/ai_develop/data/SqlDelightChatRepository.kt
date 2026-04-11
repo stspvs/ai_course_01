@@ -38,7 +38,8 @@ class SqlDelightChatRepository(
 
     override suspend fun saveAgentState(state: AgentState) {
         db.transaction {
-            persistAgentStateRow(state)
+            // Сначала сообщения, потом строка агента: иначе observeAgentState(getAgentState)
+            // срабатывает на UPDATE агента, а чтение messages попадает между delete и insert — список пустой и UI «съедает» историю.
             queries.deleteMessagesForAgent(state.agentId)
             val taskRow = queries.getTask(state.agentId).executeAsOneOrNull()
             val defaultTaskState = taskRow?.let { TaskState.fromPersisted(it.taskState) }
@@ -59,6 +60,7 @@ class SqlDelightChatRepository(
                     llmSnapshotJson = encodeLlmSnapshot(msg.llmRequestSnapshot)
                 )
             }
+            persistAgentStateRow(state)
         }
     }
 

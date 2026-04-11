@@ -159,6 +159,54 @@ class AgentEngineTest {
         assertNull(engine.processTools(""))
     }
 
+    @Test
+    fun testParseToolCallMatchesProcessTools() = runTest {
+        val call1 = engine.parseToolCall("[TOOL: calculator(5*5)]")
+        assertEquals("calculator", call1?.toolName)
+        assertEquals("5*5", call1?.input)
+        val text2 = "TOOL_CALL: calculator\nINPUT: some complex data"
+        val call2 = engine.parseToolCall(text2)
+        assertEquals("calculator", call2?.toolName)
+        assertEquals("some complex data", call2?.input)
+    }
+
+    @Test
+    fun testRegisteredToolNames() {
+        assertEquals(listOf("calculator"), engine.registeredToolNames())
+        val empty = AgentEngine(repository, memoryManager, emptyList())
+        assertTrue(empty.registeredToolNames().isEmpty())
+    }
+
+    @Test
+    fun testToolSuppressesLlmFollowUp() {
+        assertFalse(engine.toolSuppressesLlmFollowUp("calculator"))
+        assertFalse(engine.toolSuppressesLlmFollowUp("missing"))
+
+        val suppressing = object : AgentTool {
+            override val name = "news_search"
+            override val description = "x"
+            override val suppressLlmFollowUp = true
+            override suspend fun execute(input: String) = "ok"
+        }
+        val eng = AgentEngine(repository, memoryManager, listOf(suppressing))
+        assertTrue(eng.toolSuppressesLlmFollowUp("news_search"))
+        assertFalse(eng.toolSuppressesLlmFollowUp("calculator"))
+    }
+
+    @Test
+    fun testExecuteToolCallUnknownReturnsNull() = runTest {
+        val call = ParsedToolCall("no_such_tool", "in")
+        assertNull(engine.executeToolCall(call))
+    }
+
+    @Test
+    fun testWeatherToolExecuteContainsCityAndDemoText() = runTest {
+        val w = WeatherTool()
+        val out = w.execute("Paris")
+        assertTrue(out.contains("Paris"), out)
+        assertTrue(out.contains("22"), out)
+    }
+
     // --- 5: Memory & Maintenance ---
 
     @Test

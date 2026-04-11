@@ -122,7 +122,18 @@ val commonModule = module {
     singleOf(::GetMessagesUseCase)
     singleOf(::GetAgentsUseCase)
 
-    singleOf(::ChatStreamingUseCase)
+    single(named("agentTools")) {
+        listOf<AgentTool>(WeatherTool(), CalculatorTool())
+    }
+
+    single {
+        ChatStreamingUseCase(
+            repository = get(),
+            memoryManager = get(),
+            scope = get(),
+            agentTools = get(named("agentTools")),
+        )
+    }
     singleOf(::SummarizeChatUseCase)
     singleOf(::ExtractFactsUseCase)
     singleOf(::UpdateWorkingMemoryUseCase)

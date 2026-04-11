@@ -63,6 +63,8 @@ open class AutonomousAgent(
         val profile = repository.getProfile(agentId)
         _stateMachine.value = AgentStateMachine(state)
 
+        val messages = resolveMessagesSnapshot(state)
+
         _agent.update {
             Agent(
                 id = state.agentId,
@@ -75,9 +77,20 @@ open class AutonomousAgent(
                 userProfile = profile,
                 memoryStrategy = state.memoryStrategy,
                 workingMemory = state.workingMemory,
-                messages = state.messages
+                messages = messages
             )
         }
+    }
+
+    /**
+     * [repository.observeAgentState] иногда отдаёт пустой [AgentState.messages] при гонке с сохранением
+     * (или кратковременно несогласованный снимок), хотя в БД история уже есть — после перезапуска она видна.
+     * Прямой [getAgentState] в этом случае обычно возвращает актуальный список.
+     */
+    private suspend fun resolveMessagesSnapshot(state: AgentState): List<ChatMessage> {
+        if (state.messages.isNotEmpty()) return state.messages
+        val fromDb = repository.getAgentState(agentId)?.messages.orEmpty()
+        return if (fromDb.isNotEmpty()) fromDb else state.messages
     }
 
     suspend fun transitionTo(nextStage: AgentStage): Result<AgentState> {
@@ -115,29 +128,48 @@ open class AutonomousAgent(
             // 3. Первая итерация LLM
             var responseText = executeStreamingStep(this, agentSnapshot, fsm.getCurrentState().currentStage)
             
-            // 4. Tool Calling Loop
-            var toolResult = engine.processTools(responseText)
+            // 4. Tool Calling Loop — дедуп по (имя инструмента + вход), а не по тексту результата:
+            // один и тот же запрос к API может вернуть слегка разный текст, из‑за чего раньше
+            // показывалось несколько одинаковых «Tool Result» подряд.
+            var toolCall = engine.parseToolCall(responseText)
             var iterations = 0
-            val visitedResults = mutableSetOf<String>()
+            val visitedToolCalls = mutableSetOf<String>()
 
-            while (toolResult != null && iterations < 3 && visitedResults.add(toolResult)) {
+            while (toolCall != null && iterations < 3) {
+                val callKey = "${toolCall.toolName}\u0000${toolCall.input.trim()}"
+                if (!visitedToolCalls.add(callKey)) break
+
+                val toolResultText: String = try {
+                    engine.executeToolCall(toolCall) ?: run {
+                        val names = engine.registeredToolNames()
+                        val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
+                        "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
+                    }
+                } catch (e: Exception) {
+                    "Tool error: ${e.message ?: e::class.simpleName}"
+                }
+
                 emit("\n[Executing tool...]\n")
-                
+
                 agentSnapshot = _agent.value ?: break
                 val toolMsg = createMessage(
                     "system",
-                    "Tool Result: $toolResult",
+                    "Tool Result: $toolResultText",
                     agentSnapshot.messages.lastOrNull()?.id,
                     fsm.getCurrentState().currentStage
                 )
-                
+
                 processingMutex.withLock {
                     _agent.update { it?.copy(messages = it.messages + toolMsg) }
                 }
-                
+
+                if (engine.toolSuppressesLlmFollowUp(toolCall.toolName)) {
+                    break
+                }
+
                 agentSnapshot = _agent.value ?: break
                 responseText = executeStreamingStep(this, agentSnapshot, fsm.getCurrentState().currentStage)
-                toolResult = engine.processTools(responseText)
+                toolCall = engine.parseToolCall(responseText)
                 iterations++
             }
 
