@@ -135,3 +135,62 @@ DELETE FROM TaskEntity WHERE taskId = ?;
 -- После перезапуска приложения автономный конвейер не продолжается, пока пользователь не нажмёт «продолжить».
 pauseAllTasksOnAppLaunch:
 UPDATE TaskEntity SET isPaused = 1;
+
+-- MCP: зарегистрированные серверы (Streamable HTTP endpoint)
+CREATE TABLE IF NOT EXISTS McpServerEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    displayName TEXT NOT NULL,
+    baseUrl TEXT NOT NULL,
+    enabled INTEGER AS Boolean NOT NULL DEFAULT 1,
+    headersJson TEXT NOT NULL DEFAULT '{}',
+    lastSyncToolsJson TEXT NOT NULL DEFAULT '',
+    lastSyncError TEXT,
+    lastSyncAt INTEGER NOT NULL DEFAULT 0
+);
+
+-- Привязки: какой MCP tool с какого сервера доступен агенту под каким именем
+CREATE TABLE IF NOT EXISTS McpToolBindingEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    serverId TEXT NOT NULL,
+    mcpToolName TEXT NOT NULL,
+    agentToolName TEXT NOT NULL UNIQUE,
+    descriptionOverride TEXT NOT NULL DEFAULT '',
+    inputArgumentKey TEXT NOT NULL DEFAULT 'query',
+    enabled INTEGER AS Boolean NOT NULL DEFAULT 0,
+    FOREIGN KEY(serverId) REFERENCES McpServerEntity(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_binding_server ON McpToolBindingEntity(serverId);
+
+insertMcpServer:
+INSERT OR REPLACE INTO McpServerEntity(
+    id, displayName, baseUrl, enabled, headersJson, lastSyncToolsJson, lastSyncError, lastSyncAt
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+getMcpServer:
+SELECT * FROM McpServerEntity WHERE id = ?;
+
+getAllMcpServers:
+SELECT * FROM McpServerEntity ORDER BY displayName ASC;
+
+deleteMcpServer:
+DELETE FROM McpServerEntity WHERE id = ?;
+
+insertMcpToolBinding:
+INSERT OR REPLACE INTO McpToolBindingEntity(
+    id, serverId, mcpToolName, agentToolName, descriptionOverride, inputArgumentKey, enabled
+)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getMcpBindingsForServer:
+SELECT * FROM McpToolBindingEntity WHERE serverId = ? ORDER BY agentToolName ASC;
+
+getAllMcpBindings:
+SELECT * FROM McpToolBindingEntity ORDER BY serverId, agentToolName ASC;
+
+deleteMcpBinding:
+DELETE FROM McpToolBindingEntity WHERE id = ?;
+
+deleteMcpBindingsForServer:
+DELETE FROM McpToolBindingEntity WHERE serverId = ?;

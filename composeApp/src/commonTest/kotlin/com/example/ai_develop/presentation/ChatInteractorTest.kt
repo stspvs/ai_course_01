@@ -54,7 +54,7 @@ class ChatInteractorTest {
         override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
     }
 
-    private class MockUseCase(repo: ChatRepository, scope: CoroutineScope) : ChatStreamingUseCase(repo, ChatMemoryManager(), scope) {
+    private class MockUseCase(repo: ChatRepository, scope: CoroutineScope) : ChatStreamingUseCase(repo, ChatMemoryManager(), scope, testAgentToolRegistry()) {
         override fun invoke(messages: List<ChatMessage>, systemPrompt: String, maxTokens: Int, temperature: Double, stopWord: String, isJsonMode: Boolean, provider: LLMProvider): Flow<Result<String>> {
             return flowOf(Result.success("Hello "), Result.success("world!"))
         }

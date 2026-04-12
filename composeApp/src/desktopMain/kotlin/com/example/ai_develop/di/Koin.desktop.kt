@@ -6,10 +6,8 @@ import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.database.AgentDatabase
 import com.example.ai_develop.database.DriverFactory
 import com.example.ai_develop.database.stageAdapter
-import com.example.ai_develop.domain.AgentTool
-import com.example.ai_develop.domain.CalculatorTool
-import com.example.ai_develop.domain.WeatherTool
-import com.example.ai_develop.mcp.NewsMcpAgentTool
+import com.example.ai_develop.domain.McpTransport
+import com.example.ai_develop.mcp.DesktopMcpTransport
 import com.example.aidevelop.database.AgentMessageEntity
 import com.example.aidevelop.database.AgentStateEntity
 import com.example.aidevelop.database.InvariantEntity
@@ -17,7 +15,6 @@ import io.ktor.client.HttpClientConfig
 import io.ktor.client.engine.ProxyBuilder
 import io.ktor.client.engine.http
 import io.ktor.client.engine.okhttp.OkHttpConfig
-import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -25,10 +22,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 
 actual val platformModule = module {
-    single { NewsMcpAgentTool() }
-    single(named("agentTools")) {
-        listOf<AgentTool>(WeatherTool(), CalculatorTool(), get<NewsMcpAgentTool>())
-    }
+    single<McpTransport> { DesktopMcpTransport() }
 
     // SqlDelight Driver Factory and Driver
     single { DriverFactory() }

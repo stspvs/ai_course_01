@@ -33,7 +33,7 @@ class ChatStreamingUseCaseTest {
             override suspend fun saveInvariant(invariant: Invariant) {}
             override fun observeAgentState(agentId: String): Flow<AgentState?> = flowOf(null)
         }
-        useCase = ChatStreamingUseCase(repository, ChatMemoryManager(), testScope)
+        useCase = ChatStreamingUseCase(repository, ChatMemoryManager(), testScope, testAgentToolRegistry())
     }
 
     @Test

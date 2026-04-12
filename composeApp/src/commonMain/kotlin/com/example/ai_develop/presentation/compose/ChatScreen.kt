@@ -3,10 +3,11 @@ package com.example.ai_develop.presentation.compose
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -55,7 +56,7 @@ fun ChatScreen(viewModel: LLMViewModel) {
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.List, contentDescription = "Задачи") },
+                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Задачи") },
                     label = { Text("Задачи") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color(0xFF4A148C),
@@ -68,6 +69,17 @@ fun ChatScreen(viewModel: LLMViewModel) {
                     onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Build, contentDescription = "Saga") },
                     label = { Text("Saga Chat") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color(0xFF4A148C),
+                        selectedTextColor = Color(0xFF4A148C),
+                        indicatorColor = Color(0xFFE1BEE7)
+                    )
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "MCP") },
+                    label = { Text("MCP") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color(0xFF4A148C),
                         selectedTextColor = Color(0xFF4A148C),
@@ -115,6 +127,8 @@ fun ChatScreen(viewModel: LLMViewModel) {
                 2 -> TaskManagementContent(taskViewModel)
                 
                 3 -> TaskChatContent(taskViewModel)
+
+                4 -> McpServersContent()
             }
         }
     }

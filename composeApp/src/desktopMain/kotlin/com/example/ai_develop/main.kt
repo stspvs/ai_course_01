@@ -8,6 +8,7 @@ import com.example.ai_develop.domain.ChatRepository
 import com.example.ai_develop.domain.ChatStreamingUseCase
 import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.mcp.LocalNewsMcpServer
+import com.example.ai_develop.mcp.bootstrapDefaultMcpIfNeeded
 import com.example.ai_develop.presentation.compose.App
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +19,12 @@ fun main(args: Array<String>) {
     koin.pauseAllTasksOnAppLaunch()
 
     LocalNewsMcpServer.start()
+
+    bootstrapDefaultMcpIfNeeded(
+        mcpRepository = koin.get(),
+        transport = koin.get(),
+        agentToolRegistry = koin.get(),
+    )
 
     try {
         if (args.contains("--cli")) {

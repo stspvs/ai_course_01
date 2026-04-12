@@ -36,8 +36,15 @@ data class PreparedLlmRequest(
 open class AgentEngine(
     private val repository: ChatRepository,
     private val memoryManager: ChatMemoryManager,
-    private val tools: List<AgentTool> = emptyList()
+    private val toolsProvider: () -> List<AgentTool> = { emptyList() }
 ) {
+    constructor(
+        repository: ChatRepository,
+        memoryManager: ChatMemoryManager,
+        tools: List<AgentTool>
+    ) : this(repository, memoryManager, { tools })
+
+    private val tools: List<AgentTool> get() = toolsProvider()
     /**
      * Тот же запрос к LLM, что и в [streamResponse], без стриминга — для логов и отладки.
      */

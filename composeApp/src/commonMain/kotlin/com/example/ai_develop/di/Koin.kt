@@ -2,11 +2,14 @@ package com.example.ai_develop.di
 
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
+import com.example.ai_develop.data.McpRepository
 import com.example.ai_develop.data.SqlDelightChatRepository
+import com.example.ai_develop.data.SqlDelightMcpRepository
 import com.example.ai_develop.domain.*
 import com.example.ai_develop.presentation.AgentManager
 import com.example.ai_develop.presentation.ChatInteractor
 import com.example.ai_develop.presentation.LLMViewModel
+import com.example.ai_develop.presentation.McpServersViewModel
 import com.example.ai_develop.presentation.TaskViewModel
 import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
 import io.ktor.client.HttpClient
@@ -126,12 +129,22 @@ val commonModule = module {
         listOf<AgentTool>(WeatherTool(), CalculatorTool())
     }
 
+    single<McpRepository> { SqlDelightMcpRepository(get()) }
+
+    single {
+        AgentToolRegistry(
+            baseTools = get(named("agentTools")),
+            mcpRepository = get(),
+            transport = get(),
+        )
+    }
+
     single {
         ChatStreamingUseCase(
             repository = get(),
             memoryManager = get(),
             scope = get(),
-            agentTools = get(named("agentTools")),
+            agentToolRegistry = get(),
         )
     }
     singleOf(::SummarizeChatUseCase)
@@ -146,6 +159,7 @@ val commonModule = module {
 
     // ViewModels
     viewModelOf(::LLMViewModel)
+    viewModelOf(::McpServersViewModel)
     viewModel {
         TaskViewModel(
             get(),

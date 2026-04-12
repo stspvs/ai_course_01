@@ -2,6 +2,7 @@ package com.example.ai_develop.domain
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 
 /**
  * UseCase теперь является фабрикой для AutonomousAgent.
@@ -10,11 +11,17 @@ open class ChatStreamingUseCase(
     private val repository: ChatRepository,
     private val memoryManager: ChatMemoryManager,
     private val scope: CoroutineScope,
-    private val agentTools: List<AgentTool> = listOf(CalculatorTool()),
+    private val agentToolRegistry: AgentToolRegistry,
 ) {
     private val activeAgents = mutableMapOf<String, AutonomousAgent>()
-    
-    private val engine = AgentEngine(repository, memoryManager, agentTools)
+
+    private val engine = AgentEngine(repository, memoryManager) { agentToolRegistry.currentTools() }
+
+    init {
+        scope.launch {
+            agentToolRegistry.reloadFromDatabase()
+        }
+    }
 
     /**
      * Получает или создает автономного агента.
@@ -28,6 +35,12 @@ open class ChatStreamingUseCase(
     /** Сбрасывает кэш агента после смены данных в БД (например сброс задачи). */
     open fun evictAgent(agentId: String) {
         activeAgents.remove(agentId)?.dispose()
+    }
+
+    /** После изменения MCP-инструментов пересоздать движки у всех активных агентов. */
+    open fun evictAllAgents() {
+        val ids = activeAgents.keys.toList()
+        ids.forEach { evictAgent(it) }
     }
 
     /**
