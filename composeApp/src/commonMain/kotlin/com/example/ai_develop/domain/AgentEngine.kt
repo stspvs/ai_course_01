@@ -114,6 +114,37 @@ open class AgentEngine(
         return null
     }
 
+    /**
+     * Убирает из текста ассистента синтаксис вызова инструмента (после слияния с результатом в одном сообщении).
+     */
+    open fun stripToolSyntaxFromAssistantText(text: String): String {
+        var t = text
+        t = t.replace("\\[TOOL: (\\w+)\\((.*)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL), "")
+        t = t.replace("TOOL_CALL: (\\w+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL), "")
+        return t.trim()
+    }
+
+    /**
+     * Один блок ответа для UI/истории: опционально преамбула модели, затем пометка инструмента и результат.
+     * В [AutonomousAgent] преамбула не используется — ответ формирует только инструмент.
+     */
+    open fun formatMergedAssistantWithToolResult(
+        strippedPreamble: String,
+        toolName: String,
+        toolResult: String
+    ): String {
+        val prefix = strippedPreamble.trim()
+        val body = toolResult.trim()
+        return buildString {
+            if (prefix.isNotEmpty()) {
+                append(prefix)
+                append("\n\n")
+            }
+            append("— Инструмент: $toolName —\n")
+            append(body)
+        }
+    }
+
     open suspend fun executeToolCall(call: ParsedToolCall): String? =
         tools.find { it.name == call.toolName }?.execute(call.input)
 
@@ -138,8 +169,17 @@ open class AgentEngine(
         val stageContext = "\n[SYSTEM INFO] CURRENT STAGE: $stage\n"
 
         val toolsContext = if (tools.isNotEmpty()) {
-            "\nAVAILABLE TOOLS:\n" + tools.joinToString("\n") { "${it.name}: ${it.description}" } +
-                    "\nTo use a tool, output: [TOOL: name(input)]\n"
+            buildString {
+                appendLine()
+                appendLine("AVAILABLE TOOLS:")
+                tools.forEach { appendLine("${it.name}: ${it.description}") }
+                appendLine()
+                appendLine("TOOL USE (mandatory when applicable):")
+                appendLine("- For current news, weather, or arithmetic you MUST call the matching tool. Do not invent headlines or facts.")
+                appendLine("- Output a single line only, in this exact form (then stop):")
+                appendLine("[TOOL: toolname(input)]")
+                appendLine("Examples: [TOOL: news_search(world news)]  [TOOL: weather(Paris)]  [TOOL: calculator(12*34)]")
+            }.toString()
         } else ""
 
         return basePrompt + stageContext + toolsContext

@@ -64,6 +64,7 @@ class LLMViewModel(
                     .map { it.selectedAgentId ?: GENERAL_CHAT_ID }
                     .distinctUntilChanged()
                     .flatMapLatest { id ->
+                        chatStreamingUseCase.ensureToolsLoaded()
                         val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(id)
                         combine(
                             autonomousAgent.agent,
@@ -136,10 +137,10 @@ class LLMViewModel(
     fun sendMessage(message: String) {
         if (message.isBlank()) return
         val agentId = _state.value.selectedAgentId ?: GENERAL_CHAT_ID
-        val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(agentId)
-
-        autonomousAgent.sendMessage(message)
-            .launchIn(viewModelScope)
+        viewModelScope.launch {
+            chatStreamingUseCase.ensureToolsLoaded()
+            chatStreamingUseCase.getOrCreateAgent(agentId).sendMessage(message).collect()
+        }
     }
 
     fun selectAgent(agentId: String?) {

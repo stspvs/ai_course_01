@@ -2,7 +2,6 @@ package com.example.ai_develop.domain
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 
 /**
  * UseCase теперь является фабрикой для AutonomousAgent.
@@ -17,10 +16,12 @@ open class ChatStreamingUseCase(
 
     private val engine = AgentEngine(repository, memoryManager) { agentToolRegistry.currentTools() }
 
-    init {
-        scope.launch {
-            agentToolRegistry.reloadFromDatabase()
-        }
+    /**
+     * Подгружает MCP-привязки из БД перед запросом к LLM.
+     * Иначе первый ответ может уйти с пустым списком инструментов (гонка с асинхронным init).
+     */
+    open suspend fun ensureToolsLoaded() {
+        agentToolRegistry.reloadFromDatabase()
     }
 
     /**
@@ -51,6 +52,7 @@ open class ChatStreamingUseCase(
         userMessage: String,
         provider: LLMProvider
     ): Flow<Result<String>> {
+        ensureToolsLoaded()
         val agent = getOrCreateAgent(agentId)
         
         return flow {

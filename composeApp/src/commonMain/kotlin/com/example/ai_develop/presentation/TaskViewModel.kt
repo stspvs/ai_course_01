@@ -66,7 +66,10 @@ class TaskViewModel(
 
     val activeAgent: StateFlow<AutonomousAgent?> = _selectedTaskId
         .mapLatest { id ->
-            id?.let { chatStreamingUseCase.getOrCreateAgent(it, it) }
+            id?.let {
+                chatStreamingUseCase.ensureToolsLoaded()
+                chatStreamingUseCase.getOrCreateAgent(it, it)
+            }
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
@@ -194,6 +197,7 @@ class TaskViewModel(
             val buffer = StringBuilder()
             var lastUiUpdateMillis = 0L
             try {
+                chatStreamingUseCase.ensureToolsLoaded()
                 val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
                 agent.sendMessage(cleanText).collect { chunk ->
                     buffer.append(chunk)
@@ -256,6 +260,7 @@ class TaskViewModel(
                             val buffer = StringBuilder()
                             var lastUiUpdateMillis = 0L
                             try {
+                                chatStreamingUseCase.ensureToolsLoaded()
                                 val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
                                 agent.sendWelcomeMessage().collect { chunk ->
                                     buffer.append(chunk)
@@ -318,6 +323,7 @@ class TaskViewModel(
                         val buffer = StringBuilder()
                         var lastUiUpdateMillis = 0L
                         try {
+                            chatStreamingUseCase.ensureToolsLoaded()
                             val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
                             agent.sendWelcomeMessage().collect { chunk ->
                                 buffer.append(chunk)

@@ -200,6 +200,25 @@ class AgentEngineTest {
     }
 
     @Test
+    fun testStripToolSyntaxRemovesBracketAndToolCallFormats() {
+        val a = "Пояснение.\n\n[TOOL: news_search(query=\"x\", pageSize=5)]"
+        assertEquals("Пояснение.", engine.stripToolSyntaxFromAssistantText(a))
+        val b = "Hi\nTOOL_CALL: calc\nINPUT: 2+2\n"
+        assertEquals("Hi", engine.stripToolSyntaxFromAssistantText(b))
+    }
+
+    @Test
+    fun testFormatMergedAssistantWithToolResult() {
+        val withPreamble = engine.formatMergedAssistantWithToolResult("Кратко.", "news_search", "No articles")
+        assertTrue(withPreamble.contains("Кратко."))
+        assertTrue(withPreamble.contains("— Инструмент: news_search —"))
+        assertTrue(withPreamble.contains("No articles"))
+
+        val toolOnly = engine.formatMergedAssistantWithToolResult("", "news_search", "No articles")
+        assertEquals("— Инструмент: news_search —\nNo articles", toolOnly)
+    }
+
+    @Test
     fun testWeatherToolExecuteContainsCityAndDemoText() = runTest {
         val w = WeatherTool()
         val out = w.execute("Paris")

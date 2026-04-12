@@ -65,7 +65,7 @@ kotlin {
 
                 implementation(libs.mcp.kotlin.sdk.client)
                 implementation(libs.mcp.kotlin.sdk.server)
-                implementation(libs.ktor.server.netty)
+                implementation(libs.ktor.server.cio)
                 implementation(libs.ktor.server.cors)
                 implementation(libs.ktor.server.content.negotiation)
                 implementation(libs.slf4j.simple)

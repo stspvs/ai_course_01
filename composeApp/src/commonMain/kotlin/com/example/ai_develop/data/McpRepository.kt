@@ -1,0 +1,25 @@
+package com.example.ai_develop.data
+
+import kotlinx.coroutines.flow.Flow
+
+interface McpRepository {
+    fun observeServers(): Flow<List<McpServerRecord>>
+    suspend fun getAllServers(): List<McpServerRecord>
+    suspend fun getServer(id: String): McpServerRecord?
+    suspend fun upsertServer(record: McpServerRecord)
+    suspend fun deleteServer(id: String)
+
+    suspend fun getBindingsForServer(serverId: String): List<McpToolBindingRecord>
+    suspend fun upsertBinding(record: McpToolBindingRecord)
+    suspend fun deleteBinding(id: String)
+
+    /** Все включённые привязки с учётом включённого сервера (для реестра инструментов). */
+    suspend fun getEnabledBindingsForRuntime(): List<McpToolBindingRecord>
+
+    suspend fun updateServerSyncState(
+        serverId: String,
+        toolsJson: String,
+        error: String?,
+        syncAt: Long,
+    )
+}

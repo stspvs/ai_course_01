@@ -14,7 +14,10 @@ class CliAgentManager(
     private val scope: CoroutineScope
 ) {
     private val agentId = "default"
-    private val agent: AutonomousAgent = useCase.getOrCreateAgent(agentId)
+    private val agent: AutonomousAgent = runBlocking {
+        useCase.ensureToolsLoaded()
+        useCase.getOrCreateAgent(agentId)
+    }
 
     fun start() {
         println("🚀 Autonomous Agent CLI Ready.")

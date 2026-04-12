@@ -9,9 +9,9 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.cio.CIO as ServerCioEngine
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.cors.routing.CORS
 import io.modelcontextprotocol.kotlin.sdk.server.mcpStreamableHttp
 import kotlinx.serialization.json.Json
@@ -47,7 +47,9 @@ object LocalNewsMcpServer {
         outboundClient = outbound
         val mcpServer = createNewsMcpServer(newsApiKey = key, httpClient = outbound)
         return try {
-            val embedded = embeddedServer(Netty, host = "127.0.0.1", port = port) {
+            // CIO вместо Netty: на Streamable HTTP GET (SSE) в MCP SDK 0.11 + Netty возможна гонка
+            // appendSseHeaders() после commit ответа (см. kotlin-sdk #681). CIO обычно обходит это.
+            val embedded = embeddedServer(ServerCioEngine, host = "127.0.0.1", port = port) {
                 configureNewsMcpApplication(mcpServer)
             }
             embedded.start(wait = false)
@@ -63,10 +65,14 @@ object LocalNewsMcpServer {
     }
 
     fun stop() {
+        val wasRunning = server != null
         server?.stop(500, 2_000)
         server = null
         outboundClient?.close()
         outboundClient = null
+        if (wasRunning) {
+            log.info("Local News MCP server stopped")
+        }
     }
 }
 

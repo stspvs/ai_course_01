@@ -112,6 +112,7 @@ open class AgentManagementUseCase(
         emit(MemoryUpdateState(isLoading = true))
         
         try {
+            chatStreamingUseCase.ensureToolsLoaded()
             val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(agentId)
             val currentAgent = autonomousAgent.agent.value
             
@@ -148,6 +149,7 @@ open class AgentManagementUseCase(
      * Принудительное обновление состояния AutonomousAgent после изменений в БД.
      */
     private suspend fun refreshAgent(agentId: String) {
+        chatStreamingUseCase.ensureToolsLoaded()
         chatStreamingUseCase.getOrCreateAgent(agentId).refreshAgent()
     }
 }

@@ -11,8 +11,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.cio.CIO as ServerCioEngine
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.cors.routing.CORS
 import io.modelcontextprotocol.kotlin.sdk.client.mcpStreamableHttp
 import io.modelcontextprotocol.kotlin.sdk.server.Server
@@ -33,7 +33,7 @@ class McpConnectionTest {
 
     @Test
     fun mcpStreamableHttp_connectsAndListsTools() = runBlocking {
-        val server = embeddedServer(Netty, host = "127.0.0.1", port = 0) {
+        val server = embeddedServer(ServerCioEngine, host = "127.0.0.1", port = 0) {
             configureMinimalMcp()
         }
         server.start(wait = false)
@@ -69,7 +69,7 @@ class McpConnectionTest {
             )
         }
         val outbound = HttpClient(mockEngine)
-        val server = embeddedServer(Netty, host = "127.0.0.1", port = 0) {
+        val server = embeddedServer(ServerCioEngine, host = "127.0.0.1", port = 0) {
             configureNewsMcpApplication(createNewsMcpServer("test-key", outbound))
         }
         server.start(wait = false)

@@ -43,8 +43,8 @@ class AutonomousAgentStressTest {
         advanceUntilIdle()
 
         val messages = agent.agent.value?.messages ?: emptyList()
-        // Ожидаем: 1 (user) + 1 (assistant с tool call) + 1 (system с tool result) + 1 (assistant финальный) = 4
-        assertTrue(messages.size >= 4, "Expected at least 4 messages, got ${messages.size}")
+        // user + assistant (слит с результатом инструмента) + assistant (финальный ответ LLM) = 3
+        assertTrue(messages.size >= 3, "Expected at least 3 messages, got ${messages.size}")
         assertTrue(output.any { it.contains("1200") }, "Output should contain tool result")
     }
 
@@ -63,10 +63,10 @@ class AutonomousAgentStressTest {
         val messages = agent.agent.value?.messages ?: emptyList()
         assertTrue(
             messages.any { m ->
-                m.role == "system" && m.message.contains("ghost_tool") &&
+                m.role == "assistant" && m.message.contains("ghost_tool") &&
                     (m.message.contains("Tool error") || m.message.contains("unknown tool"))
             },
-            "Unknown tool should produce explicit Tool Result text, got: $messages"
+            "Unknown tool should surface error in merged assistant message, got: $messages"
         )
     }
 
@@ -168,9 +168,9 @@ class AutonomousAgentStressTest {
         val messages = agent.agent.value?.messages ?: emptyList()
         assertTrue(
             messages.any { m ->
-                m.role == "system" && m.message.contains("Tool error") && m.message.contains("intentional")
+                m.role == "assistant" && m.message.contains("Tool error") && m.message.contains("intentional")
             },
-            "Exception from execute should become Tool error message, got: $messages"
+            "Exception from execute should appear in merged assistant message, got: $messages"
         )
     }
 

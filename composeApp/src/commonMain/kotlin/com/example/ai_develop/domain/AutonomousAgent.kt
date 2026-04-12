@@ -149,18 +149,33 @@ open class AutonomousAgent(
                     "Tool error: ${e.message ?: e::class.simpleName}"
                 }
 
-                emit("\n[Executing tool...]\n")
-
-                agentSnapshot = _agent.value ?: break
-                val toolMsg = createMessage(
-                    "system",
-                    "Tool Result: $toolResultText",
-                    agentSnapshot.messages.lastOrNull()?.id,
-                    fsm.getCurrentState().currentStage
-                )
-
                 processingMutex.withLock {
-                    _agent.update { it?.copy(messages = it.messages + toolMsg) }
+                    _agent.update { agent ->
+                        val msgs = agent?.messages ?: return@update agent
+                        val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
+                        if (lastAssistant == null) {
+                            val fallback = createMessage(
+                                "system",
+                                "Tool Result: $toolResultText",
+                                msgs.lastOrNull()?.id,
+                                fsm.getCurrentState().currentStage
+                            )
+                            return@update agent.copy(messages = msgs + fallback)
+                        }
+                        // Ответ пользователю даёт инструмент, не модель — текст до вызова не сохраняем.
+                        val merged = engine.formatMergedAssistantWithToolResult(
+                            strippedPreamble = "",
+                            toolName = toolCall.toolName,
+                            toolResult = toolResultText
+                        )
+                        val newTokens = estimateTokens(merged)
+                        val updated = msgs.map { msg ->
+                            if (msg.id == lastAssistant.id) {
+                                msg.copy(message = merged, tokensUsed = newTokens)
+                            } else msg
+                        }
+                        agent.copy(messages = updated)
+                    }
                 }
 
                 if (engine.toolSuppressesLlmFollowUp(toolCall.toolName)) {
