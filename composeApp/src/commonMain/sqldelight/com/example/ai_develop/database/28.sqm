@@ -1,0 +1,2 @@
+-- MCP: отдельная команда запуска процесса для каждого сервера (docker, npx, …)
+ALTER TABLE McpServerEntity ADD COLUMN startCommand TEXT NOT NULL DEFAULT '';

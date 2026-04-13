@@ -1,6 +1,8 @@
 package com.example.ai_develop.domain
 
+import com.example.ai_develop.data.McpRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 
 /**
@@ -11,6 +13,7 @@ open class ChatStreamingUseCase(
     private val memoryManager: ChatMemoryManager,
     private val scope: CoroutineScope,
     private val agentToolRegistry: AgentToolRegistry,
+    private val mcpRepository: McpRepository,
 ) {
     private val activeAgents = mutableMapOf<String, AutonomousAgent>()
 
@@ -23,6 +26,28 @@ open class ChatStreamingUseCase(
     open suspend fun ensureToolsLoaded() {
         agentToolRegistry.reloadFromDatabase()
     }
+
+    /** Имена MCP-инструментов, доступных агентам в чате (после синхронизации с БД). */
+    open suspend fun loadedMcpToolNames(): List<String> {
+        ensureToolsLoaded()
+        return agentToolRegistry.currentMcpToolNames()
+    }
+
+    /** Все имена инструментов, видимые агенту (базовые + MCP), в актуальном порядке после [ensureToolsLoaded]. */
+    open suspend fun loadedAllToolNames(): List<String> {
+        ensureToolsLoaded()
+        return agentToolRegistry.currentAllToolNames().sorted()
+    }
+
+    /**
+     * Обновляется при любых изменениях MCP в БД ([McpRepository.observeMcpRegistryChanges]);
+     * после каждого события перечитывается реестр и отдаётся полный список имён инструментов.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    open fun observeAvailableToolNames(): Flow<List<String>> =
+        mcpRepository.observeMcpRegistryChanges()
+            .mapLatest { loadedAllToolNames() }
+            .distinctUntilChanged()
 
     /**
      * Получает или создает автономного агента.

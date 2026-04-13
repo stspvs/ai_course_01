@@ -1,5 +1,6 @@
 package com.example.ai_develop.domain
 
+import com.example.ai_develop.data.stripLeadingJsonColonLabel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlin.uuid.ExperimentalUuidApi
@@ -103,11 +104,12 @@ open class AgentEngine(
      * Извлекает первый вызов инструмента из текста модели (два поддерживаемых формата).
      */
     open fun parseToolCall(text: String): ParsedToolCall? {
-        val regex1 = "\\[TOOL: (\\w+)\\((.*)\\)\\]".toRegex()
+        // Имя инструмента: не только \w — у MCP бывают дефисы, точки, кириллица в префиксе и т.д.
+        val regex1 = "\\[TOOL: ([^\\s(]+)\\((.*)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL)
         regex1.find(text)?.let { m ->
             return ParsedToolCall(m.groupValues[1], m.groupValues[2])
         }
-        val regex2 = "TOOL_CALL: (\\w+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL)
+        val regex2 = "TOOL_CALL: (\\S+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL)
         regex2.find(text)?.let { m ->
             return ParsedToolCall(m.groupValues[1], m.groupValues[2].trim())
         }
@@ -119,8 +121,8 @@ open class AgentEngine(
      */
     open fun stripToolSyntaxFromAssistantText(text: String): String {
         var t = text
-        t = t.replace("\\[TOOL: (\\w+)\\((.*)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL), "")
-        t = t.replace("TOOL_CALL: (\\w+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL), "")
+        t = t.replace("\\[TOOL: ([^\\s(]+)\\((.*)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL), "")
+        t = t.replace("TOOL_CALL: (\\S+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL), "")
         return t.trim()
     }
 
@@ -134,7 +136,7 @@ open class AgentEngine(
         toolResult: String
     ): String {
         val prefix = strippedPreamble.trim()
-        val body = toolResult.trim()
+        val body = stripLeadingJsonColonLabel(toolResult.trim())
         return buildString {
             if (prefix.isNotEmpty()) {
                 append(prefix)
@@ -175,10 +177,11 @@ open class AgentEngine(
                 tools.forEach { appendLine("${it.name}: ${it.description}") }
                 appendLine()
                 appendLine("TOOL USE (mandatory when applicable):")
-                appendLine("- For current news, weather, or arithmetic you MUST call the matching tool. Do not invent headlines or facts.")
+                appendLine("- For exchange rates, arithmetic, or any data that comes from a listed tool, you MUST call that tool. Do not invent or guess numbers.")
                 appendLine("- Output a single line only, in this exact form (then stop):")
                 appendLine("[TOOL: toolname(input)]")
-                appendLine("Examples: [TOOL: news_search(world news)]  [TOOL: weather(Paris)]  [TOOL: calculator(12*34)]")
+                appendLine("Use the exact tool name from the list above. Example: [TOOL: my-tool-name(input)]")
+                appendLine("- If a tool expects a list of strings (see schema), put comma-separated values or a JSON array in parentheses, e.g. [TOOL: tool-name(USD,EUR)] or [TOOL: tool-name([\"USD\",\"EUR\"])].")
             }.toString()
         } else ""
 

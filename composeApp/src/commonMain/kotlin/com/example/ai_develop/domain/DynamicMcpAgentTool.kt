@@ -1,24 +1,31 @@
 package com.example.ai_develop.domain
 
-import kotlinx.serialization.json.JsonPrimitive
+import com.example.ai_develop.data.McpPrimaryArgumentKind
+import com.example.ai_develop.data.McpServerRecord
+import com.example.ai_develop.data.buildMcpPrimaryArgumentMap
+import com.example.ai_develop.data.tryParseFullMcpToolArgumentsObject
 
 class DynamicMcpAgentTool(
     override val name: String,
     override val description: String,
-    private val baseUrl: String,
-    private val headersJson: String,
+    private val server: McpServerRecord,
     private val mcpToolName: String,
-    private val inputArgumentKey: String,
+    private val primaryArgument: McpPrimaryArgumentKind,
     private val transport: McpTransport,
 ) : AgentTool {
 
     override val suppressLlmFollowUp: Boolean = true
 
     override suspend fun execute(input: String): String {
-        val trimmed = input.trim()
-        if (trimmed.isEmpty()) return "Error: empty input for tool \"$name\"."
-        val args = mapOf(inputArgumentKey to JsonPrimitive(trimmed))
-        return transport.callTool(baseUrl, headersJson, mcpToolName, args).fold(
+        val fullObject = tryParseFullMcpToolArgumentsObject(input)
+        val args = if (fullObject != null) {
+            fullObject
+        } else {
+            buildMcpPrimaryArgumentMap(primaryArgument, input).getOrElse { e ->
+                return e.message ?: "Error: ${e::class.simpleName}"
+            }
+        }
+        return transport.callTool(server, mcpToolName, args).fold(
             onSuccess = { it },
             onFailure = { e -> "MCP tool failed (${mcpToolName}): ${e.message}" },
         )

@@ -26,7 +26,12 @@ data class LLMStateModel(
     val sendFullHistory: Boolean = true,
     val isJsonMode: Boolean = false,
     val currentAgentState: AgentState? = null,
-    val activeInvariants: List<Invariant> = emptyList()
+    val activeInvariants: List<Invariant> = emptyList(),
+    /**
+     * Полный список имён инструментов, доступных агентам в чате (базовые + MCP), общий для всех агентов.
+     * Обновляется при изменениях MCP в БД и при обновлении состояния агентов.
+     */
+    val availableToolNames: List<String> = emptyList(),
 ) {
     @Transient
     private val memoryManager = ChatMemoryManager()

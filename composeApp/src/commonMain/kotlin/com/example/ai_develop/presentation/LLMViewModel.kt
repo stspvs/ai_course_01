@@ -72,22 +72,33 @@ class LLMViewModel(
                         ) { snapshot, loading ->
                             Triple(id, snapshot, loading)
                         }
-                    }
-            ) { agentsFromDb, pending, (targetId, snapshot, loading) ->
+                    },
+                chatStreamingUseCase.observeAvailableToolNames(),
+            ) { agentsFromDb, pending, triple, toolNames ->
+                val (targetId, snapshot, loading) = triple
                 val visibleFromDb = agentsFromDb.filter { it.id !in pending }
                 val updatedAgent = snapshot
                     ?: visibleFromDb.find { it.id == targetId }
                     ?: createDefaultAgent(targetId)
                 val merged = mergeAgentsFromDbWithSelection(visibleFromDb, targetId, updatedAgent)
-                Triple(merged, targetId, loading)
-            }.collect { (finalAgents, _, loading) ->
+                Triple(merged, loading, toolNames)
+            }.collect { (finalAgents, loading, toolNames) ->
                 _state.updateIfChanged { currentState ->
                     currentState.copy(
                         agents = finalAgents,
-                        isLoading = loading
+                        isLoading = loading,
+                        availableToolNames = toolNames,
                     )
                 }
             }
+        }
+    }
+
+    /** Принудительно перечитать инструменты из БД (редко нужно: список и так обновляется по [observeMcpRegistryChanges]). */
+    fun refreshAvailableTools() {
+        viewModelScope.launch {
+            val names = chatStreamingUseCase.loadedAllToolNames()
+            _state.updateIfChanged { it.copy(availableToolNames = names) }
         }
     }
 
@@ -194,7 +205,7 @@ class LLMViewModel(
     }
 
     fun clearChat() {
-        val id = _state.value.selectedAgentId ?: return
+        val id = _state.value.selectedAgentId ?: GENERAL_CHAT_ID
         viewModelScope.launch {
             agentManagementUseCase.clearChat(id)
         }

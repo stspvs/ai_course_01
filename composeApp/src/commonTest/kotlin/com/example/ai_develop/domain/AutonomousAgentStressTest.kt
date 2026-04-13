@@ -7,6 +7,13 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.*
 import kotlin.test.*
 
+/**
+ * Автономный агент: три уровня сценариев.
+ *
+ * **Ordinary** — базовый поток без сюрпризов (стриминг, инструменты, факты).
+ * **Corner** — пустые/странные входы, ошибки стрима/инструмента, suppress follow-up.
+ * **Stress** — параллельные отправки и длинные последовательности сообщений.
+ */
 class AutonomousAgentStressTest {
     private lateinit var repository: MockChatRepository
     private lateinit var memoryManager: ChatMemoryManager
@@ -18,7 +25,7 @@ class AutonomousAgentStressTest {
         repository = MockChatRepository()
         memoryManager = ChatMemoryManager()
         fakeEngine = FakeAgentEngine(repository, memoryManager)
-        
+
         repository.agentStateMap[agentId] = AgentState(
             agentId = agentId,
             name = "Stress Agent",
@@ -26,30 +33,58 @@ class AutonomousAgentStressTest {
         )
     }
 
-    @Test
-    fun testFullCoverageScenario() = runTest {
-        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
-        advanceUntilIdle() // Даем инициализироваться
+    // --- 1. Ordinary ---
 
-        // 1. Tool Call
+    @Test
+    fun ordinary_singleAssistantReplyNoTools() = runTest {
+        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
+        advanceUntilIdle()
+
+        fakeEngine.queueResponse(listOf("Hello world"))
+        agent.sendMessage("Hi").collect()
+        advanceUntilIdle()
+
+        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        assertNotNull(assistant)
+        assertTrue(assistant.message.contains("Hello world"), assistant.message)
+    }
+
+    @Test
+    fun ordinary_toolCallCalculatorThenFinalAnswer() = runTest {
+        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
+        advanceUntilIdle()
+
         fakeEngine.queueResponse(listOf("Hello! ", "TOOL_CALL: calculator\nINPUT: 25 * 48"))
         fakeEngine.queueToolResult("1200")
-        
-        // 2. Final response
         fakeEngine.queueResponse(listOf("Result is 1200."))
 
-        // Собираем результаты sendMessage
         val output = agent.sendMessage("Run test").toList()
         advanceUntilIdle()
 
         val messages = agent.agent.value?.messages ?: emptyList()
-        // user + assistant (слит с результатом инструмента) + assistant (финальный ответ LLM) = 3
         assertTrue(messages.size >= 3, "Expected at least 3 messages, got ${messages.size}")
         assertTrue(output.any { it.contains("1200") }, "Output should contain tool result")
     }
 
     @Test
-    fun testCornerCasesScenario() = runTest {
+    fun ordinary_extractFactsIntoWorkingMemory() = runTest {
+        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
+        advanceUntilIdle()
+
+        repository.extractedFactsToReturn = ChatFacts(listOf("Name: John"))
+        fakeEngine.queueResponse(listOf("I'll remember that."))
+
+        agent.sendMessage("My name is John").collect()
+        advanceUntilIdle()
+
+        val facts = agent.agent.value?.workingMemory?.extractedFacts?.facts ?: emptyList()
+        assertTrue(facts.contains("Name: John"), "Fact 'John' should be in working memory")
+    }
+
+    // --- 2. Corner cases ---
+
+    @Test
+    fun corner_unicodeEmojiAndUnknownTool() = runTest {
         val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
         advanceUntilIdle()
 
@@ -71,29 +106,44 @@ class AutonomousAgentStressTest {
     }
 
     @Test
-    fun testMemoryExtraction() = runTest {
+    fun corner_emptyUserMessage_completes() = runTest {
         val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
         advanceUntilIdle()
 
-        repository.extractedFactsToReturn = ChatFacts(listOf("Name: John"))
-        fakeEngine.queueResponse(listOf("I'll remember that."))
-
-        agent.sendMessage("My name is John").collect()
+        fakeEngine.queueResponse(listOf("ack"))
+        agent.sendMessage("").collect()
         advanceUntilIdle()
 
-        val facts = agent.agent.value?.workingMemory?.extractedFacts?.facts ?: emptyList()
-        assertTrue(facts.contains("Name: John"), "Fact 'John' should be in working memory")
+        assertFalse(agent.isProcessing.value, "Processing should be false after completion")
+        val users = agent.agent.value?.messages?.filter { it.role == "user" } ?: emptyList()
+        assertEquals(1, users.size)
+        assertEquals("", users.single().message)
     }
 
     @Test
-    fun testFailureRecovery() = runTest {
+    fun corner_whitespaceOnlyUserMessage_completes() = runTest {
+        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
+        advanceUntilIdle()
+
+        val ws = "  \t\n  "
+        fakeEngine.queueResponse(listOf("noted"))
+        agent.sendMessage(ws).collect()
+        advanceUntilIdle()
+
+        val users = agent.agent.value?.messages?.filter { it.role == "user" } ?: emptyList()
+        assertEquals(1, users.size)
+        assertEquals(ws, users.single().message)
+    }
+
+    @Test
+    fun corner_streamThrowsException_surfacesError() = runTest {
         val brokenEngine = object : AgentEngine(repository, memoryManager) {
             override fun streamFromPrepared(agent: Agent, prepared: PreparedLlmRequest): Flow<String> = flow {
                 emit("Starting... ")
                 throw IllegalStateException("API connection lost")
             }
         }
-        
+
         val agent = AutonomousAgent(agentId, repository, brokenEngine, backgroundScope)
         advanceUntilIdle()
 
@@ -105,36 +155,17 @@ class AutonomousAgentStressTest {
     }
 
     @Test
-    fun testConcurrencyMutex() = runTest {
-        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
-        advanceUntilIdle()
-
-        fakeEngine.queueResponse(listOf("Response A"))
-        fakeEngine.queueResponse(listOf("Response B"))
-
-        val job1 = launch { agent.sendMessage("Request 1").collect() }
-        val job2 = launch { agent.sendMessage("Request 2").collect() }
-
-        joinAll(job1, job2)
-        advanceUntilIdle()
-
-        val messages = agent.agent.value?.messages ?: emptyList()
-        val userMessages = messages.filter { it.role == "user" }
-        assertEquals(2, userMessages.size, "Both user messages should be present")
-    }
-
-    @Test
-    fun testSuppressLlmFollowUpSkipsSecondStream() = runTest {
-        val newsStub = object : AgentTool {
+    fun corner_suppressLlmFollowUp_skipsSecondLlmStream() = runTest {
+        val stubTool = object : AgentTool {
             override val name = "news_search"
             override val description = "stub"
             override val suppressLlmFollowUp = true
             override suspend fun execute(input: String) = "Headlines: ok ($input)"
         }
-        val engineWithNews = FakeAgentEngine(repository, memoryManager, listOf(newsStub))
-        engineWithNews.queueResponse(listOf("Calling MCP.\nTOOL_CALL: news_search\nINPUT: tech"))
+        val engineWithStub = FakeAgentEngine(repository, memoryManager, listOf(stubTool))
+        engineWithStub.queueResponse(listOf("Calling MCP.\nTOOL_CALL: news_search\nINPUT: tech"))
 
-        val agent = AutonomousAgent(agentId, repository, engineWithNews, backgroundScope)
+        val agent = AutonomousAgent(agentId, repository, engineWithStub, backgroundScope)
         advanceUntilIdle()
 
         agent.sendMessage("news please").collect()
@@ -142,7 +173,7 @@ class AutonomousAgentStressTest {
 
         assertEquals(
             1,
-            engineWithNews.streamFromPreparedCallCount,
+            engineWithStub.streamFromPreparedCallCount,
             "With suppressLlmFollowUp, second LLM stream must not run"
         )
         val messages = agent.agent.value?.messages ?: emptyList()
@@ -150,7 +181,7 @@ class AutonomousAgentStressTest {
     }
 
     @Test
-    fun testToolExecuteExceptionSurfacesAsToolError() = runTest {
+    fun corner_toolExecuteThrows_errorInHistory() = runTest {
         val badTool = object : AgentTool {
             override val name = "bad_tool"
             override val description = "always fails"
@@ -172,6 +203,45 @@ class AutonomousAgentStressTest {
             },
             "Exception from execute should appear in merged assistant message, got: $messages"
         )
+    }
+
+    // --- 3. Stress ---
+
+    @Test
+    fun stress_concurrentMessages_bothUserRowsPersisted() = runTest {
+        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
+        advanceUntilIdle()
+
+        fakeEngine.queueResponse(listOf("Response A"))
+        fakeEngine.queueResponse(listOf("Response B"))
+
+        val job1 = launch { agent.sendMessage("Request 1").collect() }
+        val job2 = launch { agent.sendMessage("Request 2").collect() }
+
+        joinAll(job1, job2)
+        advanceUntilIdle()
+
+        val messages = agent.agent.value?.messages ?: emptyList()
+        val userMessages = messages.filter { it.role == "user" }
+        assertEquals(2, userMessages.size, "Both user messages should be present")
+    }
+
+    @Test
+    fun stress_sequentialTenRoundTrips() = runTest {
+        val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
+        advanceUntilIdle()
+
+        repeat(10) { i ->
+            fakeEngine.queueResponse(listOf("Reply $i"))
+        }
+        repeat(10) { i ->
+            agent.sendMessage("msg-$i").collect()
+            advanceUntilIdle()
+        }
+
+        val userMessages = agent.agent.value?.messages?.filter { it.role == "user" } ?: emptyList()
+        assertEquals(10, userMessages.size)
+        assertEquals("msg-9", userMessages.last().message)
     }
 
     class FakeAgentEngine(
@@ -211,21 +281,21 @@ class AutonomousAgentStressTest {
         var extractedFactsToReturn = ChatFacts()
 
         override fun chatStreaming(m: List<ChatMessage>, s: String, mt: Int, t: Double, sw: String, j: Boolean, p: LLMProvider) = flowOf(Result.success("Mock"))
-        
-        override suspend fun saveAgentState(state: AgentState) { 
+
+        override suspend fun saveAgentState(state: AgentState) {
             agentStateMap[state.agentId] = state
             _agentUpdates.emit(state)
         }
-        
+
         override suspend fun getAgentState(id: String) = agentStateMap[id]
-        
-        override fun observeAgentState(id: String): Flow<AgentState?> = 
+
+        override fun observeAgentState(id: String): Flow<AgentState?> =
             _agentUpdates.filter { it.agentId == id }.onStart { agentStateMap[id]?.let { emit(it) } }
 
         override suspend fun deleteAgent(agentId: String) {
             agentStateMap.remove(agentId)
         }
-        
+
         override suspend fun extractFacts(m: List<ChatMessage>, cf: ChatFacts, p: LLMProvider) = Result.success(extractedFactsToReturn)
         override suspend fun getProfile(id: String) = null
         override suspend fun saveProfile(id: String, p: UserProfile) {}

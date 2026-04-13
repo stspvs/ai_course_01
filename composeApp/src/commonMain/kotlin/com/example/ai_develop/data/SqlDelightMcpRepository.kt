@@ -7,7 +7,9 @@ import com.example.aidevelop.database.McpServerEntity
 import com.example.aidevelop.database.McpToolBindingEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 
 class SqlDelightMcpRepository(
@@ -22,6 +24,18 @@ class SqlDelightMcpRepository(
             .mapToList(Dispatchers.Default)
             .map { rows -> rows.map { it.toRecord() } }
     }
+
+    override fun observeMcpRegistryChanges(): Flow<Unit> = merge(
+        flowOf(Unit),
+        queries.getAllMcpServers()
+            .asFlow()
+            .mapToList(Dispatchers.Default)
+            .map { },
+        queries.getAllMcpBindings()
+            .asFlow()
+            .mapToList(Dispatchers.Default)
+            .map { },
+    )
 
     override suspend fun getAllServers(): List<McpServerRecord> = withContext(Dispatchers.Default) {
         queries.getAllMcpServers().executeAsList().map { it.toRecord() }
@@ -41,6 +55,10 @@ class SqlDelightMcpRepository(
             lastSyncToolsJson = record.lastSyncToolsJson,
             lastSyncError = record.lastSyncError,
             lastSyncAt = record.lastSyncAt,
+            deploymentKind = record.deploymentKind.name,
+            startCommand = record.startCommand,
+            linkStatus = record.linkStatus.name,
+            wireKind = record.wireKind.name,
         )
     }
 
@@ -58,9 +76,8 @@ class SqlDelightMcpRepository(
             id = record.id,
             serverId = record.serverId,
             mcpToolName = record.mcpToolName,
-            agentToolName = record.agentToolName,
-            descriptionOverride = record.descriptionOverride,
-            inputArgumentKey = record.inputArgumentKey,
+            description = record.description,
+            inputSchemaJson = record.inputSchemaJson,
             enabled = record.enabled,
         )
     }
@@ -84,6 +101,7 @@ class SqlDelightMcpRepository(
         toolsJson: String,
         error: String?,
         syncAt: Long,
+        linkStatus: McpServerLinkStatus,
     ) = withContext(Dispatchers.Default) {
         val row = queries.getMcpServer(serverId).executeAsOneOrNull() ?: return@withContext
         queries.insertMcpServer(
@@ -95,8 +113,36 @@ class SqlDelightMcpRepository(
             lastSyncToolsJson = toolsJson,
             lastSyncError = error,
             lastSyncAt = syncAt,
+            deploymentKind = row.deploymentKind,
+            startCommand = row.startCommand,
+            linkStatus = linkStatus.name,
+            wireKind = row.wireKind,
         )
     }
+
+    override suspend fun replaceToolsFromSync(serverId: String, tools: List<McpDiscoveredTool>) =
+        withContext(Dispatchers.Default) {
+            val existing = queries.getMcpBindingsForServer(serverId).executeAsList()
+                .associateBy { it.mcpToolName }
+            val newNames = tools.map { it.name }.toSet()
+            for (tool in tools) {
+                val prev = existing[tool.name]
+                val id = prev?.id ?: stableMcpToolBindingId(serverId, tool.name)
+                queries.insertMcpToolBinding(
+                    id = id,
+                    serverId = serverId,
+                    mcpToolName = tool.name,
+                    description = tool.description,
+                    inputSchemaJson = tool.inputSchemaJson,
+                    enabled = prev?.enabled ?: true,
+                )
+            }
+            for (row in existing.values) {
+                if (row.mcpToolName !in newNames) {
+                    queries.deleteMcpBinding(row.id)
+                }
+            }
+        }
 }
 
 private fun McpServerEntity.toRecord() = McpServerRecord(
@@ -108,14 +154,17 @@ private fun McpServerEntity.toRecord() = McpServerRecord(
     lastSyncToolsJson = lastSyncToolsJson,
     lastSyncError = lastSyncError,
     lastSyncAt = lastSyncAt,
+    deploymentKind = McpDeploymentKind.fromStored(deploymentKind),
+    startCommand = startCommand,
+    linkStatus = McpServerLinkStatus.fromStored(linkStatus),
+    wireKind = McpWireKind.fromStored(wireKind),
 )
 
 private fun McpToolBindingEntity.toRecord() = McpToolBindingRecord(
     id = id,
     serverId = serverId,
     mcpToolName = mcpToolName,
-    agentToolName = agentToolName,
-    descriptionOverride = descriptionOverride,
-    inputArgumentKey = inputArgumentKey,
+    description = description,
+    inputSchemaJson = inputSchemaJson,
     enabled = enabled,
 )

@@ -81,6 +81,7 @@ private fun DesktopAgentsContent(
         AgentListSideBar(
             agents = state.agents,
             selectedAgentId = state.selectedAgentId,
+            availableToolNames = state.availableToolNames,
             onCreateAgent = onCreateAgent,
             onSelectAgent = onSelectAgent,
             modifier = Modifier.width(300.dp).fillMaxHeight()
@@ -123,6 +124,7 @@ private fun MobileAgentsContent(
         AgentListSideBar(
             agents = state.agents,
             selectedAgentId = null,
+            availableToolNames = state.availableToolNames,
             onCreateAgent = onCreateAgent,
             onSelectAgent = onSelectAgent,
             modifier = Modifier.fillMaxSize()
@@ -157,6 +159,7 @@ private fun MobileAgentsContent(
 private fun AgentListSideBar(
     agents: List<Agent>,
     selectedAgentId: String?,
+    availableToolNames: List<String>,
     onCreateAgent: () -> Unit,
     onSelectAgent: (String?) -> Unit,
     modifier: Modifier = Modifier
@@ -172,7 +175,11 @@ private fun AgentListSideBar(
                 Icon(Icons.Default.Add, contentDescription = "Создать агента")
             }
         }
-        
+
+        AvailableToolsOnAgentsPanel(availableToolNames)
+
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
+
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(agents) { agent ->
                 AgentItem(
@@ -181,6 +188,39 @@ private fun AgentListSideBar(
                     onClick = { onSelectAgent(agent.id) }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AvailableToolsOnAgentsPanel(toolNames: List<String>) {
+    Column(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            "Доступные инструменты",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "Актуальный список для всех агентов в чате; обновляется при изменениях в БД (вкладка «MCP»).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+        )
+        if (toolNames.isEmpty()) {
+            Text(
+                "Нет инструментов (ни встроенных, ни MCP).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+            )
+        } else {
+            Text(
+                toolNames.joinToString(", "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }

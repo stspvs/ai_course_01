@@ -1,0 +1,22 @@
+-- MCP: deploymentKind на сервере; инструменты — описание и inputSchemaJson, UNIQUE(serverId, mcpToolName)
+ALTER TABLE McpServerEntity ADD COLUMN deploymentKind TEXT NOT NULL DEFAULT 'REMOTE';
+
+CREATE TABLE McpToolBindingEntity_new (
+    id TEXT NOT NULL PRIMARY KEY,
+    serverId TEXT NOT NULL,
+    mcpToolName TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    inputSchemaJson TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(serverId) REFERENCES McpServerEntity(id) ON DELETE CASCADE,
+    UNIQUE(serverId, mcpToolName)
+);
+
+INSERT INTO McpToolBindingEntity_new (id, serverId, mcpToolName, description, inputSchemaJson, enabled)
+SELECT id, serverId, mcpToolName, descriptionOverride, '{}', enabled FROM McpToolBindingEntity;
+
+DROP TABLE McpToolBindingEntity;
+
+ALTER TABLE McpToolBindingEntity_new RENAME TO McpToolBindingEntity;
+
+CREATE INDEX IF NOT EXISTS idx_mcp_binding_server ON McpToolBindingEntity(serverId);

@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS GraylogSettingsEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    webUrl TEXT NOT NULL,
+    startCommand TEXT NOT NULL DEFAULT ''
+);
+
+INSERT OR IGNORE INTO GraylogSettingsEntity(id, webUrl, startCommand)
+VALUES ('default', 'http://127.0.0.1:9000', '');

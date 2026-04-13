@@ -448,7 +448,7 @@ class LLMViewModelTest {
         val repo: ChatRepository,
         val mm: ChatMemoryManager,
         val scope: CoroutineScope
-    ) : ChatStreamingUseCase(repo, mm, scope, testAgentToolRegistry()) {
+    ) : ChatStreamingUseCase(repo, mm, scope, testAgentToolRegistry(), EmptyMcpRepository()) {
         private val agentsMap = mutableMapOf<String, FakeAutonomousAgent>()
 
         override fun getOrCreateAgent(agentId: String, taskIdForMessagePersistence: String?): AutonomousAgent {

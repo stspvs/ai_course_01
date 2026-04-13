@@ -1,13 +1,22 @@
 package com.example.ai_develop.domain
 
+import com.example.ai_develop.data.McpDiscoveredTool
 import com.example.ai_develop.data.McpRepository
+import com.example.ai_develop.data.McpServerLinkStatus
 import com.example.ai_develop.data.McpServerRecord
 import com.example.ai_develop.data.McpToolBindingRecord
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.merge
 
 internal class EmptyMcpRepository : McpRepository {
     override fun observeServers(): Flow<List<McpServerRecord>> = flowOf(emptyList())
+
+    override fun observeMcpRegistryChanges(): Flow<Unit> = merge(
+        flowOf(Unit),
+        emptyFlow(),
+    )
     override suspend fun getAllServers(): List<McpServerRecord> = emptyList()
     override suspend fun getServer(id: String): McpServerRecord? = null
     override suspend fun upsertServer(record: McpServerRecord) {}
@@ -21,17 +30,20 @@ internal class EmptyMcpRepository : McpRepository {
         toolsJson: String,
         error: String?,
         syncAt: Long,
+        linkStatus: McpServerLinkStatus,
     ) {
+    }
+
+    override suspend fun replaceToolsFromSync(serverId: String, tools: List<McpDiscoveredTool>) {
     }
 }
 
 internal class NoopMcpTransport : McpTransport {
-    override suspend fun listTools(baseUrl: String, headersJson: String): Result<McpListToolsResult> =
+    override suspend fun listTools(server: McpServerRecord): Result<McpListToolsResult> =
         Result.failure(UnsupportedOperationException())
 
     override suspend fun callTool(
-        baseUrl: String,
-        headersJson: String,
+        server: McpServerRecord,
         toolName: String,
         arguments: Map<String, kotlinx.serialization.json.JsonElement>,
     ): Result<String> {
@@ -40,7 +52,7 @@ internal class NoopMcpTransport : McpTransport {
 }
 
 internal fun testAgentToolRegistry(
-    baseTools: List<AgentTool> = listOf(CalculatorTool(), WeatherTool()),
+    baseTools: List<AgentTool> = emptyList(),
 ): AgentToolRegistry = AgentToolRegistry(
     baseTools = baseTools,
     mcpRepository = EmptyMcpRepository(),

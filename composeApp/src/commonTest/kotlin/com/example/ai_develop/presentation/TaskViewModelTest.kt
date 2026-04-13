@@ -186,7 +186,7 @@ class TaskViewModelTest {
         val localChatRepo = FakeLocalChatRepo(taskRepo, messageRepo)
         val taskSagaCoordinator = TaskSagaCoordinator(chatRepo, localChatRepo, ChatMemoryManager(), testDispatcher)
 
-        val chatStreamingUseCase = ChatStreamingUseCase(chatRepo, ChatMemoryManager(), CoroutineScope(testDispatcher), testAgentToolRegistry())
+        val chatStreamingUseCase = ChatStreamingUseCase(chatRepo, ChatMemoryManager(), CoroutineScope(testDispatcher), testAgentToolRegistry(), EmptyMcpRepository())
         val agentFactory = DefaultAgentFactory()
 
         viewModel = TaskViewModel(

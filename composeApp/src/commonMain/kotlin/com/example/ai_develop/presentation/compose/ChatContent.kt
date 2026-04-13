@@ -783,6 +783,14 @@ private fun ChatInputArea(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Кнопка сброса вне поля: во вложенном trailingIcon клики часто не доходут до IconButton (desktop).
+            IconButton(onClick = onClearChat) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = "Clear Chat",
+                    tint = Color.Gray
+                )
+            }
             OutlinedTextField(
                 value = input,
                 onValueChange = onInputChange,
@@ -798,16 +806,7 @@ private fun ChatInputArea(
                             onSendMessage(input)
                         }
                     }
-                ),
-                trailingIcon = {
-                    IconButton(onClick = onClearChat) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Clear Chat",
-                            tint = Color.Gray
-                        )
-                    }
-                }
+                )
             )
             Spacer(modifier = Modifier.width(8.dp))
             FloatingActionButton(

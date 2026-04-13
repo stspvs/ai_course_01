@@ -134,6 +134,4 @@ buildConfig {
     buildConfigField("String", "YANDEX_KEY", "\"${getSecret("YANDEX_KEY")}\"")
     buildConfigField("String", "YANDEX_FOLDER_ID", "\"${getSecret("YANDEX_FOLDER_ID")}\"")
     buildConfigField("String", "OPENROUTER_KEY", "\"${getSecret("OPENROUTER_KEY")}\"")
-    buildConfigField("String", "NEWSAPI_KEY", "\"${getSecret("NEWSAPI_KEY")}\"")
-    buildConfigField("int", "NEWS_MCP_PORT", "${getSecret("NEWS_MCP_PORT").ifEmpty { "8765" }.toIntOrNull() ?: 8765}")
 }

@@ -73,7 +73,7 @@ open class AgentManagementUseCase(
     }
 
     open suspend fun clearChat(agentId: String) {
-        val state = repository.getAgentState(agentId) ?: return
+        val state = repository.getAgentState(agentId) ?: AgentState(agentId = agentId)
         repository.saveAgentState(state.copy(messages = emptyList()))
         refreshAgent(agentId)
     }

@@ -6,11 +6,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.data.McpDiscoveredTool
 import com.example.ai_develop.data.McpRepository
+import com.example.ai_develop.data.McpServerLinkStatus
 import com.example.ai_develop.data.McpServerRecord
+import com.example.ai_develop.data.McpWireKind
 import com.example.ai_develop.data.McpToolBindingRecord
+import com.example.ai_develop.data.classifyMcpLinkFailure
+import com.example.ai_develop.data.buildMcpPrimaryArgumentMap
+import com.example.ai_develop.data.inferPrimaryArgument
 import com.example.ai_develop.domain.AgentToolRegistry
 import com.example.ai_develop.domain.ChatStreamingUseCase
 import com.example.ai_develop.domain.McpTransport
+import com.example.ai_develop.platform.GraylogPlatform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,14 +24,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
 import kotlin.uuid.Uuid
 
 data class McpServersUiState(
     val servers: List<McpServerRecord> = emptyList(),
     val selectedServerId: String? = null,
     val bindings: List<McpToolBindingRecord> = emptyList(),
-    val discoveredTools: List<McpDiscoveredTool> = emptyList(),
     val isBusy: Boolean = false,
     val message: String? = null,
     val testInput: String = "kotlin",
@@ -37,6 +41,7 @@ class McpServersViewModel(
     private val transport: McpTransport,
     private val agentToolRegistry: AgentToolRegistry,
     private val chatStreamingUseCase: ChatStreamingUseCase,
+    private val processPlatform: GraylogPlatform,
 ) : ViewModel() {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -61,19 +66,8 @@ class McpServersViewModel(
 
     private suspend fun refreshBindingsForServer(serverId: String) {
         val bindings = mcpRepository.getBindingsForServer(serverId)
-        val server = mcpRepository.getServer(serverId)
-        val discovered = parseDiscovered(server?.lastSyncToolsJson.orEmpty())
         _ui.update {
-            it.copy(bindings = bindings, discoveredTools = discovered)
-        }
-    }
-
-    private fun parseDiscovered(jsonStr: String): List<McpDiscoveredTool> {
-        if (jsonStr.isBlank()) return emptyList()
-        return try {
-            json.decodeFromString(ListSerializer(McpDiscoveredTool.serializer()), jsonStr)
-        } catch (_: Exception) {
-            emptyList()
+            it.copy(bindings = bindings)
         }
     }
 
@@ -84,25 +78,45 @@ class McpServersViewModel(
                 _ui.update { it.copy(isBusy = false, message = "Сервер не найден") }
                 return@launch
             }
-            val result = transport.listTools(server.baseUrl, server.headersJson)
+            val result = transport.listTools(server)
             val now = System.currentTimeMillis()
             if (result.isSuccess) {
                 val tools = result.getOrThrow().tools
+                val discovered = tools.map {
+                    McpDiscoveredTool(
+                        name = it.name,
+                        description = it.description.orEmpty(),
+                        inputSchemaJson = it.inputSchemaJson,
+                    )
+                }
                 val payload = json.encodeToString(
                     ListSerializer(McpDiscoveredTool.serializer()),
-                    tools.map { McpDiscoveredTool(it.name, it.description.orEmpty()) },
+                    discovered,
                 )
-                mcpRepository.updateServerSyncState(serverId, payload, null, now)
+                mcpRepository.updateServerSyncState(
+                    serverId,
+                    payload,
+                    null,
+                    now,
+                    McpServerLinkStatus.CONNECTED,
+                )
+                mcpRepository.replaceToolsFromSync(serverId, discovered)
                 _ui.update {
                     it.copy(
                         isBusy = false,
                         message = "Обновлено: ${tools.size} инструментов",
-                        discoveredTools = parseDiscovered(payload),
                     )
                 }
             } else {
                 val err = result.exceptionOrNull()?.message
-                mcpRepository.updateServerSyncState(serverId, server.lastSyncToolsJson, err, now)
+                val linkStatus = classifyMcpLinkFailure(err)
+                mcpRepository.updateServerSyncState(
+                    serverId,
+                    server.lastSyncToolsJson,
+                    err,
+                    now,
+                    linkStatus,
+                )
                 _ui.update { it.copy(isBusy = false, message = "Ошибка: $err") }
             }
             refreshBindingsForServer(serverId)
@@ -112,7 +126,33 @@ class McpServersViewModel(
 
     fun saveServer(record: McpServerRecord) {
         viewModelScope.launch {
-            mcpRepository.upsertServer(record)
+            val existing = mcpRepository.getServer(record.id)
+            val connectionUnchanged =
+                existing != null &&
+                    existing.baseUrl == record.baseUrl &&
+                    existing.headersJson == record.headersJson &&
+                    existing.wireKind == record.wireKind &&
+                    existing.startCommand == record.startCommand
+            if (existing != null && !connectionUnchanged) {
+                transport.disposeServer(record.id)
+            }
+            val toSave = when {
+                existing == null ->
+                    record.copy(linkStatus = McpServerLinkStatus.UNKNOWN, lastSyncError = null)
+                connectionUnchanged ->
+                    record.copy(
+                        linkStatus = existing.linkStatus,
+                        lastSyncError = existing.lastSyncError,
+                        lastSyncAt = existing.lastSyncAt,
+                        lastSyncToolsJson = existing.lastSyncToolsJson,
+                    )
+                else ->
+                    record.copy(
+                        linkStatus = McpServerLinkStatus.UNKNOWN,
+                        lastSyncError = null,
+                    )
+            }
+            mcpRepository.upsertServer(toSave)
             applyRegistrySuspend()
             _ui.update { it.copy(message = "Сервер сохранён") }
         }
@@ -120,6 +160,7 @@ class McpServersViewModel(
 
     fun deleteServer(serverId: String) {
         viewModelScope.launch {
+            transport.disposeServer(serverId)
             mcpRepository.deleteServer(serverId)
             if (_ui.value.selectedServerId == serverId) {
                 _ui.update { it.copy(selectedServerId = null, bindings = emptyList()) }
@@ -138,26 +179,53 @@ class McpServersViewModel(
         }
     }
 
-    fun deleteBinding(bindingId: String, serverId: String) {
-        viewModelScope.launch {
-            mcpRepository.deleteBinding(bindingId)
-            refreshBindingsForServer(serverId)
-            applyRegistrySuspend()
-        }
-    }
-
     fun setTestInput(value: String) {
         _ui.update { it.copy(testInput = value) }
+    }
+
+    /** Запуск [McpServerRecord.startCommand] для выбранного сервера (как у Graylog: фоновый процесс). */
+    fun runServerStartCommand(serverId: String) {
+        viewModelScope.launch {
+            val server = mcpRepository.getServer(serverId) ?: return@launch
+            val cmd = server.startCommand.trim()
+            if (cmd.isEmpty()) {
+                _ui.update { it.copy(message = "Команда запуска не задана — укажите её в редактировании сервера") }
+                return@launch
+            }
+            if (server.wireKind == McpWireKind.STDIO) {
+                transport.disposeServer(serverId)
+                _ui.update {
+                    it.copy(message = "Сессия stdio остановлена. Нажмите «Обновить список tools» для нового процесса.")
+                }
+                return@launch
+            }
+            val r = processPlatform.runStartCommand(cmd)
+            _ui.update {
+                it.copy(
+                    message = r.fold(
+                        onSuccess = { msg -> msg },
+                        onFailure = { e -> "Ошибка запуска: ${e.message}" },
+                    ),
+                )
+            }
+        }
     }
 
     fun testBinding(binding: McpToolBindingRecord) {
         viewModelScope.launch {
             val server = mcpRepository.getServer(binding.serverId) ?: return@launch
             _ui.update { it.copy(isBusy = true, testResult = null) }
-            val args = mapOf(
-                binding.inputArgumentKey.ifBlank { "query" } to JsonPrimitive(_ui.value.testInput),
-            )
-            val r = transport.callTool(server.baseUrl, server.headersJson, binding.mcpToolName, args)
+            val kind = inferPrimaryArgument(binding.inputSchemaJson)
+            val args = buildMcpPrimaryArgumentMap(kind, _ui.value.testInput).getOrElse { e ->
+                _ui.update {
+                    it.copy(
+                        isBusy = false,
+                        testResult = e.message ?: e.toString(),
+                    )
+                }
+                return@launch
+            }
+            val r = transport.callTool(server, binding.mcpToolName, args)
             _ui.update {
                 it.copy(
                     isBusy = false,

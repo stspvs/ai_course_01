@@ -2,6 +2,7 @@
 
 package com.example.ai_develop.domain
 
+import com.example.ai_develop.data.stripLeadingJsonColonLabel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -156,7 +157,7 @@ open class AutonomousAgent(
                         if (lastAssistant == null) {
                             val fallback = createMessage(
                                 "system",
-                                "Tool Result: $toolResultText",
+                                "Tool Result: ${stripLeadingJsonColonLabel(toolResultText)}",
                                 msgs.lastOrNull()?.id,
                                 fsm.getCurrentState().currentStage
                             )
@@ -275,7 +276,7 @@ open class AutonomousAgent(
             val parentId = _agent.value?.messages?.lastOrNull()?.id
             val aiMsg = createMessage(
                 "assistant",
-                sb.toString(),
+                stripLeadingJsonColonLabel(sb.toString()),
                 parentId,
                 stage,
                 prepared.snapshot

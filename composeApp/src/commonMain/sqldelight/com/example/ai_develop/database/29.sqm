@@ -1,0 +1,2 @@
+-- MCP: последний статус проверки подключения (listTools)
+ALTER TABLE McpServerEntity ADD COLUMN linkStatus TEXT NOT NULL DEFAULT 'UNKNOWN';

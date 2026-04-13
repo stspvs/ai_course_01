@@ -171,6 +171,21 @@ class AgentEngineTest {
     }
 
     @Test
+    fun testParseToolCallAcceptsMcpStyleNamesWithHyphensAndPrefix() {
+        val hyphen = engine.parseToolCall("[TOOL: get-usd-rate(USD/RUB)]")
+        assertEquals("get-usd-rate", hyphen?.toolName)
+        assertEquals("USD/RUB", hyphen?.input)
+
+        val prefixed = engine.parseToolCall("[TOOL: MyServer_get_usd()]")
+        assertEquals("MyServer_get_usd", prefixed?.toolName)
+        assertEquals("", prefixed?.input)
+
+        val tcHyphen = engine.parseToolCall("TOOL_CALL: get-rate\nINPUT: EUR")
+        assertEquals("get-rate", tcHyphen?.toolName)
+        assertEquals("EUR", tcHyphen?.input)
+    }
+
+    @Test
     fun testRegisteredToolNames() {
         assertEquals(listOf("calculator"), engine.registeredToolNames())
         val empty = AgentEngine(repository, memoryManager, emptyList())
@@ -216,14 +231,9 @@ class AgentEngineTest {
 
         val toolOnly = engine.formatMergedAssistantWithToolResult("", "news_search", "No articles")
         assertEquals("— Инструмент: news_search —\nNo articles", toolOnly)
-    }
 
-    @Test
-    fun testWeatherToolExecuteContainsCityAndDemoText() = runTest {
-        val w = WeatherTool()
-        val out = w.execute("Paris")
-        assertTrue(out.contains("Paris"), out)
-        assertTrue(out.contains("22"), out)
+        val stripsJsonPrefix = engine.formatMergedAssistantWithToolResult("", "t", "JSON:\n{\"a\":1}")
+        assertEquals("— Инструмент: t —\n{\"a\":1}", stripsJsonPrefix)
     }
 
     // --- 5: Memory & Maintenance ---
