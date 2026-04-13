@@ -1,10 +1,13 @@
 package com.example.ai_develop.presentation
 
+import com.example.ai_develop.domain.ChatFacts
 import com.example.ai_develop.domain.ChatMemoryStrategy
 import com.example.ai_develop.domain.LLMProvider
+import com.example.ai_develop.domain.WorkingMemory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AgentManagerTest {
@@ -69,5 +72,22 @@ class AgentManagerTest {
         assertTrue(cleared.messages.isEmpty())
         assertTrue(cleared.branches.isEmpty())
         assertEquals(0, cleared.totalTokensUsed)
+    }
+
+    @Test
+    fun testClearChat_resetsWorkingAndTemporaryMemory() {
+        val base = manager.createDefaultAgent(LLMProvider.Yandex())
+        val agent = base.copy(
+            workingMemory = WorkingMemory(currentTask = "T", progress = "P", extractedFacts = ChatFacts(listOf("f"))),
+            memoryStrategy = ChatMemoryStrategy.Summarization(10, summary = "old summary")
+        )
+        val cleared = manager.clearChat(agent)
+        assertNull(cleared.workingMemory.currentTask)
+        assertNull(cleared.workingMemory.progress)
+        assertTrue(cleared.workingMemory.extractedFacts.facts.isEmpty())
+        val strat = cleared.memoryStrategy
+        assertTrue(strat is ChatMemoryStrategy.Summarization)
+        assertEquals(null, (strat as ChatMemoryStrategy.Summarization).summary)
+        assertEquals(10, strat.windowSize)
     }
 }

@@ -98,7 +98,9 @@ open class AgentManager {
             messages = emptyList(),
             branches = emptyList(),
             currentBranchId = null,
-            totalTokensUsed = 0
+            totalTokensUsed = 0,
+            workingMemory = agent.workingMemory.clearConversation(),
+            memoryStrategy = agent.memoryStrategy.clearConversationData()
         )
     }
 }

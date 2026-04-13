@@ -14,7 +14,11 @@ class DynamicMcpAgentTool(
     private val transport: McpTransport,
 ) : AgentTool {
 
-    override val suppressLlmFollowUp: Boolean = true
+    /**
+     * Должен быть false, иначе после первого MCP-вызова [AutonomousAgent] не делает следующий ход LLM
+     * и многошаговые сценарии (несколько инструментов подряд в одном пользовательском сообщении) невозможны.
+     */
+    override val suppressLlmFollowUp: Boolean = false
 
     override suspend fun execute(input: String): String {
         val fullObject = tryParseFullMcpToolArgumentsObject(input)

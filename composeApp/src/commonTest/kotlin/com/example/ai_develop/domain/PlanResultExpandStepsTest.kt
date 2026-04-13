@@ -41,4 +41,24 @@ class PlanResultExpandStepsTest {
         val expanded = PlanResult("g", listOf(oneBlock), "c").expandNumberedSteps()
         assertEquals(3, expanded.steps.size)
     }
+
+    @Test
+    fun expandNumberedSteps_splitsParenthesisNumberingInline() {
+        val oneBlock =
+            "1) взять курсы за дату 2) взять последние курсы 3) посчитать разницу 4) сохранить в файл"
+        val expanded = PlanResult("g", listOf(oneBlock), "c").expandNumberedSteps()
+        assertEquals(4, expanded.steps.size)
+        assertEquals("1) взять курсы за дату", expanded.steps[0])
+        assertEquals("4) сохранить в файл", expanded.steps[3])
+    }
+
+    @Test
+    fun expandNumberedSteps_splitsParenthesisNumberingPerLine() {
+        val oneBlock = """
+            1) шаг один
+            2) шаг два
+        """.trimIndent()
+        val expanded = PlanResult("g", listOf(oneBlock), "c").expandNumberedSteps()
+        assertEquals(2, expanded.steps.size)
+    }
 }

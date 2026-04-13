@@ -471,6 +471,9 @@ class LLMViewModelTest {
         private val _processingFlow = MutableStateFlow(false)
         override val isProcessing: StateFlow<Boolean> = _processingFlow.asStateFlow()
 
+        private val _agentActivityFlow = MutableStateFlow<AgentActivity>(AgentActivity.Idle)
+        override val agentActivity: StateFlow<AgentActivity> = _agentActivityFlow.asStateFlow()
+
         fun emitAgent(agent: Agent) { _agentFlow.value = agent }
         fun setProcessing(loading: Boolean) { _processingFlow.value = loading }
 

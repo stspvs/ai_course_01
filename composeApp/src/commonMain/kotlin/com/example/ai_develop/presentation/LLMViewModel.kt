@@ -68,25 +68,29 @@ class LLMViewModel(
                         val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(id)
                         combine(
                             autonomousAgent.agent,
-                            autonomousAgent.isProcessing
-                        ) { snapshot, loading ->
-                            Triple(id, snapshot, loading)
+                            autonomousAgent.isProcessing,
+                            autonomousAgent.agentActivity
+                        ) { snapshot, loading, activity ->
+                            Triple(id, snapshot, loading to activity)
                         }
                     },
                 chatStreamingUseCase.observeAvailableToolNames(),
-            ) { agentsFromDb, pending, triple, toolNames ->
-                val (targetId, snapshot, loading) = triple
+            ) { agentsFromDb, pending, tripleWithActivity, toolNames ->
+                val (targetId, snapshot, loadingAndActivity) = tripleWithActivity
+                val (loading, activity) = loadingAndActivity
                 val visibleFromDb = agentsFromDb.filter { it.id !in pending }
                 val updatedAgent = snapshot
                     ?: visibleFromDb.find { it.id == targetId }
                     ?: createDefaultAgent(targetId)
                 val merged = mergeAgentsFromDbWithSelection(visibleFromDb, targetId, updatedAgent)
-                Triple(merged, loading, toolNames)
-            }.collect { (finalAgents, loading, toolNames) ->
+                Triple(merged, loading, toolNames to activity)
+            }.collect { (finalAgents, loading, toolsAndActivity) ->
+                val (toolNames, activity) = toolsAndActivity
                 _state.updateIfChanged { currentState ->
                     currentState.copy(
                         agents = finalAgents,
                         isLoading = loading,
+                        agentActivity = activity,
                         availableToolNames = toolNames,
                     )
                 }

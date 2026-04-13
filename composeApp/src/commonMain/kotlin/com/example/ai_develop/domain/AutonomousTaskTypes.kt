@@ -19,25 +19,30 @@ data class PlanResult(
     val contextSummary: String? = null
 )
 
+/** Нумерация шагов в одной строке: «1. …», «1) …» (частый русский формат в пользовательских промптах). */
+private val numberedStepHead = Regex("^\\d{1,2}[.)]")
+
 /**
- * Если весь план пришёл одной строкой с нумерацией «1. … 2. …», разбиваем на отдельные шаги.
+ * Если весь план пришёл одной строкой с нумерацией «1. … 2. …» или «1) … 2) …», разбиваем на отдельные шаги.
  * Иначе сага после первого EXECUTION+VERIFICATION считает задачу выполненной ([TaskSaga] сравнивает индекс с [steps].lastIndex).
  */
 fun PlanResult.expandNumberedSteps(): PlanResult {
     if (steps.size != 1) return this
     val raw = steps.first()
-    val byNewline = raw.split(Regex("\\n\\s*(?=\\d{1,2}\\.\\s)"))
+    // Граница перед «N.» / «N)» после перевода строки
+    val byNewline = raw.split(Regex("\\n\\s*(?=\\d{1,2}[.)]\\s)"))
         .map { it.trim() }
         .filter { it.isNotEmpty() }
     val pieces = if (byNewline.size >= 2) {
         byNewline
     } else {
-        raw.split(Regex("\\s+(?=\\d{1,2}\\.\\s)"))
+        // Граница перед следующим пунктом в той же строке: «… 2) …»
+        raw.split(Regex("\\s+(?=\\d{1,2}[.)]\\s)"))
             .map { it.trim() }
             .filter { it.isNotEmpty() }
     }
     if (pieces.size < 2) return this
-    val onlyNumbered = pieces.filter { Regex("^\\d{1,2}\\.").containsMatchIn(it) }
+    val onlyNumbered = pieces.filter { numberedStepHead.containsMatchIn(it) }
     if (onlyNumbered.size < 2) return this
     return copy(steps = onlyNumbered)
 }

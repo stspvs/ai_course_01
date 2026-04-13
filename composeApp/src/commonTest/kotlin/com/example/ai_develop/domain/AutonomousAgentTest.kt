@@ -11,6 +11,37 @@ import kotlinx.coroutines.test.*
 import kotlin.test.*
 
 class AutonomousAgentTest {
+
+    @Test
+    fun mergeObserveMessages_keepsLongerLocalWhenProcessing() {
+        val user = ChatMessage(id = "u", role = "user", message = "hi", timestamp = 1L, source = SourceType.USER)
+        val assistant = ChatMessage(id = "a", role = "assistant", message = "hi", timestamp = 2L, source = SourceType.AI)
+        val local = listOf(user, assistant)
+        val observed = AgentState(agentId = "x", messages = listOf(user))
+        val merged = mergeObserveMessages(
+            isProcessing = true,
+            localMessages = local,
+            observed = observed,
+            fallbackWhenObservedEmpty = emptyList()
+        )
+        assertEquals(2, merged.size)
+        assertEquals("a", merged.last().id)
+    }
+
+    @Test
+    fun mergeObserveMessages_usesObservedWhenNotProcessing() {
+        val user = ChatMessage(id = "u", role = "user", message = "hi", timestamp = 1L, source = SourceType.USER)
+        val assistant = ChatMessage(id = "a", role = "assistant", message = "hi", timestamp = 2L, source = SourceType.AI)
+        val local = listOf(user, assistant)
+        val observed = AgentState(agentId = "x", messages = listOf(user))
+        val merged = mergeObserveMessages(
+            isProcessing = false,
+            localMessages = local,
+            observed = observed,
+            fallbackWhenObservedEmpty = emptyList()
+        )
+        assertEquals(1, merged.size)
+    }
     private lateinit var repository: MockChatRepository
     private lateinit var memoryManager: ChatMemoryManager
     private lateinit var engine: AgentEngine

@@ -34,6 +34,9 @@ open class AutonomousAgent(
     private val _isProcessing = MutableStateFlow(false)
     open val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
+    private val _agentActivity = MutableStateFlow<AgentActivity>(AgentActivity.Idle)
+    open val agentActivity: StateFlow<AgentActivity> = _agentActivity.asStateFlow()
+
     private val processingMutex = Mutex()
     private var stateSyncJob: Job? = null
 
@@ -87,11 +90,14 @@ open class AutonomousAgent(
      * [repository.observeAgentState] иногда отдаёт пустой [AgentState.messages] при гонке с сохранением
      * (или кратковременно несогласованный снимок), хотя в БД история уже есть — после перезапуска она видна.
      * Прямой [getAgentState] в этом случае обычно возвращает актуальный список.
+     *
+     * Пока идёт обработка ответа, снимок из БД может отставать (ещё не сохранили промежуточные шаги) —
+     * не откатываем более длинную локальную историю.
      */
     private suspend fun resolveMessagesSnapshot(state: AgentState): List<ChatMessage> {
-        if (state.messages.isNotEmpty()) return state.messages
+        val local = _agent.value?.messages.orEmpty()
         val fromDb = repository.getAgentState(agentId)?.messages.orEmpty()
-        return if (fromDb.isNotEmpty()) fromDb else state.messages
+        return mergeObserveMessages(_isProcessing.value, local, state, fromDb)
     }
 
     suspend fun transitionTo(nextStage: AgentStage): Result<AgentState> {
@@ -119,6 +125,7 @@ open class AutonomousAgent(
                 )
                 _agent.update { it?.copy(messages = it.messages + msg) }
                 _isProcessing.value = true
+                _agentActivity.value = AgentActivity.Working
             }
 
             _agent.value?.let { syncWithRepository(it) }
@@ -128,6 +135,7 @@ open class AutonomousAgent(
             
             // 3. Первая итерация LLM
             var responseText = executeStreamingStep(this, agentSnapshot, fsm.getCurrentState().currentStage)
+            _agent.value?.let { syncWithRepository(it) }
             
             // 4. Tool Calling Loop — дедуп по (имя инструмента + вход), а не по тексту результата:
             // один и тот же запрос к API может вернуть слегка разный текст, из‑за чего раньше
@@ -136,10 +144,11 @@ open class AutonomousAgent(
             var iterations = 0
             val visitedToolCalls = mutableSetOf<String>()
 
-            while (toolCall != null && iterations < 3) {
+            while (toolCall != null && iterations < MAX_TOOL_CHAIN_ITERATIONS) {
                 val callKey = "${toolCall.toolName}\u0000${toolCall.input.trim()}"
                 if (!visitedToolCalls.add(callKey)) break
 
+                _agentActivity.value = AgentActivity.RunningTool(toolCall.toolName)
                 val toolResultText: String = try {
                     engine.executeToolCall(toolCall) ?: run {
                         val names = engine.registeredToolNames()
@@ -149,6 +158,7 @@ open class AutonomousAgent(
                 } catch (e: Exception) {
                     "Tool error: ${e.message ?: e::class.simpleName}"
                 }
+                _agentActivity.value = AgentActivity.Working
 
                 processingMutex.withLock {
                     _agent.update { agent ->
@@ -178,6 +188,7 @@ open class AutonomousAgent(
                         agent.copy(messages = updated)
                     }
                 }
+                _agent.value?.let { syncWithRepository(it) }
 
                 if (engine.toolSuppressesLlmFollowUp(toolCall.toolName)) {
                     break
@@ -185,6 +196,7 @@ open class AutonomousAgent(
 
                 agentSnapshot = _agent.value ?: break
                 responseText = executeStreamingStep(this, agentSnapshot, fsm.getCurrentState().currentStage)
+                _agent.value?.let { syncWithRepository(it) }
                 toolCall = engine.parseToolCall(responseText)
                 iterations++
             }
@@ -208,6 +220,7 @@ open class AutonomousAgent(
             emit(err)
         } finally {
             _isProcessing.value = false
+            _agentActivity.value = AgentActivity.Idle
         }
     }
 
@@ -221,6 +234,7 @@ open class AutonomousAgent(
                 val currentAgent = _agent.value ?: return@flow
                 if (currentAgent.messages.isNotEmpty()) return@flow
                 _isProcessing.value = true
+                _agentActivity.value = AgentActivity.Working
             }
 
             val stage = fsm.getCurrentState().currentStage
@@ -239,6 +253,7 @@ open class AutonomousAgent(
             emit(err)
         } finally {
             _isProcessing.value = false
+            _agentActivity.value = AgentActivity.Idle
         }
     }
 
@@ -260,6 +275,7 @@ open class AutonomousAgent(
         prepared: PreparedLlmRequest
     ): String {
         val sb = StringBuilder()
+        _agentActivity.value = AgentActivity.Streaming
         try {
             engine.streamFromPrepared(agent, prepared).collect { chunk ->
                 currentCoroutineContext().ensureActive()
@@ -270,6 +286,8 @@ open class AutonomousAgent(
         } catch (e: Exception) {
             _partialResponse.emit("Error during streaming: ${e.message}")
             throw e
+        } finally {
+            _agentActivity.value = AgentActivity.Working
         }
 
         processingMutex.withLock {
@@ -288,6 +306,9 @@ open class AutonomousAgent(
     }
 
     private companion object {
+        /** Максимум раундов «инструмент → ответ LLM» за одно пользовательское сообщение (защита от бесконечного цикла). */
+        private const val MAX_TOOL_CHAIN_ITERATIONS = 16
+
         private const val WELCOME_SYSTEM_SUFFIX =
             "\n\n[ИНСТРУКЦИЯ] Пользователь ещё не начал диалог. Кратко поприветствуй его и предложи начать обсуждение задачи. Ответь одним коротким сообщением."
     }

@@ -139,9 +139,15 @@ internal fun ChatContent(
 
             val listState = rememberLazyListState()
             
-            LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length) {
-                if (messages.isNotEmpty()) {
-                    listState.scrollToItem(messages.size - 1)
+            LaunchedEffect(
+                messages.size,
+                messages.lastOrNull()?.content?.length,
+                state.isLoading,
+                state.agentActivity
+            ) {
+                val lastIndex = messages.lastIndex + if (state.isLoading) 1 else 0
+                if (lastIndex >= 0) {
+                    listState.scrollToItem(lastIndex)
                 }
             }
 
@@ -157,6 +163,12 @@ internal fun ChatContent(
                         isBranchingMode = isBranchingMode,
                         onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) }
                     )
+                }
+                items(
+                    items = if (state.isLoading) listOf("agent_activity_bubble") else emptyList(),
+                    key = { it }
+                ) {
+                    AgentActivityBubble(activity = state.agentActivity)
                 }
             }
 
@@ -183,6 +195,56 @@ internal fun ChatContent(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun AgentActivityBubble(activity: AgentActivity) {
+    val label = when (activity) {
+        AgentActivity.Idle -> "Обработка…"
+        AgentActivity.Streaming -> "Модель отвечает…"
+        is AgentActivity.RunningTool -> "Вызов инструмента: ${activity.toolName}"
+        AgentActivity.Working -> "Обработка…"
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Surface(
+            color = Color(0xFFE8EAF6),
+            contentColor = Color(0xFF283593),
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = 0.dp,
+                bottomEnd = 16.dp
+            ),
+            tonalElevation = 1.dp,
+            shadowElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFF5C6BC0)
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+        Text(
+            text = "Агент",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+        )
     }
 }
 
