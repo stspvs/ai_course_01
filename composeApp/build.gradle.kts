@@ -42,6 +42,9 @@ kotlin {
 
                 implementation(libs.sqldelight.runtime)
                 implementation(libs.sqldelight.coroutine.extensions)
+
+                implementation(libs.coil.compose)
+                implementation(libs.coil.network.ktor3)
             }
         }
 

@@ -11,6 +11,7 @@ koin = "4.0.0"
 androidx-lifecycle = "2.8.4"
 sqldelight = "2.0.2"
 mockk = "1.13.12"
+coil = "3.4.0"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -54,6 +55,9 @@ mcp-kotlin-sdk-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", 
 mcp-kotlin-sdk-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcp-kotlin-sdk" }
 
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version = "2.0.17" }
+
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
+coil-network-ktor3 = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil" }
 
 [plugins]
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }

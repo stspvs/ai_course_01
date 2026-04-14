@@ -238,12 +238,35 @@ internal fun MessageBubble(message: ChatMessage) {
             shadowElevation = 1.dp
         ) {
             Column {
+                val segments = remember(message.message) { parseMessageBodySegments(message.message) }
                 SelectionContainer {
-                    Text(
-                        text = message.message,
+                    Column(
                         modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        when {
+                            segments.isEmpty() && message.message.isNotBlank() -> {
+                                Text(
+                                    text = message.message,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+                            else -> {
+                                segments.forEach { seg ->
+                                    when (seg) {
+                                        is MessageBodySegment.Text -> Text(
+                                            text = seg.content,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        is MessageBodySegment.Image -> ChatImageFromUrl(
+                                            url = seg.url,
+                                            modifier = Modifier.padding(vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 if (message.message.isNotBlank()) {
                     Text(

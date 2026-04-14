@@ -754,6 +754,16 @@ private fun TaskMessageBubbleFrame(
                     )
                 }
             }
+            val imageUrls = remember(message.message) { imageUrlsInOrder(message.message) }
+            if (imageUrls.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                imageUrls.forEach { url ->
+                    ChatImageFromUrl(
+                        url = url,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
             if (message.message.isNotBlank()) {
                 Text(
                     text = "${message.estimatedTokenCount()} токенов",
