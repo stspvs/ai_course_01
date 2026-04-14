@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import com.example.ai_develop.data.McpDeploymentKind
 import com.example.ai_develop.data.McpWireKind
 import com.example.ai_develop.data.McpServerLinkStatus
 import com.example.ai_develop.data.McpServerRecord
@@ -332,14 +331,6 @@ private fun ServerCard(
                         lastError = server.lastSyncError,
                     )
                     Text(
-                        when (server.deploymentKind) {
-                            McpDeploymentKind.LOCAL -> "Локальный"
-                            McpDeploymentKind.REMOTE -> "Удалённый"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
                         if (server.enabled) "Включён" else "Выключен",
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -431,27 +422,12 @@ private fun ServerEditDialog(
     }
     var headers by remember(initial?.id) { mutableStateOf(initial?.headersJson ?: "{}") }
     var enabled by remember(initial?.id) { mutableStateOf(initial?.enabled ?: true) }
-    var deploymentKind by remember(initial?.id) {
-        mutableStateOf(initial?.deploymentKind ?: McpDeploymentKind.REMOTE)
-    }
     var startCommand by remember(initial?.id) { mutableStateOf(initial?.startCommand ?: "") }
 
-    val deploymentIndex = when (deploymentKind) {
-        McpDeploymentKind.LOCAL -> 0
-        McpDeploymentKind.REMOTE -> 1
-    }
-    val urlSupportingText = when (deploymentKind) {
-        McpDeploymentKind.LOCAL ->
-            "Endpoint Streamable HTTP на этой машине или в LAN, обычно …/mcp"
-        McpDeploymentKind.REMOTE ->
-            "HTTPS- или HTTP-адрес опубликованного MCP за прокси / в облаке"
-    }
-    val headersSupportingText = when (deploymentKind) {
-        McpDeploymentKind.LOCAL ->
-            "Чаще не нужен. Для локального сервера с авторизацией — JSON заголовков"
-        McpDeploymentKind.REMOTE ->
-            "Опционально: Bearer, API-key и др. в формате JSON-объекта"
-    }
+    val urlSupportingText =
+        "Полный URL Streamable HTTP endpoint (локально, в сети или в интернете), обычно …/mcp"
+    val headersSupportingText =
+        "Опционально: заголовки в формате JSON (Bearer, API-key и т.п.)"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -504,37 +480,6 @@ private fun ServerEditDialog(
                 }
 
                 if (wireKind == McpWireKind.STREAMABLE_HTTP) {
-                    Text("Тип сервера", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "Метка и подсказки для URL; для удалённого чаще нужны заголовки.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        SegmentedButton(
-                            selected = deploymentIndex == 0,
-                            onClick = { deploymentKind = McpDeploymentKind.LOCAL },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                        ) { Text("Локальный") }
-                        SegmentedButton(
-                            selected = deploymentIndex == 1,
-                            onClick = { deploymentKind = McpDeploymentKind.REMOTE },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                        ) { Text("Удалённый") }
-                    }
-                    Text(
-                        when (deploymentKind) {
-                            McpDeploymentKind.LOCAL ->
-                                "Процесс или контейнер на вашей стороне (127.0.0.1 или хост в сети)."
-                            McpDeploymentKind.REMOTE ->
-                                "Сервис в интернете или в корпоративной сети."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    HorizontalDivider()
-
                     Text("Команда запуска (boot)", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "Опционально: отдельный процесс до обращения к URL (Docker и т.). На Windows — cmd /c.",
@@ -565,14 +510,7 @@ private fun ServerEditDialog(
                         supportingText = { Text(urlSupportingText) },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
-                        placeholder = {
-                            Text(
-                                when (deploymentKind) {
-                                    McpDeploymentKind.LOCAL -> "http://127.0.0.1:8765/mcp"
-                                    McpDeploymentKind.REMOTE -> "https://api.example.com/mcp"
-                                },
-                            )
-                        },
+                        placeholder = { Text("http://127.0.0.1:8765/mcp или https://…/mcp") },
                     )
 
                     Text("Заголовки HTTP", style = MaterialTheme.typography.titleSmall)
@@ -642,7 +580,6 @@ private fun ServerEditDialog(
                             lastSyncToolsJson = initial?.lastSyncToolsJson ?: "",
                             lastSyncError = initial?.lastSyncError,
                             lastSyncAt = initial?.lastSyncAt ?: 0L,
-                            deploymentKind = deploymentKind,
                             startCommand = startCommand.trim(),
                             linkStatus = initial?.linkStatus ?: McpServerLinkStatus.UNKNOWN,
                             wireKind = wireKind,

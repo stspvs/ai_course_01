@@ -456,6 +456,17 @@ class LLMViewModelTest {
                 FakeAutonomousAgent(agentId, repo, scope, taskIdForMessagePersistence)
             }
         }
+
+        override fun evictAgent(agentId: String) {
+            agentsMap.remove(agentId)?.dispose()
+            super.evictAgent(agentId)
+        }
+
+        override fun evictAllAgents() {
+            agentsMap.values.forEach { it.dispose() }
+            agentsMap.clear()
+            super.evictAllAgents()
+        }
     }
 
     private class FakeAutonomousAgent(

@@ -17,6 +17,13 @@ open class ChatStreamingUseCase(
 ) {
     private val activeAgents = mutableMapOf<String, AutonomousAgent>()
 
+    /**
+     * Увеличивается при [evictAgent] / [evictAllAgents]. UI должен снова подписаться на [getOrCreateAgent],
+     * иначе остаётся отменённый [AutonomousAgent] и чат перестаёт получать сообщения.
+     */
+    private val _agentCacheGeneration = MutableStateFlow(0L)
+    val agentCacheGeneration: StateFlow<Long> = _agentCacheGeneration.asStateFlow()
+
     private val engine = AgentEngine(repository, memoryManager) { agentToolRegistry.currentTools() }
 
     /**
@@ -61,12 +68,13 @@ open class ChatStreamingUseCase(
     /** Сбрасывает кэш агента после смены данных в БД (например сброс задачи). */
     open fun evictAgent(agentId: String) {
         activeAgents.remove(agentId)?.dispose()
+        _agentCacheGeneration.update { it + 1L }
     }
 
     /** После изменения MCP-инструментов пересоздать движки у всех активных агентов. */
     open fun evictAllAgents() {
-        val ids = activeAgents.keys.toList()
-        ids.forEach { evictAgent(it) }
+        activeAgents.keys.toList().forEach { activeAgents.remove(it)?.dispose() }
+        _agentCacheGeneration.update { it + 1L }
     }
 
     /**

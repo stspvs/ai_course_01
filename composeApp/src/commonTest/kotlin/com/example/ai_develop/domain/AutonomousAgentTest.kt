@@ -42,6 +42,23 @@ class AutonomousAgentTest {
         )
         assertEquals(1, merged.size)
     }
+
+    @Test
+    fun mergeObserveMessages_processingPrefersLocalWhenObserveIsStaleLonger() {
+        val user = ChatMessage(id = "u", role = "user", message = "hi", timestamp = 1L, source = SourceType.USER)
+        val a1 = ChatMessage(id = "a1", role = "assistant", message = "merged", timestamp = 2L, source = SourceType.AI)
+        val a2 = ChatMessage(id = "a2", role = "assistant", message = "[TOOL: x(y)]", timestamp = 3L, source = SourceType.AI)
+        val local = listOf(user, a1)
+        val observed = AgentState(agentId = "x", messages = listOf(user, a1, a2))
+        val merged = mergeObserveMessages(
+            isProcessing = true,
+            localMessages = local,
+            observed = observed,
+            fallbackWhenObservedEmpty = emptyList()
+        )
+        assertEquals(2, merged.size)
+        assertEquals("merged", merged.last().message)
+    }
     private lateinit var repository: MockChatRepository
     private lateinit var memoryManager: ChatMemoryManager
     private lateinit var engine: AgentEngine

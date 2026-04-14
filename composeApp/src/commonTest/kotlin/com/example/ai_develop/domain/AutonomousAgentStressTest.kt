@@ -50,6 +50,41 @@ class AutonomousAgentStressTest {
     }
 
     @Test
+    fun ordinary_severalSuppressToolsInOneResponse_executesInOrderWithoutSecondLlm() = runTest {
+        val mcpA = object : AgentTool {
+            override val name = "mcp_a"
+            override val description = "stub"
+            override val suppressLlmFollowUp = true
+            override suspend fun execute(input: String) = "first($input)"
+        }
+        val mcpB = object : AgentTool {
+            override val name = "mcp_b"
+            override val description = "stub"
+            override val suppressLlmFollowUp = true
+            override suspend fun execute(input: String) = "second($input)"
+        }
+        val engineWithMcp = FakeAgentEngine(repository, memoryManager, listOf(mcpA, mcpB))
+        engineWithMcp.queueResponse(listOf("[TOOL: mcp_a(q1)] [TOOL: mcp_b(q2)]"))
+
+        val agent = AutonomousAgent(agentId, repository, engineWithMcp, backgroundScope)
+        advanceUntilIdle()
+
+        agent.sendMessage("run both").collect()
+        advanceUntilIdle()
+
+        assertEquals(
+            1,
+            engineWithMcp.streamFromPreparedCallCount,
+            "LLM must run only once; MCP chain without follow-up assistant"
+        )
+        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        assertNotNull(assistant)
+        val t = assistant.message
+        assertTrue(t.contains("mcp_a") && t.contains("first(q1)"), t)
+        assertTrue(t.contains("mcp_b") && t.contains("second(q2)"), t)
+    }
+
+    @Test
     fun ordinary_toolCallCalculatorThenFinalAnswer() = runTest {
         val agent = AutonomousAgent(agentId, repository, fakeEngine, backgroundScope)
         advanceUntilIdle()
@@ -62,7 +97,9 @@ class AutonomousAgentStressTest {
         advanceUntilIdle()
 
         val messages = agent.agent.value?.messages ?: emptyList()
-        assertTrue(messages.size >= 3, "Expected at least 3 messages, got ${messages.size}")
+        val assistants = messages.filter { it.role == "assistant" }
+        assertEquals(1, assistants.size, "After tool + final LLM answer there must be one assistant bubble, got: $messages")
+        assertEquals(2, messages.size, "Expected user + assistant, got ${messages.size}")
         assertTrue(output.any { it.contains("1200") }, "Output should contain tool result")
     }
 
@@ -178,6 +215,35 @@ class AutonomousAgentStressTest {
         )
         val messages = agent.agent.value?.messages ?: emptyList()
         assertTrue(messages.any { it.message.contains("Headlines: ok") }, "Tool output should be in history")
+    }
+
+    @Test
+    fun corner_duplicateToolCall_stripsRawToolSyntaxFromSecondAssistantMessage() = runTest {
+        val stubTool = object : AgentTool {
+            override val name = "dup_tool"
+            override val description = "stub"
+            override suspend fun execute(input: String) = "ok($input)"
+        }
+        val engineWithStub = FakeAgentEngine(repository, memoryManager, listOf(stubTool))
+        engineWithStub.queueResponse(listOf("[TOOL: dup_tool(abc)]"))
+        engineWithStub.queueToolResult("done")
+        engineWithStub.queueResponse(listOf("[TOOL: dup_tool(abc)]"))
+
+        val agent = AutonomousAgent(agentId, repository, engineWithStub, backgroundScope)
+        advanceUntilIdle()
+
+        agent.sendMessage("please").collect()
+        advanceUntilIdle()
+
+        val texts = agent.agent.value?.messages?.map { it.message } ?: emptyList()
+        assertTrue(
+            texts.none { it.contains("[TOOL:") },
+            "Raw [TOOL: …] must not remain after duplicate follow-up, got: $texts"
+        )
+        assertTrue(
+            texts.any { it.contains("— Инструмент: dup_tool —") && it.contains("done") },
+            "Merged tool output should remain, got: $texts"
+        )
     }
 
     @Test

@@ -64,7 +64,10 @@ class TaskViewModel(
     val agents: StateFlow<List<Agent>> = getAgentsUseCase()
         .stateIn(viewModelScope, sharing, emptyList())
 
-    val activeAgent: StateFlow<AutonomousAgent?> = _selectedTaskId
+    val activeAgent: StateFlow<AutonomousAgent?> = combine(
+        _selectedTaskId,
+        chatStreamingUseCase.agentCacheGeneration,
+    ) { id, _ -> id }
         .mapLatest { id ->
             id?.let {
                 chatStreamingUseCase.ensureToolsLoaded()

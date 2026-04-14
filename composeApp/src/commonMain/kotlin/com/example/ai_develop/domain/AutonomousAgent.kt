@@ -136,26 +136,80 @@ open class AutonomousAgent(
             // 3. Первая итерация LLM
             var responseText = executeStreamingStep(this, agentSnapshot, fsm.getCurrentState().currentStage)
             _agent.value?.let { syncWithRepository(it) }
-            
+
+            val batchCalls = engine.parseAllToolCalls(responseText)
+            val suppressOnlyBatch =
+                batchCalls.isNotEmpty() && batchCalls.all { engine.toolSuppressesLlmFollowUp(it.toolName) }
+
+            if (suppressOnlyBatch) {
+                runSuppressOnlyToolSequence(
+                    calls = batchCalls.take(MAX_TOOL_CHAIN_ITERATIONS),
+                    fsm = fsm
+                )
+            } else {
             // 4. Tool Calling Loop — дедуп по (имя инструмента + вход), а не по тексту результата:
             // один и тот же запрос к API может вернуть слегка разный текст, из‑за чего раньше
             // показывалось несколько одинаковых «Tool Result» подряд.
             var toolCall = engine.parseToolCall(responseText)
             var iterations = 0
             val visitedToolCalls = mutableSetOf<String>()
+            /** Текст после merge с результатом инструмента (до следующего LLM-шага); нужен для дедупа при замене того же сообщения. */
+            var lastMergedAssistantBody: String? = null
 
             while (toolCall != null && iterations < MAX_TOOL_CHAIN_ITERATIONS) {
                 val callKey = "${toolCall.toolName}\u0000${toolCall.input.trim()}"
-                if (!visitedToolCalls.add(callKey)) break
+                if (!visitedToolCalls.add(callKey)) {
+                    // Модель повторила тот же вызов после того, как инструмент уже отдал результат —
+                    // повторно не выполняем, но убираем сырой [TOOL: …] из последнего сообщения ассистента.
+                    processingMutex.withLock {
+                        _agent.update { agent ->
+                            val msgs = agent?.messages ?: return@update agent
+                            val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
+                                ?: return@update agent
+                            val cleaned = engine.stripToolSyntaxFromAssistantText(lastAssistant.message)
+                            val trimmed = cleaned.trim()
+                            if (trimmed.isEmpty()) {
+                                val fallback = lastMergedAssistantBody?.trim().orEmpty()
+                                if (fallback.isNotEmpty()) {
+                                    val newTokens = estimateTokens(fallback)
+                                    agent.copy(
+                                        messages = msgs.map { msg ->
+                                            if (msg.id == lastAssistant.id) {
+                                                msg.copy(message = fallback, tokensUsed = newTokens)
+                                            } else msg
+                                        }
+                                    )
+                                } else {
+                                    agent.copy(messages = msgs.filter { it.id != lastAssistant.id })
+                                }
+                            } else {
+                                val newTokens = estimateTokens(trimmed)
+                                agent.copy(
+                                    messages = msgs.map { msg ->
+                                        if (msg.id == lastAssistant.id) {
+                                            msg.copy(message = trimmed, tokensUsed = newTokens)
+                                        } else msg
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    // Иначе observe успевает подставить прошлый снимок с лишним ассистентом до финального save.
+                    _agent.value?.let { syncWithRepository(it) }
+                    break
+                }
 
                 _agentActivity.value = AgentActivity.RunningTool(toolCall.toolName)
+                var toolExecutionFailed = false
                 val toolResultText: String = try {
                     engine.executeToolCall(toolCall) ?: run {
+                        toolExecutionFailed = true
                         val names = engine.registeredToolNames()
                         val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
                         "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
                     }
                 } catch (e: Exception) {
+                    toolExecutionFailed = true
                     "Tool error: ${e.message ?: e::class.simpleName}"
                 }
                 _agentActivity.value = AgentActivity.Working
@@ -179,6 +233,7 @@ open class AutonomousAgent(
                             toolName = toolCall.toolName,
                             toolResult = toolResultText
                         )
+                        lastMergedAssistantBody = merged
                         val newTokens = estimateTokens(merged)
                         val updated = msgs.map { msg ->
                             if (msg.id == lastAssistant.id) {
@@ -193,12 +248,23 @@ open class AutonomousAgent(
                 if (engine.toolSuppressesLlmFollowUp(toolCall.toolName)) {
                     break
                 }
+                // Ошибка инструмента уже полностью отражена в merged-сообщении; второй LLM-раунд не нужен
+                // и перезатрёт его при replaceLastAssistant (см. тесты unknown / execute throws).
+                if (toolExecutionFailed) {
+                    break
+                }
 
                 agentSnapshot = _agent.value ?: break
-                responseText = executeStreamingStep(this, agentSnapshot, fsm.getCurrentState().currentStage)
+                responseText = executeStreamingStep(
+                    this,
+                    agentSnapshot,
+                    fsm.getCurrentState().currentStage,
+                    replaceLastAssistant = true
+                )
                 _agent.value?.let { syncWithRepository(it) }
                 toolCall = engine.parseToolCall(responseText)
                 iterations++
+            }
             }
 
             // 5. Финализация стейта
@@ -221,6 +287,72 @@ open class AutonomousAgent(
         } finally {
             _isProcessing.value = false
             _agentActivity.value = AgentActivity.Idle
+        }
+    }
+
+    /**
+     * Несколько инструментов с [AgentTool.suppressLlmFollowUp] (MCP) из одного ответа модели: выполняются по очереди,
+     * результаты накапливаются в одном сообщении, без дополнительного вызова LLM.
+     */
+    private suspend fun runSuppressOnlyToolSequence(
+        calls: List<ParsedToolCall>,
+        fsm: AgentStateMachine,
+    ) {
+        val visitedToolCalls = mutableSetOf<String>()
+        var cumulative = ""
+        val stage = fsm.getCurrentState().currentStage
+
+        for (toolCall in calls) {
+            val callKey = "${toolCall.toolName}\u0000${toolCall.input.trim()}"
+            if (!visitedToolCalls.add(callKey)) continue
+
+            _agentActivity.value = AgentActivity.RunningTool(toolCall.toolName)
+            var toolExecutionFailed = false
+            val toolResultText: String = try {
+                engine.executeToolCall(toolCall) ?: run {
+                    toolExecutionFailed = true
+                    val names = engine.registeredToolNames()
+                    val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
+                    "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
+                }
+            } catch (e: Exception) {
+                toolExecutionFailed = true
+                "Tool error: ${e.message ?: e::class.simpleName}"
+            }
+            _agentActivity.value = AgentActivity.Working
+
+            val block = engine.formatMergedAssistantWithToolResult(
+                strippedPreamble = "",
+                toolName = toolCall.toolName,
+                toolResult = toolResultText
+            )
+            cumulative = if (cumulative.isEmpty()) block else "$cumulative\n\n$block"
+
+            processingMutex.withLock {
+                _agent.update { agent ->
+                    val msgs = agent?.messages ?: return@update agent
+                    val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
+                    if (lastAssistant == null) {
+                        val fallback = createMessage(
+                            "system",
+                            "Tool Result: ${stripLeadingJsonColonLabel(toolResultText)}",
+                            msgs.lastOrNull()?.id,
+                            stage
+                        )
+                        return@update agent.copy(messages = msgs + fallback)
+                    }
+                    val newTokens = estimateTokens(cumulative)
+                    val updated = msgs.map { msg ->
+                        if (msg.id == lastAssistant.id) {
+                            msg.copy(message = cumulative, tokensUsed = newTokens)
+                        } else msg
+                    }
+                    agent.copy(messages = updated)
+                }
+            }
+            _agent.value?.let { syncWithRepository(it) }
+
+            if (toolExecutionFailed) break
         }
     }
 
@@ -260,19 +392,22 @@ open class AutonomousAgent(
     private suspend fun executeStreamingStep(
         collector: FlowCollector<String>,
         agent: Agent,
-        stage: AgentStage
+        stage: AgentStage,
+        replaceLastAssistant: Boolean = false
     ): String = executeStreamingStepWithPrepared(
         collector,
         agent,
         stage,
-        engine.prepareChatRequest(agent, stage, isJsonMode = false)
+        engine.prepareChatRequest(agent, stage, isJsonMode = false),
+        replaceLastAssistant
     )
 
     private suspend fun executeStreamingStepWithPrepared(
         collector: FlowCollector<String>,
         agent: Agent,
         stage: AgentStage,
-        prepared: PreparedLlmRequest
+        prepared: PreparedLlmRequest,
+        replaceLastAssistant: Boolean = false
     ): String {
         val sb = StringBuilder()
         _agentActivity.value = AgentActivity.Streaming
@@ -291,15 +426,32 @@ open class AutonomousAgent(
         }
 
         processingMutex.withLock {
-            val parentId = _agent.value?.messages?.lastOrNull()?.id
-            val aiMsg = createMessage(
-                "assistant",
-                stripLeadingJsonColonLabel(sb.toString()),
-                parentId,
-                stage,
-                prepared.snapshot
-            )
-            _agent.update { it?.copy(messages = it.messages + aiMsg) }
+            val msgs = _agent.value?.messages ?: return@withLock
+            val content = stripLeadingJsonColonLabel(sb.toString())
+            val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
+            if (replaceLastAssistant && lastAssistant != null) {
+                val newTokens = estimateTokens(content)
+                val updated = msgs.map { msg ->
+                    if (msg.id == lastAssistant.id) {
+                        msg.copy(
+                            message = content,
+                            tokensUsed = newTokens,
+                            llmRequestSnapshot = prepared.snapshot
+                        )
+                    } else msg
+                }
+                _agent.update { it?.copy(messages = updated) }
+            } else {
+                val parentId = msgs.lastOrNull()?.id
+                val aiMsg = createMessage(
+                    "assistant",
+                    content,
+                    parentId,
+                    stage,
+                    prepared.snapshot
+                )
+                _agent.update { it?.copy(messages = it.messages + aiMsg) }
+            }
         }
 
         return sb.toString()

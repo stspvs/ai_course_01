@@ -10,7 +10,9 @@ internal fun mergeObserveMessages(
     observed: AgentState,
     fallbackWhenObservedEmpty: List<ChatMessage>
 ): List<ChatMessage> {
-    if (isProcessing && localMessages.size > observed.messages.size) {
+    // Пока идёт ответ, локальная история — единственный источник правды: observe может прислать
+    // отстающий снимок (например больше сообщений до strip дубликата [TOOL: …]).
+    if (isProcessing && localMessages.isNotEmpty()) {
         return localMessages
     }
     if (observed.messages.isNotEmpty()) return observed.messages

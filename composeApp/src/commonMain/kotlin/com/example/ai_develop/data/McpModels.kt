@@ -2,17 +2,6 @@ package com.example.ai_develop.data
 
 import kotlinx.serialization.Serializable
 
-enum class McpDeploymentKind {
-    LOCAL,
-    REMOTE,
-    ;
-
-    companion object {
-        fun fromStored(value: String): McpDeploymentKind =
-            entries.find { it.name == value } ?: REMOTE
-    }
-}
-
 /** Транспорт MCP: HTTP (Streamable) или локальный процесс по stdin/stdout. */
 enum class McpWireKind {
     STREAMABLE_HTTP,
@@ -35,7 +24,6 @@ data class McpServerRecord(
     val lastSyncToolsJson: String = "",
     val lastSyncError: String? = null,
     val lastSyncAt: Long = 0L,
-    val deploymentKind: McpDeploymentKind = McpDeploymentKind.REMOTE,
     /** Команда запуска процесса MCP на машине (docker, npx, …); для каждого сервера отдельно. */
     val startCommand: String = "",
     /** Состояние после последней проверки подключения (listTools). */

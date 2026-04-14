@@ -46,6 +46,26 @@ open class AgentEngine(
     ) : this(repository, memoryManager, { tools })
 
     private val tools: List<AgentTool> get() = toolsProvider()
+
+    companion object {
+        /** Нежадное тело скобок, чтобы в одном ответе было несколько `[TOOL: …][TOOL: …]`. */
+        private val toolBracketRegex = "\\[TOOL: ([^\\s(]+)\\((.*?)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL)
+        private val toolLineRegex = "TOOL_CALL: (\\S+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL)
+
+        /**
+         * Первое вхождение любого из поддерживаемых форматов (если оба есть — по позиции в строке).
+         */
+        internal fun pickFirstToolMatch(text: String): MatchResult? {
+            val r1 = toolBracketRegex.find(text)
+            val r2 = toolLineRegex.find(text)
+            return when {
+                r1 == null -> r2
+                r2 == null -> r1
+                r1.range.first <= r2.range.first -> r1
+                else -> r2
+            }
+        }
+    }
     /**
      * Тот же запрос к LLM, что и в [streamResponse], без стриминга — для логов и отладки.
      */
@@ -104,24 +124,40 @@ open class AgentEngine(
      * Извлекает первый вызов инструмента из текста модели (два поддерживаемых формата).
      */
     open fun parseToolCall(text: String): ParsedToolCall? {
-        // Имя инструмента: не только \w — у MCP бывают дефисы, точки, кириллица в префиксе и т.д.
-        val regex1 = "\\[TOOL: ([^\\s(]+)\\((.*)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL)
-        regex1.find(text)?.let { m ->
-            return ParsedToolCall(m.groupValues[1], m.groupValues[2])
-        }
-        val regex2 = "TOOL_CALL: (\\S+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL)
-        regex2.find(text)?.let { m ->
-            return ParsedToolCall(m.groupValues[1], m.groupValues[2].trim())
-        }
-        return null
+        val m = pickFirstToolMatch(text) ?: return null
+        return parseToolCallFromMatch(m)
     }
+
+    /**
+     * Все вызовы из одного ответа модели **по порядку** (несколько MCP в одном сообщении без промежуточного LLM).
+     */
+    open fun parseAllToolCalls(text: String): List<ParsedToolCall> {
+        val out = mutableListOf<ParsedToolCall>()
+        var remainder = text
+        while (remainder.isNotBlank()) {
+            val m = pickFirstToolMatch(remainder) ?: break
+            out += parseToolCallFromMatch(m)
+            remainder = buildString {
+                append(remainder.substring(0, m.range.first))
+                append(remainder.substring(m.range.last + 1))
+            }
+        }
+        return out
+    }
+
+    private fun parseToolCallFromMatch(m: MatchResult): ParsedToolCall =
+        if (m.value.startsWith("[TOOL:")) {
+            ParsedToolCall(m.groupValues[1], m.groupValues[2])
+        } else {
+            ParsedToolCall(m.groupValues[1], m.groupValues[2].trim())
+        }
 
     /**
      * Убирает из текста ассистента синтаксис вызова инструмента (после слияния с результатом в одном сообщении).
      */
     open fun stripToolSyntaxFromAssistantText(text: String): String {
         var t = text
-        t = t.replace("\\[TOOL: ([^\\s(]+)\\((.*)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL), "")
+        t = t.replace("\\[TOOL: ([^\\s(]+)\\((.*?)\\)\\]".toRegex(RegexOption.DOT_MATCHES_ALL), "")
         t = t.replace("TOOL_CALL: (\\S+)\\s+INPUT: (.*)".toRegex(RegexOption.DOT_MATCHES_ALL), "")
         return t.trim()
     }
@@ -178,7 +214,7 @@ open class AgentEngine(
                 appendLine()
                 appendLine("TOOL USE (mandatory when applicable):")
                 appendLine("- For exchange rates, arithmetic, or any data that comes from a listed tool, you MUST call that tool. Do not invent or guess numbers.")
-                appendLine("- Output a single line only, in this exact form (then stop):")
+                appendLine("- Output one or more tool lines, each in this exact form (then stop). For several tools in one message, repeat the pattern, e.g. [TOOL: a(x)] [TOOL: b(y)]:")
                 appendLine("[TOOL: toolname(input)]")
                 appendLine("Use the exact tool name from the list above. Example: [TOOL: my-tool-name(input)]")
                 appendLine("- If a tool expects a list of strings (see schema), put comma-separated values or a JSON array in parentheses, e.g. [TOOL: tool-name(USD,EUR)] or [TOOL: tool-name([\"USD\",\"EUR\"])].")

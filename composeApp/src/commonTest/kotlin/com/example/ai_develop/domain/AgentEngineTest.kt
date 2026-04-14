@@ -220,6 +220,7 @@ class AgentEngineTest {
         assertEquals("Пояснение.", engine.stripToolSyntaxFromAssistantText(a))
         val b = "Hi\nTOOL_CALL: calc\nINPUT: 2+2\n"
         assertEquals("Hi", engine.stripToolSyntaxFromAssistantText(b))
+        assertEquals("", engine.stripToolSyntaxFromAssistantText("[TOOL: dup_tool(abc)]").trim())
     }
 
     @Test

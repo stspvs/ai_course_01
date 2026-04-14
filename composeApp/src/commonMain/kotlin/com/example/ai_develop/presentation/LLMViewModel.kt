@@ -60,9 +60,10 @@ class LLMViewModel(
             combine(
                 getAgentsUseCase(),
                 pendingDeletedAgentIds,
-                _state
-                    .map { it.selectedAgentId ?: GENERAL_CHAT_ID }
-                    .distinctUntilChanged()
+                combine(
+                    _state.map { it.selectedAgentId ?: GENERAL_CHAT_ID }.distinctUntilChanged(),
+                    chatStreamingUseCase.agentCacheGeneration,
+                ) { id, _ -> id }
                     .flatMapLatest { id ->
                         chatStreamingUseCase.ensureToolsLoaded()
                         val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(id)
