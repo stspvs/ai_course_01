@@ -9,18 +9,22 @@ sealed interface MessageBodySegment {
 }
 
 private val markdownImageRegex = Regex("""!\[[^\]]*]\((https?://[^)]+)\)""")
-private val bareImageUrlRegex = Regex(
-    """https?://[^\s<>"']+\.(?:png|jpg|jpeg|gif|webp|svg)(?:\?[^\s<>"']*)?""",
+/** Alternation: QuickChart first (no file extension in path), then static image URLs. */
+private val bareImageOrQuickChartRegex = Regex(
+    """(?:(?:https?://(?:www\.)?quickchart\.io/chart\?[^\s<>"']+)|(?:https?://[^\s<>"']+\.(?:png|jpg|jpeg|gif|webp|svg)(?:\?[^\s<>"']*)?))""",
     RegexOption.IGNORE_CASE
 )
 
 private val imageExtensionInUrl = Regex("""\.(png|jpg|jpeg|gif|webp|svg)(\?|#|$)""", RegexOption.IGNORE_CASE)
+private val quickChartImageUrlRegex =
+    Regex("""^https?://(?:www\.)?quickchart\.io/chart\?.*\bchart=""", RegexOption.IGNORE_CASE)
 
 internal fun isHttpImageUrl(url: String): Boolean {
     val t = url.trim()
     if (!t.startsWith("http://", ignoreCase = true) && !t.startsWith("https://", ignoreCase = true)) {
         return false
     }
+    if (quickChartImageUrlRegex.containsMatchIn(t)) return true
     return imageExtensionInUrl.containsMatchIn(t)
 }
 
@@ -58,7 +62,7 @@ private fun parseBareUrlsInTextChunk(chunk: String): List<MessageBodySegment> {
     if (chunk.isEmpty()) return emptyList()
     val out = mutableListOf<MessageBodySegment>()
     var start = 0
-    for (m in bareImageUrlRegex.findAll(chunk)) {
+    for (m in bareImageOrQuickChartRegex.findAll(chunk)) {
         if (m.range.first > start) {
             val text = chunk.substring(start, m.range.first)
             if (text.isNotEmpty()) out += MessageBodySegment.Text(text)
@@ -94,3 +98,7 @@ private fun mergeAdjacentText(segments: List<MessageBodySegment>): List<MessageB
 /** Image URLs from [raw] in order (for task bubbles that render text separately). */
 fun imageUrlsInOrder(raw: String): List<String> =
     parseMessageBodySegments(raw).filterIsInstance<MessageBodySegment.Image>().map { it.url }
+
+/** Text parts only (excludes extracted image URLs and markdown image syntax). */
+fun messageBodyTextOnly(segments: List<MessageBodySegment>): String =
+    segments.filterIsInstance<MessageBodySegment.Text>().joinToString("") { it.content }

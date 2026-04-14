@@ -50,7 +50,7 @@ class AutonomousAgentStressTest {
     }
 
     @Test
-    fun ordinary_severalSuppressToolsInOneResponse_executesInOrderWithoutSecondLlm() = runTest {
+    fun ordinary_severalSuppressToolsInOneResponse_thenContinuationLlm() = runTest {
         val mcpA = object : AgentTool {
             override val name = "mcp_a"
             override val description = "stub"
@@ -65,6 +65,7 @@ class AutonomousAgentStressTest {
         }
         val engineWithMcp = FakeAgentEngine(repository, memoryManager, listOf(mcpA, mcpB))
         engineWithMcp.queueResponse(listOf("[TOOL: mcp_a(q1)] [TOOL: mcp_b(q2)]"))
+        engineWithMcp.queueResponse(listOf("Продолжаю остальные шаги."))
 
         val agent = AutonomousAgent(agentId, repository, engineWithMcp, backgroundScope)
         advanceUntilIdle()
@@ -73,15 +74,98 @@ class AutonomousAgentStressTest {
         advanceUntilIdle()
 
         assertEquals(
-            1,
+            2,
             engineWithMcp.streamFromPreparedCallCount,
-            "LLM must run only once; MCP chain without follow-up assistant"
+            "Первый ответ с [TOOL:], затем обязательный раунд продолжения после MCP-батча"
+        )
+        val assistantTexts = agent.agent.value?.messages
+            ?.filter { it.role == "assistant" }
+            ?.map { it.message }
+            .orEmpty()
+        val merged = assistantTexts.find { it.contains("mcp_a") && it.contains("mcp_b") }
+        assertNotNull(merged, "ожидается пузырь с результатами обоих MCP: $assistantTexts")
+        assertTrue(merged!!.contains("first(q1)"), merged)
+        assertTrue(merged.contains("second(q2)"), merged)
+    }
+
+    @Test
+    fun ordinary_suppressToolsBatch_preservesProseAroundToolLines() = runTest {
+        val mcpA = object : AgentTool {
+            override val name = "mcp_a"
+            override val description = "stub"
+            override val suppressLlmFollowUp = true
+            override suspend fun execute(input: String) = "first($input)"
+        }
+        val mcpB = object : AgentTool {
+            override val name = "mcp_b"
+            override val description = "stub"
+            override val suppressLlmFollowUp = true
+            override suspend fun execute(input: String) = "second($input)"
+        }
+        val engineWithMcp = FakeAgentEngine(repository, memoryManager, listOf(mcpA, mcpB))
+        engineWithMcp.queueResponse(
+            listOf("Файл будет сохранён.\n\n[TOOL: mcp_a(q1)] [TOOL: mcp_b(q2)]")
+        )
+        engineWithMcp.queueResponse(listOf("Дальше по плану."))
+
+        val agent = AutonomousAgent(agentId, repository, engineWithMcp, backgroundScope)
+        advanceUntilIdle()
+
+        agent.sendMessage("run both").collect()
+        advanceUntilIdle()
+
+        val assistantTexts = agent.agent.value?.messages
+            ?.filter { it.role == "assistant" }
+            ?.map { it.message }
+            .orEmpty()
+        val withProseAndTools = assistantTexts.find {
+            it.contains("Файл будет сохранён") && it.contains("mcp_b")
+        }
+        assertNotNull(withProseAndTools, assistantTexts.toString())
+    }
+
+    @Test
+    fun ordinary_suppressToolThenNonSuppressToolInOneResponse_runsBothBeforeFollowUpLlm() = runTest {
+        var fetchCalls = 0
+        var writeCalls = 0
+        val fetch = object : AgentTool {
+            override val name = "mcp_fetch"
+            override val description = "stub"
+            override val suppressLlmFollowUp = true
+            override suspend fun execute(input: String): String {
+                fetchCalls++
+                return "rates($input)"
+            }
+        }
+        val writer = object : AgentTool {
+            override val name = "write_file"
+            override val description = "stub"
+            override val suppressLlmFollowUp = false
+            override suspend fun execute(input: String): String {
+                writeCalls++
+                return "saved($input)"
+            }
+        }
+        val engineMixed = FakeAgentEngine(repository, memoryManager, listOf(fetch, writer))
+        engineMixed.queueResponse(listOf("[TOOL: mcp_fetch(USD)] [TOOL: write_file(/tmp/q.txt)]"))
+        engineMixed.queueResponse(listOf("Готово."))
+
+        val agent = AutonomousAgent(agentId, repository, engineMixed, backgroundScope)
+        advanceUntilIdle()
+
+        agent.sendMessage("save quotes").collect()
+        advanceUntilIdle()
+
+        assertEquals(1, fetchCalls)
+        assertEquals(1, writeCalls)
+        assertEquals(
+            2,
+            engineMixed.streamFromPreparedCallCount,
+            "LLM: ответ с двумя TOOL, затем финальный ответ после write_file"
         )
         val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
-        val t = assistant.message
-        assertTrue(t.contains("mcp_a") && t.contains("first(q1)"), t)
-        assertTrue(t.contains("mcp_b") && t.contains("second(q2)"), t)
+        assertTrue(assistant.message.contains("Готово"), assistant.message)
     }
 
     @Test
@@ -201,6 +285,7 @@ class AutonomousAgentStressTest {
         }
         val engineWithStub = FakeAgentEngine(repository, memoryManager, listOf(stubTool))
         engineWithStub.queueResponse(listOf("Calling MCP.\nTOOL_CALL: news_search\nINPUT: tech"))
+        engineWithStub.queueResponse(listOf("Готово: новости получены."))
 
         val agent = AutonomousAgent(agentId, repository, engineWithStub, backgroundScope)
         advanceUntilIdle()
@@ -209,9 +294,9 @@ class AutonomousAgentStressTest {
         advanceUntilIdle()
 
         assertEquals(
-            1,
+            2,
             engineWithStub.streamFromPreparedCallCount,
-            "With suppressLlmFollowUp, second LLM stream must not run"
+            "После одного MCP без второго [TOOL:] в том же ответе — второй раунд LLM (продолжение без «продолжай»)"
         )
         val messages = agent.agent.value?.messages ?: emptyList()
         assertTrue(messages.any { it.message.contains("Headlines: ok") }, "Tool output should be in history")

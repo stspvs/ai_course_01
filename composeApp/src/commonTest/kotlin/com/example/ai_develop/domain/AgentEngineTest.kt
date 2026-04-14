@@ -215,6 +215,13 @@ class AgentEngineTest {
     }
 
     @Test
+    fun testStripFirstToolInvocation() {
+        val a = "[TOOL: mcp_a(x)] [TOOL: mcp_b(y)]"
+        assertEquals("[TOOL: mcp_b(y)]", engine.stripFirstToolInvocation(a).trim())
+        assertEquals("", engine.stripFirstToolInvocation("[TOOL: only(z)]").trim())
+    }
+
+    @Test
     fun testStripToolSyntaxRemovesBracketAndToolCallFormats() {
         val a = "Пояснение.\n\n[TOOL: news_search(query=\"x\", pageSize=5)]"
         assertEquals("Пояснение.", engine.stripToolSyntaxFromAssistantText(a))

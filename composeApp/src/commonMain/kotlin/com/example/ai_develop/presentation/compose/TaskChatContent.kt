@@ -696,9 +696,11 @@ private fun TaskMessageBubbleFrame(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember(message.id) { mutableStateOf(false) }
-    val full = message.message
-    val collapsible = taskBubbleCollapsible(full, DEFAULT_TASK_BUBBLE_PREVIEW_CHARS)
-    val displayText = taskBubbleDisplayText(full, expanded, DEFAULT_TASK_BUBBLE_PREVIEW_CHARS)
+    val segments = remember(message.message) { parseMessageBodySegments(message.message) }
+    val textOnly = remember(message.message) { messageBodyTextOnly(segments) }
+    val collapsible = taskBubbleCollapsible(textOnly, DEFAULT_TASK_BUBBLE_PREVIEW_CHARS)
+    val collapsedPreviewText = taskBubbleDisplayText(textOnly, expanded, DEFAULT_TASK_BUBBLE_PREVIEW_CHARS)
+    val showInterleaved = expanded || !collapsible
 
     val stageColor = message.taskState?.let { getStageColor(it, task) } ?: MaterialTheme.colorScheme.secondaryContainer
     val bgColor = if (message.source == SourceType.USER) MaterialTheme.colorScheme.primaryContainer else stageColor.copy(alpha = 0.1f)
@@ -729,7 +731,37 @@ private fun TaskMessageBubbleFrame(
                 )
                 Spacer(Modifier.height(4.dp))
             }
-            Text(displayText)
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (showInterleaved) {
+                        segments.forEach { seg ->
+                            when (seg) {
+                                is MessageBodySegment.Text -> Text(
+                                    text = seg.content,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                is MessageBodySegment.Image -> ChatImageFromUrl(
+                                    url = seg.url,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    } else {
+                        if (collapsedPreviewText.isNotEmpty()) {
+                            Text(
+                                text = collapsedPreviewText,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                        segments.filterIsInstance<MessageBodySegment.Image>().forEach { seg ->
+                            ChatImageFromUrl(
+                                url = seg.url,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
             if (collapsible) {
                 Spacer(Modifier.height(6.dp))
                 Row(
@@ -751,16 +783,6 @@ private fun TaskMessageBubbleFrame(
                         text = if (expanded) "Свернуть" else "Показать полностью",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-            val imageUrls = remember(message.message) { imageUrlsInOrder(message.message) }
-            if (imageUrls.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                imageUrls.forEach { url ->
-                    ChatImageFromUrl(
-                        url = url,
-                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }

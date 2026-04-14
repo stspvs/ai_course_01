@@ -162,6 +162,15 @@ open class AgentEngine(
         return t.trim()
     }
 
+    /** Удаляет первый вызов инструмента из текста (тот же порядок, что [parseAllToolCalls]). */
+    open fun stripFirstToolInvocation(text: String): String {
+        val m = pickFirstToolMatch(text) ?: return text
+        return buildString {
+            append(text.substring(0, m.range.first))
+            append(text.substring(m.range.last + 1))
+        }
+    }
+
     /**
      * Один блок ответа для UI/истории: опционально преамбула модели, затем пометка инструмента и результат.
      * В [AutonomousAgent] преамбула не используется — ответ формирует только инструмент.
@@ -214,10 +223,13 @@ open class AgentEngine(
                 appendLine()
                 appendLine("TOOL USE (mandatory when applicable):")
                 appendLine("- For exchange rates, arithmetic, or any data that comes from a listed tool, you MUST call that tool. Do not invent or guess numbers.")
-                appendLine("- Output one or more tool lines, each in this exact form (then stop). For several tools in one message, repeat the pattern, e.g. [TOOL: a(x)] [TOOL: b(y)]:")
+                appendLine("- Output one or more tool lines, each in this exact form. For several tools in one message, repeat the pattern, e.g. [TOOL: a(x)] [TOOL: b(y)]:")
                 appendLine("[TOOL: toolname(input)]")
                 appendLine("Use the exact tool name from the list above. Example: [TOOL: my-tool-name(input)]")
                 appendLine("- If a tool expects a list of strings (see schema), put comma-separated values or a JSON array in parentheses, e.g. [TOOL: tool-name(USD,EUR)] or [TOOL: tool-name([\"USD\",\"EUR\"])].")
+                appendLine("- If the user asks to fetch data AND save/export/write to a file in one request: emit ALL required [TOOL: ...] lines in this single reply (data first, then write/save). Do not stop after only the first tool.")
+                appendLine("- After the last [TOOL: ...] line, add a short user-facing confirmation in the user's language (e.g. Russian): that data was saved, with file path or name when known. This text is shown in chat together with tool results; do not rely on tool JSON alone for that reassurance.")
+                appendLine("- Long requests (several charts + save file, etc.) may require multiple [TOOL: ...] lines in one reply, or a second model turn after the first tool results appear — the app will continue automatically; still prefer packing all tools into one reply when possible.")
             }.toString()
         } else ""
 
