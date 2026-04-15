@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.example.ai_develop.data.EmbeddingFloatCodec
 import com.example.ai_develop.data.RagDocumentSummary
 import com.example.ai_develop.data.RagStoredChunk
+import com.example.ai_develop.domain.ChunkStrategy
 import com.example.ai_develop.domain.OllamaDefaultModelName
 import com.example.ai_develop.domain.OllamaUiModelNames
 import com.example.ai_develop.domain.TextChunk
@@ -171,6 +173,109 @@ private fun OllamaEmbedModelDropdown(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChunkStrategyDropdown(
+    value: ChunkStrategy,
+    onValueChange: (ChunkStrategy) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = value.labelRu,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Стратегия чанкинга") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            ChunkStrategy.entries.forEach { strategy ->
+                DropdownMenuItem(
+                    text = { Text(strategy.labelRu) },
+                    onClick = {
+                        onValueChange(strategy)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private data class ChunkParamLabels(
+    val chunkLabel: String,
+    val overlapLabel: String,
+    val hint: String,
+)
+
+private fun chunkParamLabels(strategy: ChunkStrategy): ChunkParamLabels = when (strategy) {
+    ChunkStrategy.FIXED_WINDOW -> ChunkParamLabels(
+        chunkLabel = "Длина скользящего окна (симв.)",
+        overlapLabel = "Перекрытие соседних окон (симв.)",
+        hint = "Текст режется окнами фиксированной длины; следующее окно сдвигается на «длина − перекрытие».",
+    )
+    ChunkStrategy.PARAGRAPH -> ChunkParamLabels(
+        chunkLabel = "Макс. длина абзаца-чанка (симв.)",
+        overlapLabel = "Перекрытие при нарезке длинного абзаца (симв.)",
+        hint = "Сначала границы по пустым строкам; если абзац длиннее лимита — дополнительная нарезка с перекрытием.",
+    )
+    ChunkStrategy.SENTENCE -> ChunkParamLabels(
+        chunkLabel = "Макс. длина блока предложений (симв.)",
+        overlapLabel = "Перекрытие при нарезке длинного предложения (симв.)",
+        hint = "Предложения склеиваются до лимита; если одно предложение длиннее — режется окном с перекрытием.",
+    )
+    ChunkStrategy.RECURSIVE -> ChunkParamLabels(
+        chunkLabel = "Макс. длина части после разбиения (симв.)",
+        overlapLabel = "Перекрытие при нарезке длинной части (симв.)",
+        hint = "Сначала разделители: пустая строка, перевод строки, «. », пробел; куски больше лимита режутся окном.",
+    )
+}
+
+@Composable
+private fun ChunkSizeOverlapFields(
+    strategy: ChunkStrategy,
+    chunkSize: Int,
+    overlap: Int,
+    onChunkSize: (Int) -> Unit,
+    onOverlap: (Int) -> Unit,
+) {
+    val labels = chunkParamLabels(strategy)
+    Text("Параметры чанкинга", style = MaterialTheme.typography.titleSmall)
+    Text(
+        labels.hint,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.secondary,
+    )
+    Spacer(Modifier.height(4.dp))
+    key(strategy) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = chunkSize.toString(),
+                onValueChange = { it.toIntOrNull()?.let(onChunkSize) },
+                label = { Text(labels.chunkLabel) },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = overlap.toString(),
+                onValueChange = { it.toIntOrNull()?.let(onOverlap) },
+                label = { Text(labels.overlapLabel) },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+            )
+        }
+    }
+}
+
 @Composable
 fun RagEmbeddingsContent(viewModel: RagEmbeddingsViewModel = koinViewModel()) {
     val ui by viewModel.uiState.collectAsState()
@@ -178,7 +283,7 @@ fun RagEmbeddingsContent(viewModel: RagEmbeddingsViewModel = koinViewModel()) {
     val topScroll = rememberScrollState()
     val detailScroll = rememberScrollState()
     val selectedDoc = saved.find { it.id == ui.expandedDbDocId }
-    var bottomPanelExpanded by remember { mutableStateOf(true) }
+    var bottomPanelExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -218,22 +323,17 @@ fun RagEmbeddingsContent(viewModel: RagEmbeddingsViewModel = koinViewModel()) {
                 value = ui.ollamaModel,
                 onValueChange = viewModel::setOllamaModel,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = ui.chunkSize.toString(),
-                    onValueChange = { it.toIntOrNull()?.let(viewModel::setChunkSize) },
-                    label = { Text("Размер чанка (симв.)") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = ui.overlap.toString(),
-                    onValueChange = { it.toIntOrNull()?.let(viewModel::setOverlap) },
-                    label = { Text("Overlap") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                )
-            }
+            ChunkStrategyDropdown(
+                value = ui.chunkStrategy,
+                onValueChange = viewModel::setChunkStrategy,
+            )
+            ChunkSizeOverlapFields(
+                strategy = ui.chunkStrategy,
+                chunkSize = ui.chunkSize,
+                overlap = ui.overlap,
+                onChunkSize = viewModel::setChunkSize,
+                onOverlap = viewModel::setOverlap,
+            )
 
             ui.error?.let { err ->
                 Text(err, color = MaterialTheme.colorScheme.error)
@@ -486,7 +586,7 @@ private fun RagDocumentDetailSection(
 
     Text(selectedDoc.title, style = MaterialTheme.typography.titleSmall)
     Text(
-        "${selectedDoc.sourceFileName} · ${selectedDoc.ollamaModel} · chunk=${selectedDoc.chunkSize} overlap=${selectedDoc.overlap}",
+        "${selectedDoc.sourceFileName} · ${selectedDoc.ollamaModel} · chunk=${selectedDoc.chunkSize} overlap=${selectedDoc.overlap} · ${ChunkStrategy.fromId(selectedDoc.chunkStrategy).labelRu}",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.secondary,
     )

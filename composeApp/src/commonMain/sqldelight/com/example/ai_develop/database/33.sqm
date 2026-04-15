@@ -1,0 +1,5 @@
+ALTER TABLE RagDocumentEntity ADD COLUMN sourcePath TEXT NOT NULL DEFAULT '';
+
+UPDATE RagDocumentEntity SET sourcePath = id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rag_document_source ON RagDocumentEntity(sourceFileName, sourcePath);

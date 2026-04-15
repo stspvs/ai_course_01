@@ -14,9 +14,11 @@ data class RagDocumentSummary(
     val id: String,
     val title: String,
     val sourceFileName: String,
+    val sourcePath: String,
     val ollamaModel: String,
     val chunkSize: Long,
     val overlap: Long,
+    val chunkStrategy: String,
     val createdAt: Long,
     val chunkCount: Int,
 )
@@ -63,9 +65,11 @@ class RagEmbeddingRepository(
                         id = id,
                         title = row.title,
                         sourceFileName = row.sourceFileName,
+                        sourcePath = row.sourcePath,
                         ollamaModel = row.ollamaModel,
                         chunkSize = row.chunkSize,
                         overlap = row.overlap,
+                        chunkStrategy = row.chunkStrategy,
                         createdAt = row.createdAt,
                         chunkCount = count,
                     )
@@ -81,18 +85,37 @@ class RagEmbeddingRepository(
         queries.getChunksForRagDocument(documentId).executeAsList().map { it.toStoredChunk() }
     }
 
+    /**
+     * Сохраняет документ и чанки. Перед вставкой удаляются все строки для того же источника:
+     * то же [RagDocumentEntity.sourceFileName], и путь совпадает с нормализованным [RagDocumentEntity.sourcePath],
+     * либо это строка после миграции БД (`sourcePath = id`), чтобы не плодить дубли.
+     *
+     * @return true, если до вставки уже были строки для этого источника
+     */
     suspend fun insertDocumentWithChunks(
         document: RagDocumentEntity,
         chunks: List<RagChunkEntity>,
-    ) = withContext(Dispatchers.Default) {
+    ): Boolean = withContext(Dispatchers.Default) {
+        val pathKey = normalizeRagSourcePath(document.sourcePath)
+        var replaced = false
         db.transaction {
+            replaced = queries.selectRagDocumentIdsForSameFileSource(
+                sourceFileName = document.sourceFileName,
+                sourcePath = pathKey,
+            ).executeAsList().isNotEmpty()
+            queries.deleteRagDocumentsForSameFileSource(
+                sourceFileName = document.sourceFileName,
+                sourcePath = pathKey,
+            )
             queries.insertRagDocument(
                 id = document.id,
                 title = document.title,
                 sourceFileName = document.sourceFileName,
+                sourcePath = pathKey,
                 ollamaModel = document.ollamaModel,
                 chunkSize = document.chunkSize,
                 overlap = document.overlap,
+                chunkStrategy = document.chunkStrategy,
                 createdAt = document.createdAt,
                 fullText = document.fullText,
             )
@@ -108,6 +131,7 @@ class RagEmbeddingRepository(
                 )
             }
         }
+        replaced
     }
 
     suspend fun deleteDocument(id: String) = withContext(Dispatchers.Default) {

@@ -6,6 +6,7 @@ import com.example.ai_develop.data.EmbeddingFloatCodec
 import com.example.ai_develop.data.OllamaEmbeddingClient
 import com.example.ai_develop.data.RagEmbeddingRepository
 import com.example.ai_develop.data.RagStoredChunk
+import com.example.ai_develop.domain.ChunkStrategy
 import com.example.ai_develop.domain.OllamaDefaultModelName
 import com.example.ai_develop.domain.TextChunk
 import com.example.ai_develop.domain.TextChunker
@@ -28,6 +29,7 @@ data class RagEmbeddingsUiState(
     val sourceFileName: String = "",
     val fullText: String = "",
     val ollamaModel: String = OllamaDefaultModelName,
+    val chunkStrategy: ChunkStrategy = ChunkStrategy.FIXED_WINDOW,
     val chunkSize: Int = 512,
     val overlap: Int = 64,
     val chunks: List<TextChunk> = emptyList(),
@@ -71,10 +73,15 @@ class RagEmbeddingsViewModel(
         recomputeChunks()
     }
 
+    fun setChunkStrategy(strategy: ChunkStrategy) {
+        _ui.update { it.copy(chunkStrategy = strategy, error = null, saveMessage = null) }
+        recomputeChunks()
+    }
+
     fun recomputeChunks() {
         val s = _ui.value
         val chunks = try {
-            TextChunker.chunk(s.fullText, s.chunkSize, s.overlap)
+            TextChunker.chunk(s.fullText, s.chunkStrategy, s.chunkSize, s.overlap)
         } catch (e: IllegalArgumentException) {
             _ui.update { it.copy(chunks = emptyList(), embeddings = null, error = e.message) }
             return
@@ -159,9 +166,11 @@ class RagEmbeddingsViewModel(
                     id = docId,
                     title = title,
                     sourceFileName = s.sourceFileName.ifBlank { "(вставка)" },
+                    sourcePath = s.sourcePath.orEmpty(),
                     ollamaModel = s.ollamaModel.trim().ifEmpty { OllamaDefaultModelName },
                     chunkSize = s.chunkSize.toLong(),
                     overlap = s.overlap.toLong(),
+                    chunkStrategy = s.chunkStrategy.id,
                     createdAt = now,
                     fullText = s.fullText,
                 )
@@ -176,8 +185,17 @@ class RagEmbeddingsViewModel(
                         embeddingBlob = EmbeddingFloatCodec.floatArrayToLittleEndianBytes(emb[idx]),
                     )
                 }
-                ragRepository.insertDocumentWithChunks(doc, chunkRows)
-                _ui.update { it.copy(saveMessage = "Сохранено в базу", error = null) }
+                val replaced = ragRepository.insertDocumentWithChunks(doc, chunkRows)
+                _ui.update {
+                    it.copy(
+                        saveMessage = if (replaced) {
+                            "Документ для этого файла обновлён в базе"
+                        } else {
+                            "Сохранено в базу"
+                        },
+                        error = null,
+                    )
+                }
             } catch (e: Exception) {
                 _ui.update { it.copy(error = e.message ?: e.toString(), saveMessage = null) }
             }
@@ -229,5 +247,28 @@ class RagEmbeddingsViewModel(
 
     fun dismissMessages() {
         _ui.update { it.copy(error = null, saveMessage = null) }
+    }
+
+    /**
+     * Для unit-тестов: задаёт текст без платформенного диалога выбора файла.
+     * [internal] — виден только в модуле composeApp (в т.ч. commonTest).
+     */
+    internal fun setSourceTextForTests(
+        fullText: String,
+        sourceFileName: String = "test.txt",
+        sourcePath: String = "/test/doc.txt",
+    ) {
+        _ui.update {
+            it.copy(
+                sourcePath = sourcePath,
+                sourceFileName = sourceFileName,
+                fullText = fullText,
+                chunks = emptyList(),
+                embeddings = null,
+                error = null,
+                saveMessage = null,
+            )
+        }
+        recomputeChunks()
     }
 }

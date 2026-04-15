@@ -218,9 +218,11 @@ CREATE TABLE IF NOT EXISTS RagDocumentEntity (
     id TEXT NOT NULL PRIMARY KEY,
     title TEXT NOT NULL,
     sourceFileName TEXT NOT NULL,
+    sourcePath TEXT NOT NULL,
     ollamaModel TEXT NOT NULL,
     chunkSize INTEGER NOT NULL,
     overlap INTEGER NOT NULL,
+    chunkStrategy TEXT NOT NULL,
     createdAt INTEGER NOT NULL,
     fullText TEXT NOT NULL
 );
@@ -240,9 +242,19 @@ CREATE INDEX IF NOT EXISTS idx_rag_chunk_document ON RagChunkEntity(documentId);
 
 insertRagDocument:
 INSERT OR REPLACE INTO RagDocumentEntity(
-    id, title, sourceFileName, ollamaModel, chunkSize, overlap, createdAt, fullText
+    id, title, sourceFileName, sourcePath, ollamaModel, chunkSize, overlap, chunkStrategy, createdAt, fullText
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getRagDocumentBySource:
+SELECT * FROM RagDocumentEntity WHERE sourceFileName = ? AND sourcePath = ? LIMIT 1;
+
+-- Тот же файл, что и при сохранении: имя + нормализованный путь, либо старая строка миграции (sourcePath = id)
+selectRagDocumentIdsForSameFileSource:
+SELECT id FROM RagDocumentEntity WHERE sourceFileName = ? AND (sourcePath = ? OR sourcePath = id);
+
+deleteRagDocumentsForSameFileSource:
+DELETE FROM RagDocumentEntity WHERE sourceFileName = ? AND (sourcePath = ? OR sourcePath = id);
 
 insertRagChunk:
 INSERT OR REPLACE INTO RagChunkEntity(

@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class OllamaEmbeddingClientTest {
@@ -63,5 +64,23 @@ class OllamaEmbeddingClientTest {
         val out = sut.embed("m", "x")
         assertEquals(2, out.size)
         assertTrue(abs(EmbeddingNormalization.l2Norm(out) - 1f) < 1e-4f)
+    }
+
+    @Test
+    fun `embed throws when response has no vectors`() = runTest {
+        val mockEngine = MockEngine {
+            respond(
+                content = """{"model": "m", "embeddings": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+        val client = HttpClient(mockEngine) {
+            install(ContentNegotiation) { json(json) }
+        }
+        val sut = OllamaEmbeddingClient(client, baseUrl = "http://127.0.0.1:11434")
+        assertFailsWith<IllegalStateException> {
+            sut.embed("m", "x")
+        }
     }
 }
