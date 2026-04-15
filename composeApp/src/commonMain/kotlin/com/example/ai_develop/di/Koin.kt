@@ -2,6 +2,8 @@ package com.example.ai_develop.di
 
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
+import com.example.ai_develop.data.OllamaEmbeddingClient
+import com.example.ai_develop.data.RagEmbeddingRepository
 import com.example.ai_develop.data.GraylogSettingsRepository
 import com.example.ai_develop.data.McpRepository
 import com.example.ai_develop.data.SqlDelightChatRepository
@@ -14,6 +16,7 @@ import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.GraylogSettingsViewModel
 import com.example.ai_develop.presentation.McpServersViewModel
 import com.example.ai_develop.platform.GraylogPlatform
+import com.example.ai_develop.presentation.RagEmbeddingsViewModel
 import com.example.ai_develop.presentation.TaskViewModel
 import com.example.ai_develop.presentation.strategy.StrategyDelegateFactory
 import io.ktor.client.HttpClient
@@ -135,6 +138,8 @@ val commonModule = module {
     }
 
     single<McpRepository> { SqlDelightMcpRepository(get()) }
+    single { OllamaEmbeddingClient(get()) }
+    single { RagEmbeddingRepository(get()) }
     single<GraylogSettingsRepository> { SqlDelightGraylogSettingsRepository(get()) }
     single<GraylogPlatform> { GraylogPlatform() }
 
@@ -169,6 +174,7 @@ val commonModule = module {
     viewModelOf(::LLMViewModel)
     viewModelOf(::McpServersViewModel)
     viewModelOf(::GraylogSettingsViewModel)
+    viewModelOf(::RagEmbeddingsViewModel)
     viewModel {
         TaskViewModel(
             get(),

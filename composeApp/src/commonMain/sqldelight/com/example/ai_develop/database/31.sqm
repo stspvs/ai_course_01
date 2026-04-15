@@ -1,0 +1,23 @@
+CREATE TABLE RagDocumentEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    sourceFileName TEXT NOT NULL,
+    ollamaModel TEXT NOT NULL,
+    chunkSize INTEGER NOT NULL,
+    overlap INTEGER NOT NULL,
+    createdAt INTEGER NOT NULL,
+    fullText TEXT NOT NULL
+);
+
+CREATE TABLE RagChunkEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    documentId TEXT NOT NULL,
+    chunkIndex INTEGER NOT NULL,
+    startOffset INTEGER NOT NULL,
+    endOffset INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    embeddingBlob BLOB NOT NULL,
+    FOREIGN KEY(documentId) REFERENCES RagDocumentEntity(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_rag_chunk_document ON RagChunkEntity(documentId);

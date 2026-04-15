@@ -3,6 +3,21 @@ package com.example.ai_develop.domain
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 
+/** Модель Ollama по умолчанию (новые агенты, переключение провайдера, RAG). */
+const val OllamaDefaultModelName = "qwen2.5:1.5b"
+
+/**
+ * Имена моделей в выпадающем списке UI для провайдера Ollama (редактор агента, RAG и т.д.).
+ */
+val OllamaUiModelNames: List<String> = listOf(
+    OllamaDefaultModelName,
+    "deepseek-r1:8b",
+    "qwen2.5:3b",
+    "qwen2.5:7b",
+    "llama3.2:3b",
+    "gpt-oss:20b",
+)
+
 @Serializable
 sealed class LLMProvider {
     abstract val model: String
@@ -35,7 +50,7 @@ sealed class LLMProvider {
     @Serializable
     @SerialName("ollama")
     data class Ollama(
-        override val model: String = "deepseek-r1:8b"
+        override val model: String = OllamaDefaultModelName
     ) : LLMProvider() {
         override val name: String = "Ollama"
     }

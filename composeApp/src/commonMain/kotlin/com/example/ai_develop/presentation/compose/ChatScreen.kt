@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -86,6 +87,17 @@ fun ChatScreen(viewModel: LLMViewModel) {
                         indicatorColor = Color(0xFFE1BEE7)
                     )
                 )
+                NavigationBarItem(
+                    selected = selectedTab == 5,
+                    onClick = { selectedTab = 5 },
+                    icon = { Icon(Icons.Default.Description, contentDescription = "RAG") },
+                    label = { Text("RAG") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color(0xFF4A148C),
+                        selectedTextColor = Color(0xFF4A148C),
+                        indicatorColor = Color(0xFFE1BEE7)
+                    )
+                )
             }
         }
     ) { padding ->
@@ -129,6 +141,8 @@ fun ChatScreen(viewModel: LLMViewModel) {
                 3 -> TaskChatContent(taskViewModel)
 
                 4 -> McpServersContent()
+
+                5 -> RagEmbeddingsContent()
             }
         }
     }

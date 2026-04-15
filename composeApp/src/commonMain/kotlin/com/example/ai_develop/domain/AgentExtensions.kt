@@ -12,6 +12,24 @@ import kotlin.uuid.Uuid
 val Agent.memoryProvider: LLMProvider
     get() = userProfile?.memoryModelProvider ?: provider
 
+/** Уникальные имена моделей Ollama из основного провайдера и модели памяти в профиле. */
+fun ollamaModelNamesFromAgents(agents: List<Agent>): List<String> {
+    val set = linkedSetOf<String>()
+    for (a in agents) {
+        when (val p = a.provider) {
+            is LLMProvider.Ollama -> p.model.trim().takeIf { it.isNotEmpty() }?.let { set.add(it) }
+            else -> {}
+        }
+        a.userProfile?.memoryModelProvider?.let { mp ->
+            when (mp) {
+                is LLMProvider.Ollama -> mp.model.trim().takeIf { it.isNotEmpty() }?.let { set.add(it) }
+                else -> {}
+            }
+        }
+    }
+    return set.toList()
+}
+
 fun Agent.assistantMessagesCount(): Int {
     return messages.count { it.source == SourceType.ASSISTANT }
 }

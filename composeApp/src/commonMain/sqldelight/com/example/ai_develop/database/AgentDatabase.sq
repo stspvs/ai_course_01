@@ -212,3 +212,52 @@ SELECT * FROM GraylogSettingsEntity WHERE id = 'default';
 upsertGraylogSettings:
 INSERT OR REPLACE INTO GraylogSettingsEntity(id, webUrl, startCommand)
 VALUES ('default', ?, ?);
+
+-- RAG: документы и чанки с эмбеддингами (BLOB float32 LE)
+CREATE TABLE IF NOT EXISTS RagDocumentEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    sourceFileName TEXT NOT NULL,
+    ollamaModel TEXT NOT NULL,
+    chunkSize INTEGER NOT NULL,
+    overlap INTEGER NOT NULL,
+    createdAt INTEGER NOT NULL,
+    fullText TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS RagChunkEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    documentId TEXT NOT NULL,
+    chunkIndex INTEGER NOT NULL,
+    startOffset INTEGER NOT NULL,
+    endOffset INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    embeddingBlob BLOB NOT NULL,
+    FOREIGN KEY(documentId) REFERENCES RagDocumentEntity(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_chunk_document ON RagChunkEntity(documentId);
+
+insertRagDocument:
+INSERT OR REPLACE INTO RagDocumentEntity(
+    id, title, sourceFileName, ollamaModel, chunkSize, overlap, createdAt, fullText
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+insertRagChunk:
+INSERT OR REPLACE INTO RagChunkEntity(
+    id, documentId, chunkIndex, startOffset, endOffset, text, embeddingBlob
+)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getAllRagDocuments:
+SELECT * FROM RagDocumentEntity ORDER BY createdAt DESC;
+
+getRagDocument:
+SELECT * FROM RagDocumentEntity WHERE id = ?;
+
+getChunksForRagDocument:
+SELECT * FROM RagChunkEntity WHERE documentId = ? ORDER BY chunkIndex ASC;
+
+deleteRagDocument:
+DELETE FROM RagDocumentEntity WHERE id = ?;

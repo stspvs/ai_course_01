@@ -55,14 +55,7 @@ internal fun LLMSelector(
     val deepSeekModels = listOf("deepseek-chat", "deepseek-coder")
     val openRouterModels = listOf("google/gemini-2.0-flash-001", "anthropic/claude-3.5-sonnet", "openai/gpt-4o", "deepseek/deepseek-r1:free")
     val yandexModels = listOf("yandexgpt-5.1/latest", "yandexgpt-lite/latest", "yandexgpt/latest")
-    val ollamaModels = listOf(
-        "deepseek-r1:8b",
-        "qwen2.5:1.5b",
-        "qwen2.5:3b",
-        "qwen2.5:7b",
-        "llama3.2:3b",
-        "gpt-oss:20b"
-    )
+    val ollamaModels = OllamaUiModelNames
 
     Column(
         modifier = Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.4f), RoundedCornerShape(12.dp)).padding(4.dp),
