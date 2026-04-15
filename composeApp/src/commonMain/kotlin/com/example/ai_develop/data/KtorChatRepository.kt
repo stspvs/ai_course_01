@@ -19,7 +19,8 @@ class KtorChatRepository(
     private val deepSeekKey: String,
     private val yandexKey: String,
     private val yandexFolderId: String,
-    private val openRouterKey: String
+    private val openRouterKey: String,
+    private val ollamaBaseUrl: String
 ) : ChatRepository {
 
     private val json = Json {
@@ -33,6 +34,7 @@ class KtorChatRepository(
             is LLMProvider.DeepSeek -> DeepSeekHandler(deepSeekKey, provider, json)
             is LLMProvider.Yandex -> YandexHandler(yandexKey, yandexFolderId, provider, json)
             is LLMProvider.OpenRouter -> OpenRouterHandler(openRouterKey, provider, json)
+            is LLMProvider.Ollama -> OllamaHandler(ollamaBaseUrl, provider, json)
         }
     }
 

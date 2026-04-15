@@ -31,4 +31,12 @@ sealed class LLMProvider {
     ) : LLMProvider() {
         override val name: String = "OpenRouter"
     }
+
+    @Serializable
+    @SerialName("ollama")
+    data class Ollama(
+        override val model: String = "deepseek-r1:8b"
+    ) : LLMProvider() {
+        override val name: String = "Ollama"
+    }
 }

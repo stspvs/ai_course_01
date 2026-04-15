@@ -51,10 +51,18 @@ internal fun LLMSelector(
     var providerExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
 
-    val providers = listOf("DeepSeek", "OpenRouter")
+    val providers = listOf("DeepSeek", "OpenRouter", "Ollama")
     val deepSeekModels = listOf("deepseek-chat", "deepseek-coder")
     val openRouterModels = listOf("google/gemini-2.0-flash-001", "anthropic/claude-3.5-sonnet", "openai/gpt-4o", "deepseek/deepseek-r1:free")
     val yandexModels = listOf("yandexgpt-5.1/latest", "yandexgpt-lite/latest", "yandexgpt/latest")
+    val ollamaModels = listOf(
+        "deepseek-r1:8b",
+        "qwen2.5:1.5b",
+        "qwen2.5:3b",
+        "qwen2.5:7b",
+        "llama3.2:3b",
+        "gpt-oss:20b"
+    )
 
     Column(
         modifier = Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.4f), RoundedCornerShape(12.dp)).padding(4.dp),
@@ -62,7 +70,12 @@ internal fun LLMSelector(
     ) {
         ExposedDropdownMenuBox(expanded = providerExpanded, onExpandedChange = { providerExpanded = it }) {
             OutlinedTextField(
-                value = when(currentProvider){ is LLMProvider.Yandex -> "Yandex"; is LLMProvider.DeepSeek -> "DeepSeek"; is LLMProvider.OpenRouter -> "OpenRouter" },
+                value = when (currentProvider) {
+                    is LLMProvider.Yandex -> "Yandex"
+                    is LLMProvider.DeepSeek -> "DeepSeek"
+                    is LLMProvider.OpenRouter -> "OpenRouter"
+                    is LLMProvider.Ollama -> "Ollama"
+                },
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Провайдер") },
@@ -73,8 +86,20 @@ internal fun LLMSelector(
             ExposedDropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
                 providers.forEach { p ->
                     DropdownMenuItem(text = { Text(p) }, onClick = {
-                        val firstModel = when(p){ "DeepSeek" -> deepSeekModels.first(); "OpenRouter" -> openRouterModels.first(); else -> yandexModels.first() }
-                        onProviderChange(when(p){ "DeepSeek" -> LLMProvider.DeepSeek(firstModel); "OpenRouter" -> LLMProvider.OpenRouter(firstModel); else -> LLMProvider.Yandex(firstModel) })
+                        val firstModel = when (p) {
+                            "DeepSeek" -> deepSeekModels.first()
+                            "OpenRouter" -> openRouterModels.first()
+                            "Ollama" -> ollamaModels.first()
+                            else -> yandexModels.first()
+                        }
+                        onProviderChange(
+                            when (p) {
+                                "DeepSeek" -> LLMProvider.DeepSeek(firstModel)
+                                "OpenRouter" -> LLMProvider.OpenRouter(firstModel)
+                                "Ollama" -> LLMProvider.Ollama(firstModel)
+                                else -> LLMProvider.Yandex(firstModel)
+                            }
+                        )
                         providerExpanded = false
                     })
                 }
@@ -92,10 +117,22 @@ internal fun LLMSelector(
                 shape = RoundedCornerShape(12.dp)
             )
             ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
-                val models = when(currentProvider){ is LLMProvider.DeepSeek -> deepSeekModels; is LLMProvider.OpenRouter -> openRouterModels; is LLMProvider.Yandex -> yandexModels }
+                val models = when (currentProvider) {
+                    is LLMProvider.DeepSeek -> deepSeekModels
+                    is LLMProvider.OpenRouter -> openRouterModels
+                    is LLMProvider.Yandex -> yandexModels
+                    is LLMProvider.Ollama -> ollamaModels
+                }
                 models.forEach { m ->
                     DropdownMenuItem(text = { Text(m) }, onClick = {
-                        onProviderChange(when(currentProvider){ is LLMProvider.DeepSeek -> LLMProvider.DeepSeek(m); is LLMProvider.OpenRouter -> LLMProvider.OpenRouter(m); is LLMProvider.Yandex -> LLMProvider.Yandex(m) })
+                        onProviderChange(
+                            when (currentProvider) {
+                                is LLMProvider.DeepSeek -> LLMProvider.DeepSeek(m)
+                                is LLMProvider.OpenRouter -> LLMProvider.OpenRouter(m)
+                                is LLMProvider.Yandex -> LLMProvider.Yandex(m)
+                                is LLMProvider.Ollama -> LLMProvider.Ollama(m)
+                            }
+                        )
                         modelExpanded = false
                     })
                 }
@@ -110,8 +147,8 @@ internal fun TemperatureSlider(
     provider: LLMProvider,
     onTempChange: (Double) -> Unit
 ) {
-    val isDeepSeek = provider is LLMProvider.DeepSeek
-    val maxTemp = if (isDeepSeek) 2.0 else 1.0
+    val wideTempRange = provider is LLMProvider.DeepSeek || provider is LLMProvider.Ollama
+    val maxTemp = if (wideTempRange) 2.0 else 1.0
     val coercedTemp = temp.coerceIn(0.0, maxTemp)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -133,7 +170,7 @@ internal fun TemperatureSlider(
             value = coercedTemp.toFloat(),
             onValueChange = { onTempChange(it.toDouble()) },
             valueRange = 0f..maxTemp.toFloat(),
-            steps = if (isDeepSeek) 19 else 9,
+            steps = if (wideTempRange) 19 else 9,
             colors = SliderDefaults.colors(
                 thumbColor = Color(0xFF4A148C),
                 activeTrackColor = Color(0xFF4A148C)

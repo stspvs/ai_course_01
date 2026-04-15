@@ -289,3 +289,81 @@ internal class OpenRouterHandler(
         return contentBuilder.toString()
     }
 }
+
+internal class OllamaHandler(
+    private val baseUrl: String,
+    private val provider: LLMProvider.Ollama,
+    private val json: Json
+) : LLMHandler {
+    override fun buildUrl(platform: Platform): String {
+        return baseUrl.trimEnd('/') + "/v1/chat/completions"
+    }
+
+    override fun buildHeaders(): Map<String, String> = emptyMap()
+
+    override fun buildChatRequestBody(
+        messages: List<ChatMessage>,
+        systemPrompt: String,
+        maxTokens: Int,
+        temperature: Double,
+        stopWord: String,
+        isJsonMode: Boolean,
+        stream: Boolean
+    ): String {
+        val apiMessages = mutableListOf<Message>()
+        if (systemPrompt.isNotBlank()) apiMessages.add(Message(role = "system", content = systemPrompt))
+        messages.forEach { msg -> apiMessages.add(Message(role = msg.role, content = msg.content)) }
+
+        val validatedTemp = temperature.coerceIn(0.0, 2.0)
+
+        return json.encodeToString(
+            ChatRequest(
+                model = provider.model,
+                messages = apiMessages,
+                maxTokens = maxTokens,
+                temperature = validatedTemp,
+                stream = stream,
+                responseFormat = if (isJsonMode) ResponseFormat("json_object") else null,
+                stop = if (stopWord.isNotBlank()) listOf(stopWord) else null
+            )
+        )
+    }
+
+    override fun parseStreamChunk(line: String, context: StreamContext): StreamChunkResult {
+        val trimmedLine = line.trim()
+        if (trimmedLine.startsWith("data:")) {
+            val data = trimmedLine.substringAfter("data:").trim()
+            if (data == "[DONE]") return StreamChunkResult.Done
+
+            return try {
+                val chunk = json.decodeFromString<ChatStreamResponse>(data)
+                val delta = chunk.choices?.firstOrNull()?.delta
+                val content = delta?.content ?: delta?.reasoningContent ?: delta?.reasoning
+                if (content != null) StreamChunkResult.Content(content) else StreamChunkResult.Ignore
+            } catch (e: Exception) {
+                StreamChunkResult.Ignore
+            }
+        }
+        return StreamChunkResult.Ignore
+    }
+
+    override fun parseFullResponse(responseText: String): String {
+        return if (responseText.trim().startsWith("data:")) {
+            parseSseResponse(responseText)
+        } else {
+            val resp = json.decodeFromString<ChatResponse>(responseText)
+            resp.choices.firstOrNull()?.message?.content ?: ""
+        }
+    }
+
+    private fun parseSseResponse(responseText: String): String {
+        val contentBuilder = StringBuilder()
+        responseText.split("\n").forEach { line ->
+            val result = parseStreamChunk(line, StreamContext())
+            if (result is StreamChunkResult.Content) {
+                contentBuilder.append(result.delta)
+            }
+        }
+        return contentBuilder.toString()
+    }
+}

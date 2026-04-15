@@ -92,7 +92,8 @@ val commonModule = module {
             deepSeekKey = BuildConfig.DEEPSEEK_KEY,
             yandexKey = BuildConfig.YANDEX_KEY,
             yandexFolderId = BuildConfig.YANDEX_FOLDER_ID,
-            openRouterKey = BuildConfig.OPENROUTER_KEY
+            openRouterKey = BuildConfig.OPENROUTER_KEY,
+            ollamaBaseUrl = BuildConfig.OLLAMA_BASE_URL
         )
     }
 

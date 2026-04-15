@@ -84,4 +84,30 @@ class LLMHandlersTest {
         assertTrue(result2 is StreamChunkResult.Content)
         assertEquals("e", (result2 as StreamChunkResult.Content).delta)
     }
+
+    @Test
+    fun testOllamaHandlerBuildRequestBody() {
+        val provider = LLMProvider.Ollama("deepseek-r1:8b")
+        val handler = OllamaHandler("http://127.0.0.1:11434", provider, json)
+        val messages = listOf(ChatMessage(message = "Hello", source = SourceType.USER))
+
+        val bodyString = handler.buildChatRequestBody(
+            messages = messages,
+            systemPrompt = "System",
+            maxTokens = 100,
+            temperature = 0.7,
+            stopWord = "",
+            isJsonMode = false,
+            stream = true
+        )
+
+        val body = json.parseToJsonElement(bodyString).jsonObject
+        assertEquals("deepseek-r1:8b", body["model"]?.jsonPrimitive?.content)
+        assertEquals(100, body["max_tokens"]?.jsonPrimitive?.int)
+        assertEquals(true, body["stream"]?.jsonPrimitive?.boolean)
+
+        val apiMessages = body["messages"]?.jsonArray
+        assertEquals(2, apiMessages?.size)
+        assertEquals("system", apiMessages?.get(0)?.jsonObject?.get("role")?.jsonPrimitive?.content)
+    }
 }

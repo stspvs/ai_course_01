@@ -45,7 +45,8 @@ class KtorChatRepositoryTest {
             deepSeekKey = "test_key",
             yandexKey = "test_key",
             yandexFolderId = "test_id",
-            openRouterKey = "test_key"
+            openRouterKey = "test_key",
+            ollamaBaseUrl = "http://127.0.0.1:11434"
         )
     }
 

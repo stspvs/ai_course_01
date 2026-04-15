@@ -39,7 +39,7 @@ class KtorChatRepositoryMemoryTest {
 
         val client = HttpClient(mockEngine)
 
-        val repository = KtorChatRepository(client, "key", "key", "id", "key")
+        val repository = KtorChatRepository(client, "key", "key", "id", "key", "http://127.0.0.1:11434")
         val result = repository.extractFacts(emptyList(), ChatFacts(), LLMProvider.DeepSeek())
 
         assertTrue(result.isSuccess, "Result should be success: ${result.exceptionOrNull()?.message}")
@@ -69,7 +69,7 @@ class KtorChatRepositoryMemoryTest {
 
         val client = HttpClient(mockEngine)
 
-        val repository = KtorChatRepository(client, "key", "key", "id", "key")
+        val repository = KtorChatRepository(client, "key", "key", "id", "key", "http://127.0.0.1:11434")
         val result = repository.analyzeWorkingMemory(emptyList(), "instruction", LLMProvider.DeepSeek())
 
         assertTrue(result.isSuccess, "Result should be success: ${result.exceptionOrNull()?.message}")

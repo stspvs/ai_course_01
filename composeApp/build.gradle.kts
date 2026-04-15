@@ -128,6 +128,11 @@ fun getSecret(name: String): String {
         ?: ""
 }
 
+fun getOllamaBaseUrl(): String {
+    val v = getSecret("OLLAMA_BASE_URL")
+    return v.ifEmpty { "http://127.0.0.1:11434" }
+}
+
 buildConfig {
     packageName("com.example.ai_develop")
     
@@ -137,4 +142,5 @@ buildConfig {
     buildConfigField("String", "YANDEX_KEY", "\"${getSecret("YANDEX_KEY")}\"")
     buildConfigField("String", "YANDEX_FOLDER_ID", "\"${getSecret("YANDEX_FOLDER_ID")}\"")
     buildConfigField("String", "OPENROUTER_KEY", "\"${getSecret("OPENROUTER_KEY")}\"")
+    buildConfigField("String", "OLLAMA_BASE_URL", "\"${getOllamaBaseUrl()}\"")
 }
