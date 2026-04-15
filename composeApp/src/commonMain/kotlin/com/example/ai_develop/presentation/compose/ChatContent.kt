@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -26,12 +27,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.*
 import kotlin.math.min
+
+private fun ChatMessage.supportsRagChunkDetailDialog(): Boolean {
+    if (source != SourceType.AI && role.lowercase() != "assistant") return false
+    val attr = llmRequestSnapshot?.ragAttribution ?: return false
+    return attr.used && attr.sources.isNotEmpty()
+}
 
 @Composable
 internal fun ChatContent(
@@ -57,6 +65,8 @@ internal fun ChatContent(
     var showMemoryPanel by remember { mutableStateOf(false) }
 
     val strategy = activeAgent?.memoryStrategy
+    val isGeneralChat = state.selectedAgentId == GENERAL_CHAT_ID
+    var ragDetailMessage by remember { mutableStateOf<ChatMessage?>(null) }
     val isBranchingMode = strategy is ChatMemoryStrategy.Branching
     val isSummarizationMode = strategy is ChatMemoryStrategy.Summarization
     val isStickyFactsMode = strategy is ChatMemoryStrategy.StickyFacts
@@ -161,7 +171,9 @@ internal fun ChatContent(
                     MessageItem(
                         message = message,
                         isBranchingMode = isBranchingMode,
-                        onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) }
+                        isGeneralChat = isGeneralChat,
+                        onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) },
+                        onOpenRagDialog = { ragDetailMessage = it },
                     )
                 }
                 items(
@@ -178,6 +190,13 @@ internal fun ChatContent(
                 onSendMessage = onSendMessage,
                 onClearChat = onClearChat
             )
+
+            ragDetailMessage?.let { msg ->
+                RagChunksDetailDialog(
+                    message = msg,
+                    onDismiss = { ragDetailMessage = null },
+                )
+            }
         }
 
         // Боковая панель Состояния Памяти (Краткосрочная + Рабочая + Долгая)
@@ -557,26 +576,96 @@ private fun BranchesPanel(
     }
 }
 
+@Composable
+private fun RagChunksDetailDialog(
+    message: ChatMessage,
+    onDismiss: () -> Unit,
+) {
+    val sources = message.llmRequestSnapshot?.ragAttribution?.sources.orEmpty()
+    val scroll = rememberScrollState()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Фрагменты, подмешанные в промпт") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(scroll),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Ниже — тот же текст, что был добавлен в системный промпт вместе с вашим вопросом. Ответ мог опираться на эти фрагменты, на общие знания модели или на оба источника.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                sources.forEachIndexed { i, src ->
+                    HorizontalDivider()
+                    Text(
+                        text = "${i + 1}. ${src.documentTitle}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = buildString {
+                            append(src.sourceFileName)
+                            append(" · чанк ${src.chunkIndex}")
+                            src.score?.let { append(" · близость к запросу " + "%.3f".format(it)) }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                    )
+                    if (src.chunkText.isNotBlank()) {
+                        SelectionContainer {
+                            Text(
+                                text = src.chunkText,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "Текст фрагмента недоступен (сообщение до обновления приложения).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            fontStyle = FontStyle.Italic,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        },
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageItem(
     message: ChatMessage,
     isBranchingMode: Boolean,
-    onCreateBranch: (String) -> Unit
+    isGeneralChat: Boolean,
+    onCreateBranch: (String) -> Unit,
+    onOpenRagDialog: (ChatMessage) -> Unit,
 ) {
     var showBranchDialog by remember { mutableStateOf(false) }
     var branchName by remember { mutableStateOf("") }
 
-    Box(
-        modifier = if (isBranchingMode) {
-            Modifier.combinedClickable(
-                onLongClick = { showBranchDialog = true },
-                onClick = {}
-            )
-        } else {
-            Modifier
-        }
-    ) {
+    val openRagOnClick = isGeneralChat && message.supportsRagChunkDetailDialog()
+
+    val outerModifier = when {
+        isBranchingMode && openRagOnClick -> Modifier.combinedClickable(
+            onClick = { onOpenRagDialog(message) },
+            onLongClick = { showBranchDialog = true },
+        )
+        isBranchingMode -> Modifier.combinedClickable(
+            onClick = {},
+            onLongClick = { showBranchDialog = true },
+        )
+        openRagOnClick -> Modifier.clickable { onOpenRagDialog(message) }
+        else -> Modifier
+    }
+
+    Box(modifier = outerModifier) {
         MessageBubble(message = message)
     }
 

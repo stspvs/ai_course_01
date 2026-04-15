@@ -1,6 +1,7 @@
 package com.example.ai_develop.domain
 
 import com.example.ai_develop.data.McpRepository
+import com.example.ai_develop.data.RagContextRetriever
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -14,6 +15,7 @@ open class ChatStreamingUseCase(
     private val scope: CoroutineScope,
     private val agentToolRegistry: AgentToolRegistry,
     private val mcpRepository: McpRepository,
+    private val ragContextRetriever: RagContextRetriever? = null,
 ) {
     private val activeAgents = mutableMapOf<String, AutonomousAgent>()
 
@@ -61,7 +63,7 @@ open class ChatStreamingUseCase(
      */
     open fun getOrCreateAgent(agentId: String, taskIdForMessagePersistence: String? = null): AutonomousAgent {
         return activeAgents.getOrPut(agentId) {
-            AutonomousAgent(agentId, repository, engine, scope, taskIdForMessagePersistence)
+            AutonomousAgent(agentId, repository, engine, scope, taskIdForMessagePersistence, ragContextRetriever)
         }
     }
 

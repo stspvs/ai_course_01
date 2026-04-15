@@ -45,7 +45,8 @@ data class UpdateAgentParams(
     val provider: LLMProvider,
     val stopWord: String,
     val maxTokens: Int,
-    val memoryStrategy: ChatMemoryStrategy
+    val memoryStrategy: ChatMemoryStrategy,
+    val ragEnabled: Boolean = false,
 )
 
 /**
@@ -76,5 +77,6 @@ data class AgentState(
     val workingMemory: WorkingMemory = WorkingMemory(),
     val messages: List<ChatMessage> = emptyList(),
     val branches: List<ChatBranch> = emptyList(),
-    val currentBranchId: String? = null
+    val currentBranchId: String? = null,
+    val ragEnabled: Boolean = false,
 )

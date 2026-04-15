@@ -77,7 +77,8 @@ class SqlDelightChatRepository(
             planJson = json.encodeToString(AgentPlan.serializer(), state.plan),
             memoryStrategyJson = json.encodeToString(ChatMemoryStrategy.serializer(), state.memoryStrategy),
             workingMemoryJson = json.encodeToString(WorkingMemory.serializer(), state.workingMemory),
-            llmProviderJson = json.encodeToString(LLMProvider.serializer(), state.provider)
+            llmProviderJson = json.encodeToString(LLMProvider.serializer(), state.provider),
+            ragEnabled = state.ragEnabled,
         )
     }
 
@@ -127,7 +128,8 @@ class SqlDelightChatRepository(
                     memoryStrategy = state.memoryStrategy,
                     workingMemory = state.workingMemory,
                     messages = msgs,
-                    userProfile = profile
+                    userProfile = profile,
+                    ragEnabled = state.ragEnabled,
                 )
             }
         }
@@ -148,7 +150,8 @@ class SqlDelightChatRepository(
                     memoryStrategy = it.memoryStrategy,
                     workingMemory = it.workingMemory,
                     messages = it.messages,
-                    userProfile = profile
+                    userProfile = profile,
+                    ragEnabled = it.ragEnabled,
                 )
             }
         }
@@ -165,7 +168,8 @@ class SqlDelightChatRepository(
             stopWord = agent.stopWord,
             memoryStrategy = agent.memoryStrategy,
             workingMemory = agent.workingMemory,
-            messages = agent.messages
+            messages = agent.messages,
+            ragEnabled = agent.ragEnabled,
         )
         saveAgentState(state)
     }
@@ -180,7 +184,8 @@ class SqlDelightChatRepository(
             maxTokens = agent.maxTokens,
             stopWord = agent.stopWord,
             memoryStrategy = agent.memoryStrategy,
-            workingMemory = agent.workingMemory
+            workingMemory = agent.workingMemory,
+            ragEnabled = agent.ragEnabled,
         )
         persistAgentStateRow(state)
     }
@@ -396,7 +401,8 @@ class SqlDelightChatRepository(
                 }
             } else {
                 WorkingMemory()
-            }
+            },
+            ragEnabled = it.ragEnabled,
         )
     }
 

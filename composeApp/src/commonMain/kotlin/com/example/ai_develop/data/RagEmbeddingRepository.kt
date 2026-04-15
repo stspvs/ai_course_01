@@ -23,6 +23,35 @@ data class RagDocumentSummary(
     val chunkCount: Int,
 )
 
+/**
+ * Чанк с эмбеддингом и метаданными документа для RAG-поиска.
+ */
+data class RagIndexedChunk(
+    val chunkId: String,
+    val documentId: String,
+    val chunkIndex: Long,
+    val text: String,
+    val embedding: FloatArray,
+    val ollamaModel: String,
+    val documentTitle: String,
+    val sourceFileName: String,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class != other::class) return false
+        other as RagIndexedChunk
+        if (chunkId != other.chunkId) return false
+        if (!embedding.contentEquals(other.embedding)) return false
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = chunkId.hashCode()
+        result = 31 * result + embedding.contentHashCode()
+        return result
+    }
+}
+
 data class RagStoredChunk(
     val id: String,
     val chunkIndex: Long,
@@ -83,6 +112,21 @@ class RagEmbeddingRepository(
 
     suspend fun getChunks(documentId: String): List<RagStoredChunk> = withContext(Dispatchers.Default) {
         queries.getChunksForRagDocument(documentId).executeAsList().map { it.toStoredChunk() }
+    }
+
+    suspend fun loadAllChunksForRetrieval(): List<RagIndexedChunk> = withContext(Dispatchers.Default) {
+        queries.getAllRagChunksWithDocuments().executeAsList().map { row ->
+            RagIndexedChunk(
+                chunkId = row.chunkId,
+                documentId = row.documentId,
+                chunkIndex = row.chunkIndex,
+                text = row.chunkText,
+                embedding = EmbeddingFloatCodec.littleEndianBytesToFloatArray(row.embeddingBlob),
+                ollamaModel = row.ollamaModel,
+                documentTitle = row.documentTitle,
+                sourceFileName = row.sourceFileName,
+            )
+        }
     }
 
     /**

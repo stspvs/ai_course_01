@@ -31,7 +31,7 @@ internal fun AgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
     onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
@@ -71,7 +71,7 @@ private fun DesktopAgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
     onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
@@ -96,7 +96,7 @@ private fun DesktopAgentsContent(
                     agent = selectedAgent,
                     templates = templates,
                     canDelete = selectedAgent.id != GENERAL_CHAT_ID,
-                    onUpdateAgent = { n, p, t, pr, s, m, k -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k) },
+                    onUpdateAgent = { n, p, t, pr, s, m, k, r -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k, r) },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
                     onDuplicateAgent = { onDuplicateAgent(selectedAgent.id) }
@@ -114,7 +114,7 @@ private fun MobileAgentsContent(
     state: LLMStateModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
-    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
     onUpdateProfile: (String, UserProfile) -> Unit,
     onDeleteAgent: (String) -> Unit,
     onDuplicateAgent: (String) -> Unit,
@@ -145,7 +145,7 @@ private fun MobileAgentsContent(
                     agent = selectedAgent,
                     templates = templates,
                     canDelete = selectedAgent.id != GENERAL_CHAT_ID,
-                    onUpdateAgent = { n, p, t, pr, s, m, k -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k) },
+                    onUpdateAgent = { n, p, t, pr, s, m, k, r -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k, r) },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
                     onDuplicateAgent = { onDuplicateAgent(selectedAgent.id) }
@@ -280,7 +280,7 @@ private fun AgentDetails(
     agent: Agent,
     templates: List<AgentTemplate>,
     canDelete: Boolean,
-    onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
     onUpdateProfile: (UserProfile) -> Unit,
     onDeleteAgent: () -> Unit,
     onDuplicateAgent: () -> Unit
@@ -321,7 +321,7 @@ private fun AgentSettingsTab(
     agent: Agent,
     templates: List<AgentTemplate>,
     canDelete: Boolean,
-    onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy) -> Unit,
+    onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
     onDeleteAgent: () -> Unit,
     onDuplicateAgent: () -> Unit
 ) {
@@ -333,18 +333,24 @@ private fun AgentSettingsTab(
     var maxTokens by remember(agent.id) { mutableStateOf(agent.maxTokens) }
     var memoryStrategy by remember(agent.id) { mutableStateOf(agent.memoryStrategy) }
     var windowSize by remember(agent.id) { mutableStateOf(agent.memoryStrategy.windowSize) }
+    var ragEnabled by remember(agent.id) { mutableStateOf(agent.ragEnabled) }
 
-    LaunchedEffect(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy) {
+    LaunchedEffect(agent.ragEnabled) {
+        ragEnabled = agent.ragEnabled
+    }
+
+    LaunchedEffect(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy, ragEnabled) {
         if (name != agent.name ||
             systemPrompt != agent.systemPrompt ||
             temperature != agent.temperature ||
             provider != agent.provider ||
             stopWord != agent.stopWord ||
             maxTokens != agent.maxTokens ||
-            memoryStrategy != agent.memoryStrategy
+            memoryStrategy != agent.memoryStrategy ||
+            ragEnabled != agent.ragEnabled
         ) {
             delay(500)
-            onUpdateAgent(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy)
+            onUpdateAgent(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy, ragEnabled)
         }
     }
 
@@ -417,6 +423,25 @@ private fun AgentSettingsTab(
         )
 
         HorizontalDivider()
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("RAG (контекст из базы)", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Подмешивать релевантные фрагменты из сохранённых документов в запрос к модели",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = ragEnabled,
+                onCheckedChange = { ragEnabled = it }
+            )
+        }
         
         MemoryStrategySelector(
             currentStrategy = memoryStrategy, 

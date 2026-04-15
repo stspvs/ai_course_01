@@ -109,7 +109,9 @@ data class Agent(
     val memoryStrategy: ChatMemoryStrategy = ChatMemoryStrategy.SlidingWindow(10),
     val totalTokensUsed: Int = 0,
     val userProfile: UserProfile? = null,
-    val workingMemory: WorkingMemory = WorkingMemory()
+    val workingMemory: WorkingMemory = WorkingMemory(),
+    /** Подмешивать контекст из локальной RAG-базы в запрос к LLM. */
+    val ragEnabled: Boolean = false,
 )
 
 data class AgentUpdate(

@@ -125,8 +125,8 @@ fun ChatScreen(viewModel: LLMViewModel) {
                     state = state,
                     templates = viewModel.agentTemplates,
                     onCreateAgent = { viewModel.createAgent() },
-                    onUpdateAgent = { id, n, p, t, pr, s, m, k -> 
-                        viewModel.updateAgent(id, n, p, t, pr, s, m, k) 
+                    onUpdateAgent = { id, n, p, t, pr, s, m, k, r ->
+                        viewModel.updateAgent(id, n, p, t, pr, s, m, k, r)
                     },
                     onUpdateProfile = { id, profile ->
                         viewModel.updateUserProfile(id, profile)

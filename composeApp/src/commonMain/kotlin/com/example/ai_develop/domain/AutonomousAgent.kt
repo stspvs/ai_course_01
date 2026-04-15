@@ -2,6 +2,7 @@
 
 package com.example.ai_develop.domain
 
+import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.stripLeadingJsonColonLabel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -18,7 +19,8 @@ open class AutonomousAgent(
     private val repository: ChatRepository,
     private val engine: AgentEngine,
     externalScope: CoroutineScope,
-    private val taskIdForMessagePersistence: String? = null
+    private val taskIdForMessagePersistence: String? = null,
+    private val ragContextRetriever: RagContextRetriever? = null,
 ) {
     private val job = SupervisorJob(externalScope.coroutineContext[Job])
     private val scope = CoroutineScope(externalScope.coroutineContext.minusKey(Job) + job)
@@ -81,7 +83,8 @@ open class AutonomousAgent(
                 userProfile = profile,
                 memoryStrategy = state.memoryStrategy,
                 workingMemory = state.workingMemory,
-                messages = messages
+                messages = messages,
+                ragEnabled = state.ragEnabled,
             )
         }
     }
@@ -440,9 +443,47 @@ open class AutonomousAgent(
         collector,
         agent,
         stage,
-        engine.prepareChatRequest(agent, stage, isJsonMode = false),
+        prepareLlmRequestWithOptionalRag(agent, stage),
         replaceLastAssistant
     )
+
+    private suspend fun prepareLlmRequestWithOptionalRag(agent: Agent, stage: AgentStage): PreparedLlmRequest {
+        if (!agent.ragEnabled) {
+            return engine.prepareChatRequest(agent, stage, isJsonMode = false)
+        }
+        val last = agent.messages.lastOrNull()
+        if (last == null || last.role.lowercase() != "user") {
+            return engine.prepareChatRequest(agent, stage, isJsonMode = false)
+        }
+        val query = last.message.trim()
+        if (query.isEmpty()) {
+            return engine.prepareChatRequest(
+                agent,
+                stage,
+                isJsonMode = false,
+                ragContext = null,
+                ragAttribution = RagAttribution(used = false),
+            )
+        }
+        val retrieved = ragContextRetriever?.retrieve(query)
+        return if (retrieved != null) {
+            engine.prepareChatRequest(
+                agent,
+                stage,
+                isJsonMode = false,
+                ragContext = retrieved.contextText,
+                ragAttribution = retrieved.attribution,
+            )
+        } else {
+            engine.prepareChatRequest(
+                agent,
+                stage,
+                isJsonMode = false,
+                ragContext = null,
+                ragAttribution = RagAttribution(used = false),
+            )
+        }
+    }
 
     private suspend fun executeStreamingStepWithPrepared(
         collector: FlowCollector<String>,
@@ -549,7 +590,8 @@ open class AutonomousAgent(
                 stopWord = agent.stopWord,
                 messages = agent.messages,
                 workingMemory = agent.workingMemory,
-                memoryStrategy = agent.memoryStrategy
+                memoryStrategy = agent.memoryStrategy,
+                ragEnabled = agent.ragEnabled,
             )
         )
     }

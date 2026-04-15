@@ -54,7 +54,8 @@ open class AgentManagementUseCase(
             provider = params.provider,
             maxTokens = params.maxTokens,
             stopWord = params.stopWord,
-            memoryStrategy = params.memoryStrategy
+            memoryStrategy = params.memoryStrategy,
+            ragEnabled = params.ragEnabled,
         ))
         refreshAgent(params.id)
     }

@@ -244,7 +244,9 @@ internal fun MemoryStrategySelector(
 }
 
 @Composable
-internal fun MessageBubble(message: ChatMessage) {
+internal fun MessageBubble(
+    message: ChatMessage,
+) {
     if (message.isSystemNotification) {
         SystemNotificationBubble(message.message)
         return

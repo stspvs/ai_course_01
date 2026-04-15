@@ -72,9 +72,11 @@ open class AgentEngine(
     open fun prepareChatRequest(
         agent: Agent,
         stage: AgentStage,
-        isJsonMode: Boolean = false
+        isJsonMode: Boolean = false,
+        ragContext: String? = null,
+        ragAttribution: RagAttribution? = null,
     ): PreparedLlmRequest {
-        val systemPrompt = prepareSystemPrompt(agent, stage)
+        val systemPrompt = prepareSystemPrompt(agent, stage, ragContext)
         val inputMessages = prepareInputMessages(agent)
         val snapshot = LlmRequestSnapshot(
             effectiveSystemPrompt = systemPrompt,
@@ -85,7 +87,8 @@ open class AgentEngine(
             temperature = agent.temperature,
             maxTokens = agent.maxTokens,
             isJsonMode = isJsonMode,
-            stopWord = agent.stopWord
+            stopWord = agent.stopWord,
+            ragAttribution = ragAttribution,
         )
         return PreparedLlmRequest(systemPrompt, inputMessages, snapshot)
     }
@@ -211,7 +214,7 @@ open class AgentEngine(
         return executeToolCall(call)
     }
 
-    private fun prepareSystemPrompt(agent: Agent, stage: AgentStage): String {
+    private fun prepareSystemPrompt(agent: Agent, stage: AgentStage, ragContext: String? = null): String {
         val basePrompt = memoryManager.wrapSystemPrompt(agent)
         val stageContext = "\n[SYSTEM INFO] CURRENT STAGE: $stage\n"
 
@@ -233,7 +236,11 @@ open class AgentEngine(
             }.toString()
         } else ""
 
-        return basePrompt + stageContext + toolsContext
+        val ragSection = if (!ragContext.isNullOrBlank()) {
+            "\n\n[RELEVANT CONTEXT FROM KNOWLEDGE BASE]\n${ragContext.trim()}\n"
+        } else ""
+
+        return basePrompt + stageContext + toolsContext + ragSection
     }
 
     private fun prepareInputMessages(agent: Agent): List<ChatMessage> {

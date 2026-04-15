@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS AgentStateEntity (
     planJson TEXT NOT NULL, -- JSON AgentPlan
     memoryStrategyJson TEXT NOT NULL DEFAULT '', -- JSON ChatMemoryStrategy
     workingMemoryJson TEXT NOT NULL DEFAULT '', -- JSON WorkingMemory
-    llmProviderJson TEXT -- JSON LLMProvider (основная модель чата)
+    llmProviderJson TEXT, -- JSON LLMProvider (основная модель чата)
+    ragEnabled INTEGER AS Boolean NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS ProfileEntity (
@@ -70,9 +71,9 @@ CREATE TABLE IF NOT EXISTS TaskEntity (
 saveAgentState:
 INSERT OR REPLACE INTO AgentStateEntity(
     agentId, name, systemPrompt, temperature, maxTokens, stopWord,
-    currentStage, currentStepId, planJson, memoryStrategyJson, workingMemoryJson, llmProviderJson
+    currentStage, currentStepId, planJson, memoryStrategyJson, workingMemoryJson, llmProviderJson, ragEnabled
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getAgentState:
 SELECT * FROM AgentStateEntity WHERE agentId = ?;
@@ -273,3 +274,19 @@ SELECT * FROM RagChunkEntity WHERE documentId = ? ORDER BY chunkIndex ASC;
 
 deleteRagDocument:
 DELETE FROM RagDocumentEntity WHERE id = ?;
+
+-- RAG retrieval: чанки с метаданными документа для поиска по эмбеддингам
+getAllRagChunksWithDocuments:
+SELECT
+    c.id AS chunkId,
+    c.documentId,
+    c.chunkIndex,
+    c.startOffset,
+    c.endOffset,
+    c.text AS chunkText,
+    c.embeddingBlob,
+    d.ollamaModel,
+    d.title AS documentTitle,
+    d.sourceFileName
+FROM RagChunkEntity c
+INNER JOIN RagDocumentEntity d ON c.documentId = d.id;
