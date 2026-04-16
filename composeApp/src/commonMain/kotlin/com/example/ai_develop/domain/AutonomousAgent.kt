@@ -3,6 +3,7 @@
 package com.example.ai_develop.domain
 
 import com.example.ai_develop.data.RagContextRetriever
+import com.example.ai_develop.data.RagPipelineSettingsRepository
 import com.example.ai_develop.data.stripLeadingJsonColonLabel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -21,6 +22,7 @@ open class AutonomousAgent(
     externalScope: CoroutineScope,
     private val taskIdForMessagePersistence: String? = null,
     private val ragContextRetriever: RagContextRetriever? = null,
+    private val ragPipelineSettingsRepository: RagPipelineSettingsRepository? = null,
 ) {
     private val job = SupervisorJob(externalScope.coroutineContext[Job])
     private val scope = CoroutineScope(externalScope.coroutineContext.minusKey(Job) + job)
@@ -465,13 +467,33 @@ open class AutonomousAgent(
                 ragAttribution = RagAttribution(used = false),
             )
         }
-        val retrieved = ragContextRetriever?.retrieve(query)
+        val config = runCatching { ragPipelineSettingsRepository?.getConfig() }.getOrNull()
+            ?: RagRetrievalConfig.Default
+        var retrievalQuery = query
+        var rewriteApplied = false
+        if (config.queryRewriteEnabled) {
+            val rewriteProvider = resolveRewriteProvider(agent, config)
+            repository.rewriteQueryForRag(query, rewriteProvider).onSuccess { rw ->
+                if (rw.isNotBlank()) {
+                    retrievalQuery = rw.trim()
+                    rewriteApplied = true
+                }
+            }
+        }
+        if (retrievalQuery.isBlank()) retrievalQuery = query
+
+        val retrieved = ragContextRetriever?.retrieve(
+            originalQuery = query,
+            retrievalQuery = retrievalQuery,
+            config = config,
+            rewriteApplied = rewriteApplied,
+        )
         return if (retrieved != null) {
             engine.prepareChatRequest(
                 agent,
                 stage,
                 isJsonMode = false,
-                ragContext = retrieved.contextText,
+                ragContext = if (retrieved.attribution.used) retrieved.contextText else null,
                 ragAttribution = retrieved.attribution,
             )
         } else {
@@ -483,6 +505,12 @@ open class AutonomousAgent(
                 ragAttribution = RagAttribution(used = false),
             )
         }
+    }
+
+    private fun resolveRewriteProvider(agent: Agent, config: RagRetrievalConfig): LLMProvider {
+        val m = config.rewriteOllamaModel.trim()
+        val p = agent.provider
+        return if (p is LLMProvider.Ollama && m.isNotEmpty()) p.copy(model = m) else p
     }
 
     private suspend fun executeStreamingStepWithPrepared(

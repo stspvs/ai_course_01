@@ -140,6 +140,45 @@ class KtorChatRepository(
         }
     }
 
+    override suspend fun rewriteQueryForRag(
+        userQuery: String,
+        provider: LLMProvider,
+    ): Result<String> {
+        return try {
+            val messages = listOf(
+                ChatMessage(message = ragQueryRewriteSystemPrompt, role = "system", source = SourceType.SYSTEM),
+                ChatMessage(message = userQuery.trim(), role = "user", source = SourceType.USER),
+            )
+            val handler = getHandler(provider)
+            val platform = getPlatform()
+            val url = handler.buildUrl(platform)
+            val bodyString = handler.buildChatRequestBody(
+                messages = messages,
+                systemPrompt = "",
+                maxTokens = 256,
+                temperature = 0.2,
+                stopWord = "",
+                isJsonMode = false,
+                stream = false,
+            )
+            val response = httpClient.post(url) {
+                handler.buildHeaders().forEach { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                setBody(bodyString)
+            }
+            if (response.status.isSuccess()) {
+                val responseText = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
+                val text = handler.parseFullResponse(responseText)
+                Result.success(text.trim())
+            } else {
+                val errorBody = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
+                Result.failure(Exception("RAG query rewrite failed: ${response.status}. Body: $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun summarize(
         messages: List<ChatMessage>,
         previousSummary: String?,

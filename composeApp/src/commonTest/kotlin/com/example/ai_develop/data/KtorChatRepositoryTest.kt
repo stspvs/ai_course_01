@@ -4,6 +4,7 @@ import com.example.ai_develop.domain.*
 import io.ktor.client.*
 import io.ktor.client.engine.mock.*
 import io.ktor.http.*
+import io.ktor.http.content.TextContent
 import io.ktor.utils.io.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.toList
@@ -12,6 +13,9 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -302,6 +306,55 @@ class KtorChatRepositoryTest {
         // Then
         assertTrue(results.any { it.isFailure })
         assertEquals("Timeout", results.first { it.isFailure }.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun rewriteQueryForRag_ollama_success() = runTest(testDispatcher) {
+        val mockResponse = """{"choices":[{"message":{"role":"assistant","content":"  поисковая строка  "}}]}"""
+        val client = createMockClient(mockResponse)
+        val repository = createRepository(client)
+
+        val result = repository.rewriteQueryForRag(
+            userQuery = "что такое RAG",
+            provider = LLMProvider.Ollama("qwen2.5:1.5b"),
+        )
+
+        assertTrue(result.isSuccess, "Error: ${result.exceptionOrNull()}")
+        assertEquals("поисковая строка", result.getOrNull())
+    }
+
+    @Test
+    fun rewriteQueryForRag_ollama_requestBodyContainsLanguagePrompt() = runTest(testDispatcher) {
+        val mockResponse = """{"choices":[{"message":{"role":"assistant","content":"ok"}}]}"""
+        val mockEngine = MockEngine { request ->
+            assertTrue(request.url.encodedPath.endsWith("/v1/chat/completions"))
+            val bodyJson = (request.body as TextContent).text
+            val root = json.parseToJsonElement(bodyJson).jsonObject
+            val messages = root["messages"]!!.jsonArray
+            val systemContent = messages[0].jsonObject["content"]!!.jsonPrimitive.content
+            assertEquals(
+                ragQueryRewriteSystemPrompt,
+                systemContent,
+                "System message must be exactly ragQueryRewriteSystemPrompt (language rules)",
+            )
+            val userContent = messages[1].jsonObject["content"]!!.jsonPrimitive.content
+            assertEquals("что такое RAG", userContent)
+            respond(
+                content = ByteReadChannel(mockResponse),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val client = HttpClient(mockEngine)
+        val repository = createRepository(client)
+
+        val result = repository.rewriteQueryForRag(
+            userQuery = "что такое RAG",
+            provider = LLMProvider.Ollama("qwen2.5:1.5b"),
+        )
+
+        assertTrue(result.isSuccess)
+        assertEquals("ok", result.getOrNull())
     }
 
     @Test

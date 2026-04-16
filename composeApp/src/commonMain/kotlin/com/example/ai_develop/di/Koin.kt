@@ -3,8 +3,12 @@ package com.example.ai_develop.di
 import com.example.ai_develop.BuildConfig
 import com.example.ai_develop.data.KtorChatRepository
 import com.example.ai_develop.data.OllamaEmbeddingClient
+import com.example.ai_develop.data.OllamaModelsClient
+import com.example.ai_develop.data.OllamaRagRerankClient
 import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagEmbeddingRepository
+import com.example.ai_develop.data.RagPipelineSettingsRepository
+import com.example.ai_develop.data.SqlDelightRagPipelineSettingsRepository
 import com.example.ai_develop.data.GraylogSettingsRepository
 import com.example.ai_develop.data.McpRepository
 import com.example.ai_develop.data.SqlDelightChatRepository
@@ -140,8 +144,11 @@ val commonModule = module {
 
     single<McpRepository> { SqlDelightMcpRepository(get()) }
     single { OllamaEmbeddingClient(get()) }
+    single { OllamaRagRerankClient(get(), get()) }
+    single { OllamaModelsClient(get(), get()) }
     single { RagEmbeddingRepository(get()) }
-    single { RagContextRetriever(get(), get()) }
+    single { RagContextRetriever(get(), get(), get()) }
+    single<RagPipelineSettingsRepository> { SqlDelightRagPipelineSettingsRepository(get(), get()) }
     single<GraylogSettingsRepository> { SqlDelightGraylogSettingsRepository(get()) }
     single<GraylogPlatform> { GraylogPlatform() }
 
@@ -161,6 +168,7 @@ val commonModule = module {
             agentToolRegistry = get(),
             mcpRepository = get(),
             ragContextRetriever = get(),
+            ragPipelineSettingsRepository = get(),
         )
     }
     singleOf(::SummarizeChatUseCase)
@@ -177,7 +185,16 @@ val commonModule = module {
     viewModelOf(::LLMViewModel)
     viewModelOf(::McpServersViewModel)
     viewModelOf(::GraylogSettingsViewModel)
-    viewModelOf(::RagEmbeddingsViewModel)
+    viewModel {
+        RagEmbeddingsViewModel(
+            ollamaEmbeddingClient = get(),
+            ragRepository = get(),
+            ragContextRetriever = get(),
+            ragPipelineSettingsRepository = get(),
+            ollamaModelsClient = get(),
+            chatRepository = get(),
+        )
+    }
     viewModel {
         TaskViewModel(
             get(),

@@ -11,10 +11,33 @@ data class RagSourceRef(
     val sourceFileName: String,
     val chunkIndex: Long,
     val score: Double? = null,
+    /** Итоговый скор после rerank (Hybrid / LLM), если отличается от косинуса. */
+    val finalScore: Double? = null,
     /** Идентификатор чанка в БД (для отладки / дозагрузки). */
     val chunkId: String = "",
     /** Текст чанка, подмешанного в промпт (для просмотра по нажатию на сообщение). */
     val chunkText: String = "",
+)
+
+/**
+ * Краткая сводка пайплайна RAG для UI (чат, dry-run).
+ */
+@Serializable
+data class RagRetrievalDebug(
+    val pipelineMode: RagPipelineMode = RagPipelineMode.Baseline,
+    val originalQuery: String = "",
+    val retrievalQuery: String = "",
+    val rewriteApplied: Boolean = false,
+    val recallTopK: Int = 0,
+    val finalTopK: Int = 0,
+    val candidatesAfterRecall: Int = 0,
+    val candidatesAfterThreshold: Int = 0,
+    val candidatesAfterRerank: Int = 0,
+    val minSimilarity: Float? = null,
+    val hybridLexicalWeight: Float? = null,
+    val llmRerankModel: String? = null,
+    /** Причина пустого контекста: отсечены по порогу, нет чанков в БД и т.д. */
+    val emptyReason: String? = null,
 )
 
 /**
@@ -24,6 +47,7 @@ data class RagSourceRef(
 data class RagAttribution(
     val used: Boolean = false,
     val sources: List<RagSourceRef> = emptyList(),
+    val debug: RagRetrievalDebug? = null,
 )
 
 /**

@@ -214,6 +214,19 @@ upsertGraylogSettings:
 INSERT OR REPLACE INTO GraylogSettingsEntity(id, webUrl, startCommand)
 VALUES ('default', ?, ?);
 
+-- Глобальные настройки пайплайна RAG (JSON RagRetrievalConfig)
+CREATE TABLE IF NOT EXISTS RagPipelineSettingsEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    configJson TEXT NOT NULL
+);
+
+getRagPipelineSettings:
+SELECT * FROM RagPipelineSettingsEntity WHERE id = 'default';
+
+upsertRagPipelineSettings:
+INSERT OR REPLACE INTO RagPipelineSettingsEntity(id, configJson)
+VALUES ('default', ?);
+
 -- RAG: документы и чанки с эмбеддингами (BLOB float32 LE)
 CREATE TABLE IF NOT EXISTS RagDocumentEntity (
     id TEXT NOT NULL PRIMARY KEY,

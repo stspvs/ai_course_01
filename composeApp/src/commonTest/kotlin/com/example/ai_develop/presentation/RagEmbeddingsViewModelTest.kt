@@ -9,11 +9,27 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.example.ai_develop.data.EmbeddingFloatCodec
 import com.example.ai_develop.data.OllamaEmbeddingClient
+import com.example.ai_develop.data.OllamaModelsClient
+import com.example.ai_develop.data.OllamaRagRerankClient
+import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagEmbeddingRepository
+import com.example.ai_develop.data.SqlDelightRagPipelineSettingsRepository
 import com.example.ai_develop.database.AgentDatabase
 import com.example.ai_develop.database.stageAdapter
+import com.example.ai_develop.domain.AgentState
+import com.example.ai_develop.domain.AgentStage
+import com.example.ai_develop.domain.ChatFacts
+import com.example.ai_develop.domain.ChatMessage
+import com.example.ai_develop.domain.ChatRepository
 import com.example.ai_develop.domain.ChunkStrategy
+import com.example.ai_develop.domain.Invariant
+import com.example.ai_develop.domain.LLMProvider
 import com.example.ai_develop.domain.OllamaDefaultModelName
+import com.example.ai_develop.domain.RagPipelineMode
+import com.example.ai_develop.domain.RagRetrievalConfig
+import com.example.ai_develop.domain.TaskAnalysisResult
+import com.example.ai_develop.domain.UserProfile
+import com.example.ai_develop.domain.WorkingMemoryAnalysis
 import com.example.aidevelop.database.RagChunkEntity
 import com.example.aidevelop.database.RagDocumentEntity
 import io.ktor.client.HttpClient
@@ -26,6 +42,7 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -79,8 +96,125 @@ class RagEmbeddingsViewModelTest {
         driver.close()
     }
 
-    private fun newViewModel(ollama: OllamaEmbeddingClient) {
-        viewModel = RagEmbeddingsViewModel(ollama, ragRepository)
+    private fun clientTagsEmpty(): OllamaModelsClient {
+        val mockEngine = MockEngine {
+            respond(
+                content = """{"models":[]}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val http = HttpClient(mockEngine) {
+            install(ContentNegotiation) { json(json) }
+        }
+        return OllamaModelsClient(http, json, baseUrl = "http://127.0.0.1:11434")
+    }
+
+    private fun clientRerankStub(): OllamaRagRerankClient {
+        val mockEngine = MockEngine {
+            respond(
+                content = """{"response":"5"}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val http = HttpClient(mockEngine) {
+            install(ContentNegotiation) { json(json) }
+        }
+        return OllamaRagRerankClient(http, json, baseUrl = "http://127.0.0.1:11434")
+    }
+
+    private fun newViewModel(
+        ollama: OllamaEmbeddingClient,
+        models: OllamaModelsClient = clientTagsEmpty(),
+        chat: ChatRepository = FakeChatRepositoryForRagVm(),
+    ) {
+        val retriever = RagContextRetriever(ollama, ragRepository, clientRerankStub())
+        val pipelineRepo = SqlDelightRagPipelineSettingsRepository(database, json)
+        viewModel = RagEmbeddingsViewModel(
+            ollama,
+            ragRepository,
+            retriever,
+            pipelineRepo,
+            models,
+            chat,
+        )
+    }
+
+    private fun clientTagsWithModels(vararg names: String): OllamaModelsClient {
+        val arr = names.joinToString(",") { """{"name":"$it"}""" }
+        val mockEngine = MockEngine {
+            respond(
+                content = """{"models":[$arr]}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val http = HttpClient(mockEngine) {
+            install(ContentNegotiation) { json(json) }
+        }
+        return OllamaModelsClient(http, json, baseUrl = "http://127.0.0.1:11434")
+    }
+
+    private fun clientTagsFailing(): OllamaModelsClient {
+        val mockEngine = MockEngine {
+            throw RuntimeException("tags unavailable")
+        }
+        val http = HttpClient(mockEngine) {
+            install(ContentNegotiation) { json(json) }
+        }
+        return OllamaModelsClient(http, json, baseUrl = "http://127.0.0.1:11434")
+    }
+
+    private class FakeChatRepositoryForRagVm(
+        private val rewriteResult: suspend (String) -> Result<String> = { Result.success(it) },
+    ) : ChatRepository {
+        override fun chatStreaming(
+            messages: List<ChatMessage>,
+            systemPrompt: String,
+            maxTokens: Int,
+            temperature: Double,
+            stopWord: String,
+            isJsonMode: Boolean,
+            provider: LLMProvider,
+        ) = emptyFlow<Result<String>>()
+
+        override suspend fun extractFacts(
+            messages: List<ChatMessage>,
+            currentFacts: ChatFacts,
+            provider: LLMProvider,
+        ) = Result.success(ChatFacts())
+
+        override suspend fun summarize(
+            messages: List<ChatMessage>,
+            previousSummary: String?,
+            instruction: String,
+            provider: LLMProvider,
+        ) = Result.success("")
+
+        override suspend fun analyzeTask(
+            messages: List<ChatMessage>,
+            instruction: String,
+            provider: LLMProvider,
+        ) = Result.success(TaskAnalysisResult())
+
+        override suspend fun analyzeWorkingMemory(
+            messages: List<ChatMessage>,
+            instruction: String,
+            provider: LLMProvider,
+        ) = Result.success(WorkingMemoryAnalysis())
+
+        override suspend fun saveAgentState(state: AgentState) {}
+        override suspend fun getAgentState(agentId: String) = null
+        override suspend fun deleteAgent(agentId: String) {}
+        override suspend fun getProfile(agentId: String): UserProfile? = null
+        override suspend fun saveProfile(agentId: String, profile: UserProfile) {}
+        override suspend fun getInvariants(agentId: String, stage: AgentStage) = emptyList<Invariant>()
+        override suspend fun saveInvariant(invariant: Invariant) {}
+        override fun observeAgentState(agentId: String) = emptyFlow<AgentState?>()
+
+        override suspend fun rewriteQueryForRag(userQuery: String, provider: LLMProvider) =
+            rewriteResult(userQuery)
     }
 
     private fun clientFixedEmbedding(dim: Int = 4): OllamaEmbeddingClient {
@@ -397,5 +531,151 @@ class RagEmbeddingsViewModelTest {
         assertNull(viewModel.uiState.value.error)
         val doc = ragRepository.observeAllDocuments().first().single()
         assertEquals(OllamaDefaultModelName, doc.ollamaModel)
+    }
+
+    @Test
+    fun init_loadsRagPipelineConfigFromDatabase() = runBlocking {
+        val pipelineRepo = SqlDelightRagPipelineSettingsRepository(database, json)
+        val saved = RagRetrievalConfig(
+            pipelineMode = RagPipelineMode.Hybrid,
+            recallTopK = 77,
+            finalTopK = 4,
+            minSimilarity = 0.3f,
+        )
+        pipelineRepo.saveConfig(saved)
+
+        newViewModel(clientFixedEmbedding())
+        waitUntil { viewModel.uiState.value.ragPipelineConfig.recallTopK == 77 }
+        val s = viewModel.uiState.value
+        assertEquals(RagPipelineMode.Hybrid, s.ragPipelineConfig.pipelineMode)
+        assertEquals(4, s.ragPipelineConfig.finalTopK)
+        assertEquals(0.3f, s.ragPipelineConfig.minSimilarity!!, 1e-5f)
+        assertEquals(saved, s.savedRagPipelineConfig)
+    }
+
+    @Test
+    fun updateRagPipeline_and_saveRagPipeline_persists() = runBlocking {
+        newViewModel(clientFixedEmbedding())
+        waitUntil { viewModel.uiState.value.ragPipelineConfig == RagRetrievalConfig.Default }
+
+        viewModel.updateRagPipeline { it.copy(recallTopK = 42, queryRewriteEnabled = true) }
+        assertEquals(42, viewModel.uiState.value.ragPipelineConfig.recallTopK)
+        assertTrue(viewModel.uiState.value.ragPipelineConfig.queryRewriteEnabled)
+
+        viewModel.saveRagPipeline()
+        waitUntil { viewModel.uiState.value.saveMessage != null }
+
+        val fromDb = SqlDelightRagPipelineSettingsRepository(database, json).getConfig()
+        assertEquals(42, fromDb.recallTopK)
+        assertTrue(fromDb.queryRewriteEnabled)
+        assertEquals(viewModel.uiState.value.ragPipelineConfig, viewModel.uiState.value.savedRagPipelineConfig)
+    }
+
+    @Test
+    fun refreshOllamaModelList_success() = runBlocking {
+        newViewModel(clientFixedEmbedding(), models = clientTagsWithModels("m1", "m2"))
+        viewModel.refreshOllamaModelList()
+        waitUntil { viewModel.uiState.value.ollamaLocalModels.size == 2 }
+        assertNull(viewModel.uiState.value.ollamaModelsLoadError)
+        assertEquals(listOf("m1", "m2"), viewModel.uiState.value.ollamaLocalModels)
+    }
+
+    @Test
+    fun refreshOllamaModelList_failure_setsError() = runBlocking {
+        newViewModel(clientFixedEmbedding(), models = clientTagsFailing())
+        viewModel.refreshOllamaModelList()
+        waitUntil { viewModel.uiState.value.ollamaModelsLoadError != null }
+        assertTrue(viewModel.uiState.value.ollamaLocalModels.isEmpty())
+    }
+
+    @Test
+    fun runRagPreviewDryRun_emptyQuery_setsError() = runBlocking {
+        newViewModel(clientFixedEmbedding())
+        viewModel.setRagPreviewQuery("   ")
+        viewModel.runRagPreviewDryRun()
+        assertEquals("Введите тестовый запрос", viewModel.uiState.value.error)
+        assertFalse(viewModel.uiState.value.ragPreviewLoading)
+    }
+
+    @Test
+    fun runRagPreviewDryRun_withIndexedChunks_showsPreview() = runBlocking {
+        val docId = Uuid.random().toString()
+        val body = "hello rag body"
+        ragRepository.insertDocumentWithChunks(
+            RagDocumentEntity(
+                id = docId,
+                title = "DocTitle",
+                sourceFileName = "preview.txt",
+                sourcePath = "c:/preview.txt",
+                ollamaModel = "embed-model",
+                chunkSize = 10L,
+                overlap = 0L,
+                chunkStrategy = "FIXED_WINDOW",
+                createdAt = 1L,
+                fullText = body,
+            ),
+            listOf(
+                RagChunkEntity(
+                    id = Uuid.random().toString(),
+                    documentId = docId,
+                    chunkIndex = 0L,
+                    startOffset = 0L,
+                    endOffset = body.length.toLong(),
+                    text = body,
+                    embeddingBlob = EmbeddingFloatCodec.floatArrayToLittleEndianBytes(floatArrayOf(1f, 1f)),
+                )
+            )
+        )
+        newViewModel(clientFixedEmbedding(dim = 2))
+        viewModel.setRagPreviewQuery("search me")
+        viewModel.runRagPreviewDryRun()
+        waitUntil { !viewModel.uiState.value.ragPreviewLoading }
+        val text = requireNotNull(viewModel.uiState.value.ragPreviewText)
+        assertTrue(text.contains("Использован RAG"))
+        assertTrue(text.contains("DocTitle") || text.contains("preview.txt"))
+    }
+
+    @Test
+    fun runRagPreviewDryRun_queryRewrite_showsOriginalAndRetrievalQuery() = runBlocking {
+        val docId = Uuid.random().toString()
+        ragRepository.insertDocumentWithChunks(
+            RagDocumentEntity(
+                id = docId,
+                title = "T",
+                sourceFileName = "rw.txt",
+                sourcePath = "c:/rw.txt",
+                ollamaModel = "embed-model",
+                chunkSize = 10L,
+                overlap = 0L,
+                chunkStrategy = "FIXED_WINDOW",
+                createdAt = 1L,
+                fullText = "x",
+            ),
+            listOf(
+                RagChunkEntity(
+                    id = Uuid.random().toString(),
+                    documentId = docId,
+                    chunkIndex = 0L,
+                    startOffset = 0L,
+                    endOffset = 1L,
+                    text = "chunk",
+                    embeddingBlob = EmbeddingFloatCodec.floatArrayToLittleEndianBytes(floatArrayOf(1f, 1f)),
+                )
+            )
+        )
+        newViewModel(
+            clientFixedEmbedding(dim = 2),
+            chat = FakeChatRepositoryForRagVm(
+                rewriteResult = { Result.success("переписанный запрос") },
+            ),
+        )
+        viewModel.updateRagPipeline { it.copy(queryRewriteEnabled = true) }
+        viewModel.setRagPreviewQuery("исходный")
+        viewModel.runRagPreviewDryRun()
+        waitUntil { !viewModel.uiState.value.ragPreviewLoading }
+        val text = requireNotNull(viewModel.uiState.value.ragPreviewText)
+        assertTrue(text.contains("Исходный запрос"))
+        assertTrue(text.contains("переписанный"))
+        assertTrue(text.contains("Запрос для поиска"))
     }
 }

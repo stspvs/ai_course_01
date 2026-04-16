@@ -39,6 +39,12 @@ interface ChatRepository {
         provider: LLMProvider
     ): Result<WorkingMemoryAnalysis>
 
+    /** Переформулировать запрос для поиска по RAG (одна строка). */
+    suspend fun rewriteQueryForRag(
+        userQuery: String,
+        provider: LLMProvider,
+    ): Result<String> = Result.success(userQuery)
+
     // Новые методы для Stateful Agent
     suspend fun saveAgentState(state: AgentState)
     suspend fun getAgentState(agentId: String): AgentState?

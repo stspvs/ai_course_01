@@ -186,6 +186,36 @@ class RagEmbeddingRepositoryTest {
     }
 
     @Test
+    fun loadAllChunksForRetrieval_returnsIndexedChunksWithEmbeddings() = runTest {
+        val docId = Uuid.random().toString()
+        val vec = floatArrayOf(0.5f, -0.25f, 1f)
+        val blob = EmbeddingFloatCodec.floatArrayToLittleEndianBytes(vec)
+        repository.insertDocumentWithChunks(
+            doc(
+                docId,
+                sourceFileName = "retrieval.txt",
+                sourcePath = "c:/retrieval.txt",
+                fullText = "full",
+            ),
+            listOf(
+                chunk(Uuid.random().toString(), docId, 0, text = "chunk text", blob = blob),
+            ),
+        )
+
+        val loaded = repository.loadAllChunksForRetrieval()
+        assertEquals(1, loaded.size)
+        val ch = loaded.single()
+        assertEquals("chunk text", ch.text)
+        assertEquals("T", ch.documentTitle)
+        assertEquals("retrieval.txt", ch.sourceFileName)
+        assertEquals("m", ch.ollamaModel)
+        assertEquals(vec.size, ch.embedding.size)
+        for (i in vec.indices) {
+            assertEquals(vec[i], ch.embedding[i], absoluteTolerance = 1e-6f)
+        }
+    }
+
+    @Test
     fun getChunks_roundTripEmbeddingBlob() = runTest {
         val docId = Uuid.random().toString()
         val vec = floatArrayOf(1f, -2f, 0.5f)

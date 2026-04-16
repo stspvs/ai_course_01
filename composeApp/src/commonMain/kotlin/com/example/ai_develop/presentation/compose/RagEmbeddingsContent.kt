@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
@@ -45,7 +46,13 @@ import com.example.ai_develop.data.RagStoredChunk
 import com.example.ai_develop.domain.ChunkStrategy
 import com.example.ai_develop.domain.OllamaDefaultModelName
 import com.example.ai_develop.domain.OllamaUiModelNames
+import com.example.ai_develop.domain.RagEvaluationScope
+import com.example.ai_develop.domain.RagPipelineMode
 import com.example.ai_develop.domain.TextChunk
+import com.example.ai_develop.domain.ragPipelineModeDescription
+import com.example.ai_develop.domain.ragPipelineModeMenuSubtitle
+import com.example.ai_develop.domain.ragPipelinePanelHelpText
+import com.example.ai_develop.presentation.RagEmbeddingsUiState
 import com.example.ai_develop.presentation.RagEmbeddingsViewModel
 import kotlin.math.sqrt
 import org.koin.compose.viewmodel.koinViewModel
@@ -126,6 +133,7 @@ private fun OllamaEmbedModelDropdown(
     models: List<String>,
     value: String,
     onValueChange: (String) -> Unit,
+    labelText: String = "Модель Ollama для embed",
 ) {
     var expanded by remember { mutableStateOf(false) }
     val ordered = remember(models) { models.distinct() }
@@ -136,7 +144,7 @@ private fun OllamaEmbedModelDropdown(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text("Модель Ollama для embed") },
+            label = { Text(labelText) },
             singleLine = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
@@ -170,6 +178,295 @@ private fun OllamaEmbedModelDropdown(
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RagPipelineSettingsCard(
+    ui: RagEmbeddingsUiState,
+    viewModel: RagEmbeddingsViewModel,
+) {
+    val cfg = ui.ragPipelineConfig
+    val modelChoices = remember(ui.ollamaLocalModels) {
+        (ui.ollamaLocalModels + OllamaUiModelNames).distinct()
+    }
+    var panelExpanded by remember { mutableStateOf(true) }
+    var showPipelineHelp by remember { mutableStateOf(false) }
+    val ragPipelineDirty = ui.ragPipelineConfig != ui.savedRagPipelineConfig
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (ragPipelineDirty) {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            },
+        ),
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { panelExpanded = !panelExpanded },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Пайплайн поиска RAG", style = MaterialTheme.typography.titleMedium)
+                        if (!panelExpanded) {
+                            Text(
+                                text = "${cfg.pipelineMode} · recall ${cfg.recallTopK} / final ${cfg.finalTopK}" +
+                                    if (cfg.queryRewriteEnabled) " · rewrite" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = if (panelExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (panelExpanded) "Свернуть" else "Развернуть",
+                    )
+                }
+                IconButton(onClick = { showPipelineHelp = true }) {
+                    Icon(Icons.Default.Info, contentDescription = "Справка по пайплайну RAG")
+                }
+            }
+            if (panelExpanded) {
+                Column(
+                    Modifier.padding(horizontal = 12.dp, vertical = 4.dp).padding(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+            Text(
+                "Базовый шаг (эмбеддинг + recall) всегда активен. Остальное — по режиму и порогам.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+            var modeExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(expanded = modeExpanded, onExpandedChange = { modeExpanded = it }) {
+                OutlinedTextField(
+                    value = when (cfg.pipelineMode) {
+                        RagPipelineMode.Baseline -> "Baseline"
+                        RagPipelineMode.Threshold -> "Threshold"
+                        RagPipelineMode.Hybrid -> "Hybrid"
+                        RagPipelineMode.LlmRerank -> "LLM rerank"
+                    },
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Режим пайплайна") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modeExpanded) },
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
+                )
+                ExposedDropdownMenu(expanded = modeExpanded, onDismissRequest = { modeExpanded = false }) {
+                    RagPipelineMode.entries.forEach { m ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(m.name, style = MaterialTheme.typography.bodyLarge)
+                                    Text(
+                                        ragPipelineModeMenuSubtitle(m),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                viewModel.updateRagPipeline { it.copy(pipelineMode = m) }
+                                modeExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+            Text(
+                text = ragPipelineModeDescription(cfg.pipelineMode),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = cfg.recallTopK.toString(),
+                    onValueChange = { it.toIntOrNull()?.let { v -> viewModel.updateRagPipeline { c -> c.copy(recallTopK = v.coerceAtLeast(1)) } } },
+                    label = { Text("Recall top-K") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = cfg.finalTopK.toString(),
+                    onValueChange = { it.toIntOrNull()?.let { v -> viewModel.updateRagPipeline { c -> c.copy(finalTopK = v.coerceAtLeast(1)) } } },
+                    label = { Text("Final top-K") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                )
+            }
+            OutlinedTextField(
+                value = cfg.minSimilarity?.toString().orEmpty(),
+                onValueChange = { s ->
+                    val v = s.toFloatOrNull()
+                    viewModel.updateRagPipeline { c -> c.copy(minSimilarity = v) }
+                },
+                label = { Text("Мин. similarity (пусто = не задан)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("напр. 0.28") },
+            )
+            OutlinedTextField(
+                value = cfg.hybridLexicalWeight.toString(),
+                onValueChange = { it.toFloatOrNull()?.let { v -> viewModel.updateRagPipeline { c -> c.copy(hybridLexicalWeight = v.coerceIn(0f, 1f)) } } },
+                label = { Text("Hybrid: w (косинус vs Jaccard), 0…1") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                supportingText = if (cfg.pipelineMode == RagPipelineMode.Hybrid) {
+                    {
+                        Text(
+                            "Итог: w·cosine + (1−w)·Jaccard по токенам. Больше w — сильнее эмбеддинги; меньше — сильнее совпадение слов.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                } else {
+                    null
+                },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Checkbox(
+                    checked = cfg.queryRewriteEnabled,
+                    onCheckedChange = { viewModel.updateRagPipeline { c -> c.copy(queryRewriteEnabled = it) } },
+                )
+                Text("Query rewrite (LLM)")
+            }
+            OllamaEmbedModelDropdown(
+                models = modelChoices,
+                value = cfg.rewriteOllamaModel.ifBlank { OllamaDefaultModelName },
+                onValueChange = { viewModel.updateRagPipeline { c -> c.copy(rewriteOllamaModel = it) } },
+                labelText = "Модель для query rewrite (если Ollama)",
+            )
+            OllamaEmbedModelDropdown(
+                models = modelChoices,
+                value = cfg.llmRerankOllamaModel.ifBlank { OllamaDefaultModelName },
+                onValueChange = { viewModel.updateRagPipeline { c -> c.copy(llmRerankOllamaModel = it) } },
+                labelText = "Модель для LLM-rerank",
+            )
+            OutlinedTextField(
+                value = cfg.llmRerankMaxCandidates.toString(),
+                onValueChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateRagPipeline { c -> c.copy(llmRerankMaxCandidates = v.coerceAtLeast(1)) }
+                    }
+                },
+                label = { Text("Макс. кандидатов для LLM-rerank") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Text("Охват панели оценки (dry-run)", style = MaterialTheme.typography.labelMedium)
+            Text(
+                "Не влияет на поиск в чате и на проверку «Запустить»; только для теста и будущей отладки.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = cfg.evaluationScope == RagEvaluationScope.ALL,
+                        onClick = { viewModel.updateRagPipeline { c -> c.copy(evaluationScope = RagEvaluationScope.ALL) } },
+                    )
+                    Text("Все опциональные шаги")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = cfg.evaluationScope == RagEvaluationScope.SUBSET,
+                        onClick = { viewModel.updateRagPipeline { c -> c.copy(evaluationScope = RagEvaluationScope.SUBSET) } },
+                    )
+                    Text("Выборочно")
+                }
+            }
+            if (cfg.evaluationScope == RagEvaluationScope.SUBSET) {
+                val ev = cfg.evaluationStepsEnabled
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(ev.threshold, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(threshold = v)) } })
+                        Text("Порог")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(ev.heuristic, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(heuristic = v)) } })
+                        Text("Эвристика")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(ev.llmRerank, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(llmRerank = v)) } })
+                        Text("LLM rerank")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(ev.queryRewrite, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(queryRewrite = v)) } })
+                        Text("Query rewrite")
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { viewModel.saveRagPipeline() },
+                    enabled = ui.ragPipelineConfig != ui.savedRagPipelineConfig,
+                ) { Text("Сохранить настройки RAG") }
+                OutlinedButton(onClick = { viewModel.refreshOllamaModelList() }) { Text("Обновить список моделей Ollama") }
+            }
+            ui.ollamaModelsLoadError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            HorizontalDivider()
+            Text("Проверка извлечения (dry-run)", style = MaterialTheme.typography.titleSmall)
+            OutlinedTextField(
+                value = ui.ragPreviewQuery,
+                onValueChange = viewModel::setRagPreviewQuery,
+                label = { Text("Тестовый запрос") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { viewModel.runRagPreviewDryRun() },
+                    enabled = !ui.ragPreviewLoading,
+                ) { Text("Запустить") }
+                if (ui.ragPreviewLoading) {
+                    CircularProgressIndicator(Modifier.height(22.dp).width(22.dp))
+                }
+            }
+            ui.ragPreviewText?.let { t ->
+                SelectionContainer {
+                    Text(t, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+                }
+            }
+        }
+    }
+    if (showPipelineHelp) {
+        AlertDialog(
+            onDismissRequest = { showPipelineHelp = false },
+            title = { Text("Справка: пайплайн RAG") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        text = ragPipelinePanelHelpText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPipelineHelp = false }) {
+                    Text("OK")
+                }
+            },
+        )
     }
 }
 
@@ -298,6 +595,9 @@ fun RagEmbeddingsContent(viewModel: RagEmbeddingsViewModel = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("RAG: эмбеддинги Ollama", style = MaterialTheme.typography.titleLarge)
+
+            RagPipelineSettingsCard(ui = ui, viewModel = viewModel)
+
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,

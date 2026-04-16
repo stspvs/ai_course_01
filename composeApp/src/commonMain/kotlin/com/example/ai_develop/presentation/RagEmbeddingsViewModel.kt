@@ -4,10 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_develop.data.EmbeddingFloatCodec
 import com.example.ai_develop.data.OllamaEmbeddingClient
+import com.example.ai_develop.data.OllamaModelsClient
+import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagEmbeddingRepository
+import com.example.ai_develop.data.RagPipelineSettingsRepository
 import com.example.ai_develop.data.RagStoredChunk
+import com.example.ai_develop.domain.ChatRepository
 import com.example.ai_develop.domain.ChunkStrategy
+import com.example.ai_develop.domain.LLMProvider
 import com.example.ai_develop.domain.OllamaDefaultModelName
+import com.example.ai_develop.domain.RagRetrievalConfig
 import com.example.ai_develop.domain.TextChunk
 import com.example.ai_develop.domain.TextChunker
 import com.example.ai_develop.platform.openTextFileDialog
@@ -42,12 +48,24 @@ data class RagEmbeddingsUiState(
     val expandedDbDocId: String? = null,
     val dbPreviewText: String? = null,
     val dbPreviewChunks: List<RagStoredChunk> = emptyList(),
+    val ragPipelineConfig: RagRetrievalConfig = RagRetrievalConfig.Default,
+    /** Последний конфиг, записанный в БД; для сравнения с [ragPipelineConfig]. */
+    val savedRagPipelineConfig: RagRetrievalConfig = RagRetrievalConfig.Default,
+    val ollamaLocalModels: List<String> = emptyList(),
+    val ollamaModelsLoadError: String? = null,
+    val ragPreviewQuery: String = "",
+    val ragPreviewText: String? = null,
+    val ragPreviewLoading: Boolean = false,
 )
 
 @OptIn(ExperimentalUuidApi::class)
 class RagEmbeddingsViewModel(
     private val ollamaEmbeddingClient: OllamaEmbeddingClient,
     private val ragRepository: RagEmbeddingRepository,
+    private val ragContextRetriever: RagContextRetriever,
+    private val ragPipelineSettingsRepository: RagPipelineSettingsRepository,
+    private val ollamaModelsClient: OllamaModelsClient,
+    private val chatRepository: ChatRepository,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(RagEmbeddingsUiState())
@@ -58,6 +76,115 @@ class RagEmbeddingsViewModel(
         SharingStarted.WhileSubscribed(5000),
         emptyList(),
     )
+
+    init {
+        viewModelScope.launch {
+            runCatching { ragPipelineSettingsRepository.getConfig() }.getOrNull()?.let { cfg ->
+                _ui.update { it.copy(ragPipelineConfig = cfg, savedRagPipelineConfig = cfg) }
+            }
+        }
+        viewModelScope.launch { refreshOllamaModelList() }
+    }
+
+    fun updateRagPipeline(transform: (RagRetrievalConfig) -> RagRetrievalConfig) {
+        _ui.update { it.copy(ragPipelineConfig = transform(it.ragPipelineConfig)) }
+    }
+
+    fun saveRagPipeline() {
+        viewModelScope.launch {
+            try {
+                ragPipelineSettingsRepository.saveConfig(_ui.value.ragPipelineConfig)
+                _ui.update { cur ->
+                    cur.copy(
+                        savedRagPipelineConfig = cur.ragPipelineConfig,
+                        saveMessage = "Настройки RAG сохранены",
+                        error = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update { it.copy(error = e.message ?: e.toString()) }
+            }
+        }
+    }
+
+    fun refreshOllamaModelList() {
+        viewModelScope.launch {
+            ollamaModelsClient.listModelNames()
+                .onSuccess { names ->
+                    _ui.update { it.copy(ollamaLocalModels = names, ollamaModelsLoadError = null) }
+                }
+                .onFailure { e ->
+                    _ui.update { it.copy(ollamaModelsLoadError = e.message ?: e.toString()) }
+                }
+        }
+    }
+
+    fun setRagPreviewQuery(q: String) {
+        _ui.update { it.copy(ragPreviewQuery = q) }
+    }
+
+    fun runRagPreviewDryRun() {
+        val q = _ui.value.ragPreviewQuery.trim()
+        if (q.isEmpty()) {
+            _ui.update { it.copy(error = "Введите тестовый запрос") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(ragPreviewLoading = true, ragPreviewText = null, error = null) }
+            try {
+                val cfg = _ui.value.ragPipelineConfig
+                var retrievalQuery = q
+                var rewriteApplied = false
+                if (cfg.queryRewriteEnabled) {
+                    val provider = LLMProvider.Ollama(
+                        model = cfg.rewriteOllamaModel.trim().ifBlank { OllamaDefaultModelName },
+                    )
+                    chatRepository.rewriteQueryForRag(q, provider).onSuccess { rw ->
+                        if (rw.isNotBlank()) {
+                            retrievalQuery = rw.trim()
+                            rewriteApplied = true
+                        }
+                    }
+                }
+                if (retrievalQuery.isBlank()) retrievalQuery = q
+
+                val r = ragContextRetriever.retrieve(
+                    originalQuery = q,
+                    retrievalQuery = retrievalQuery,
+                    config = cfg,
+                    rewriteApplied = rewriteApplied,
+                )
+                val text = buildString {
+                    if (r == null) {
+                        appendLine("Нет результата (пустой запрос).")
+                    } else {
+                        if (rewriteApplied || retrievalQuery != q) {
+                            appendLine("Исходный запрос: $q")
+                            appendLine("Запрос для поиска (после rewrite): ${retrievalQuery.take(500)}")
+                            appendLine()
+                        }
+                        r.attribution.debug?.let { d ->
+                            appendLine("Режим: ${d.pipelineMode}")
+                            appendLine("Recall K: ${d.recallTopK}, final K: ${d.finalTopK}")
+                            appendLine("После recall: ${d.candidatesAfterRecall}, после порога: ${d.candidatesAfterThreshold}, после rerank: ${d.candidatesAfterRerank}")
+                            d.minSimilarity?.let { appendLine("Порог: $it") }
+                            d.emptyReason?.let { appendLine("Причина пусто: $it") }
+                            appendLine()
+                        }
+                        appendLine("Использован RAG: ${r.attribution.used}")
+                        r.attribution.sources.forEachIndexed { i, s ->
+                            appendLine("${i + 1}. ${s.documentTitle} score=${s.score} final=${s.finalScore}")
+                        }
+                    }
+                }
+                _ui.update { it.copy(ragPreviewText = text.trim(), ragPreviewLoading = false) }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(ragPreviewLoading = false, error = e.message ?: e.toString())
+                }
+            }
+        }
+    }
 
     fun setOllamaModel(value: String) {
         _ui.update { it.copy(ollamaModel = value, error = null, saveMessage = null) }

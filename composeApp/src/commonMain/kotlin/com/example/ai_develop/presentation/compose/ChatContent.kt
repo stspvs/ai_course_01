@@ -35,9 +35,10 @@ import androidx.compose.ui.unit.sp
 import com.example.ai_develop.domain.*
 import kotlin.math.min
 
-private fun ChatMessage.supportsRagChunkDetailDialog(): Boolean {
+private fun ChatMessage.supportsRagDetailDialog(): Boolean {
     if (source != SourceType.AI && role.lowercase() != "assistant") return false
     val attr = llmRequestSnapshot?.ragAttribution ?: return false
+    if (attr.debug != null) return true
     return attr.used && attr.sources.isNotEmpty()
 }
 
@@ -65,7 +66,6 @@ internal fun ChatContent(
     var showMemoryPanel by remember { mutableStateOf(false) }
 
     val strategy = activeAgent?.memoryStrategy
-    val isGeneralChat = state.selectedAgentId == GENERAL_CHAT_ID
     var ragDetailMessage by remember { mutableStateOf<ChatMessage?>(null) }
     val isBranchingMode = strategy is ChatMemoryStrategy.Branching
     val isSummarizationMode = strategy is ChatMemoryStrategy.Summarization
@@ -171,7 +171,6 @@ internal fun ChatContent(
                     MessageItem(
                         message = message,
                         isBranchingMode = isBranchingMode,
-                        isGeneralChat = isGeneralChat,
                         onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) },
                         onOpenRagDialog = { ragDetailMessage = it },
                     )
@@ -581,23 +580,60 @@ private fun RagChunksDetailDialog(
     message: ChatMessage,
     onDismiss: () -> Unit,
 ) {
-    val sources = message.llmRequestSnapshot?.ragAttribution?.sources.orEmpty()
+    val attr = message.llmRequestSnapshot?.ragAttribution
+    val sources = attr?.sources.orEmpty()
+    val debug = attr?.debug
     val scroll = rememberScrollState()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Фрагменты, подмешанные в промпт") },
+        title = { Text("RAG: шаги и фрагменты") },
         text = {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 440.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(scroll),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (debug != null) {
+                    Text("Пайплайн", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        buildString {
+                            appendLine("Режим: ${debug.pipelineMode}")
+                            appendLine("Запрос: ${debug.originalQuery.take(500)}")
+                            if (debug.rewriteApplied || debug.retrievalQuery != debug.originalQuery) {
+                                appendLine("Для поиска: ${debug.retrievalQuery.take(500)}")
+                            }
+                            appendLine("Recall K: ${debug.recallTopK}, final K: ${debug.finalTopK}")
+                            appendLine("После recall: ${debug.candidatesAfterRecall}, после порога: ${debug.candidatesAfterThreshold}, после rerank: ${debug.candidatesAfterRerank}")
+                            debug.minSimilarity?.let { appendLine("Порог (отсечение по cosine): $it") }
+                            debug.hybridLexicalWeight?.let { appendLine("Баланс w (косинус в смеси): $it") }
+                            debug.llmRerankModel?.let { appendLine("Модель LLM-rerank: $it") }
+                            debug.emptyReason?.let { appendLine("Причина пустого контекста: $it") }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Мин. similarity — фильтр по косинусу до пересортировки. У фрагмента: cosine — близость эмбеддингов; " +
+                            "«Итог Hybrid» — w·cosine + (1−w)·Jaccard; для LLM rerank — оценка модели.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    HorizontalDivider()
+                }
                 Text(
-                    text = "Ниже — тот же текст, что был добавлен в системный промпт вместе с вашим вопросом. Ответ мог опираться на эти фрагменты, на общие знания модели или на оба источника.",
+                    text = if (sources.isEmpty()) {
+                        "Фрагменты из базы не были подмешаны в промпт (или список недоступен)."
+                    } else {
+                        "Ниже — текст, добавленный в системный промпт. Ответ мог опираться на эти фрагменты и на общие знания модели."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                val finalScoreLabel = when (debug?.pipelineMode) {
+                    RagPipelineMode.Hybrid -> "Итог Hybrid"
+                    RagPipelineMode.LlmRerank -> "Оценка LLM"
+                    else -> "итог"
+                }
                 sources.forEachIndexed { i, src ->
                     HorizontalDivider()
                     Text(
@@ -609,7 +645,8 @@ private fun RagChunksDetailDialog(
                         text = buildString {
                             append(src.sourceFileName)
                             append(" · чанк ${src.chunkIndex}")
-                            src.score?.let { append(" · близость к запросу " + "%.3f".format(it)) }
+                            src.score?.let { append(" · косинус " + "%.3f".format(it)) }
+                            src.finalScore?.let { append(" · $finalScoreLabel " + "%.3f".format(it)) }
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray,
@@ -643,14 +680,13 @@ private fun RagChunksDetailDialog(
 private fun MessageItem(
     message: ChatMessage,
     isBranchingMode: Boolean,
-    isGeneralChat: Boolean,
     onCreateBranch: (String) -> Unit,
     onOpenRagDialog: (ChatMessage) -> Unit,
 ) {
     var showBranchDialog by remember { mutableStateOf(false) }
     var branchName by remember { mutableStateOf("") }
 
-    val openRagOnClick = isGeneralChat && message.supportsRagChunkDetailDialog()
+    val openRagOnClick = message.supportsRagDetailDialog()
 
     val outerModifier = when {
         isBranchingMode && openRagOnClick -> Modifier.combinedClickable(
