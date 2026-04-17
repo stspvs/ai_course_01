@@ -78,7 +78,9 @@ class WasmChatRepository(private val json: Json) : LocalChatRepository {
             maxTokens = agent.maxTokens,
             memoryStrategy = agent.memoryStrategy,
             currentBranchId = agent.currentBranchId,
-            branches = agent.branches
+            branches = agent.branches,
+            ragEnabled = agent.ragEnabled,
+            mcpAllowedBindingIds = agent.mcpAllowedBindingIds,
         ) ?: agent
         
         saveAgent(toSave)

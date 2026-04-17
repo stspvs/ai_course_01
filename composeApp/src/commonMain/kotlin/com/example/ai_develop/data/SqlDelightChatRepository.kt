@@ -79,6 +79,10 @@ class SqlDelightChatRepository(
             workingMemoryJson = json.encodeToString(WorkingMemory.serializer(), state.workingMemory),
             llmProviderJson = json.encodeToString(LLMProvider.serializer(), state.provider),
             ragEnabled = state.ragEnabled,
+            mcpAllowedBindingIdsJson = json.encodeToString(
+                ListSerializer(String.serializer()),
+                state.mcpAllowedBindingIds,
+            ),
         )
     }
 
@@ -130,6 +134,7 @@ class SqlDelightChatRepository(
                     messages = msgs,
                     userProfile = profile,
                     ragEnabled = state.ragEnabled,
+                    mcpAllowedBindingIds = state.mcpAllowedBindingIds,
                 )
             }
         }
@@ -152,6 +157,7 @@ class SqlDelightChatRepository(
                     messages = it.messages,
                     userProfile = profile,
                     ragEnabled = it.ragEnabled,
+                    mcpAllowedBindingIds = it.mcpAllowedBindingIds,
                 )
             }
         }
@@ -170,6 +176,7 @@ class SqlDelightChatRepository(
             workingMemory = agent.workingMemory,
             messages = agent.messages,
             ragEnabled = agent.ragEnabled,
+            mcpAllowedBindingIds = agent.mcpAllowedBindingIds,
         )
         saveAgentState(state)
     }
@@ -186,6 +193,7 @@ class SqlDelightChatRepository(
             memoryStrategy = agent.memoryStrategy,
             workingMemory = agent.workingMemory,
             ragEnabled = agent.ragEnabled,
+            mcpAllowedBindingIds = agent.mcpAllowedBindingIds,
         )
         persistAgentStateRow(state)
     }
@@ -403,7 +411,17 @@ class SqlDelightChatRepository(
                 WorkingMemory()
             },
             ragEnabled = it.ragEnabled,
+            mcpAllowedBindingIds = decodeMcpAllowedBindingIds(it.mcpAllowedBindingIdsJson),
         )
+    }
+
+    private fun decodeMcpAllowedBindingIds(jsonStr: String): List<String> {
+        if (jsonStr.isBlank()) return emptyList()
+        return try {
+            json.decodeFromString(ListSerializer(String.serializer()), jsonStr)
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     private fun mapTaskToDomain(it: TaskEntity): TaskContext {

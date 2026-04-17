@@ -1,0 +1,1 @@
+ALTER TABLE AgentStateEntity ADD COLUMN mcpAllowedBindingIdsJson TEXT NOT NULL DEFAULT '[]';

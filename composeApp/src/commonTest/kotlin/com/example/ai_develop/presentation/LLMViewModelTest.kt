@@ -2,6 +2,7 @@ package com.example.ai_develop.presentation
 
 import app.cash.turbine.test
 import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.EmptyMcpRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.*
@@ -385,7 +386,8 @@ class LLMViewModelTest {
                     memoryStrategy = state.memoryStrategy,
                     workingMemory = state.workingMemory,
                     messages = emptyList(),
-                    userProfile = profile
+                    userProfile = profile,
+                    mcpAllowedBindingIds = state.mcpAllowedBindingIds,
                 )
             }
         }
@@ -404,7 +406,8 @@ class LLMViewModelTest {
                     memoryStrategy = it.memoryStrategy,
                     workingMemory = it.workingMemory,
                     messages = it.messages,
-                    userProfile = profile
+                    userProfile = profile,
+                    mcpAllowedBindingIds = it.mcpAllowedBindingIds,
                 )
             }
         }
@@ -421,7 +424,8 @@ class LLMViewModelTest {
                     stopWord = agent.stopWord,
                     memoryStrategy = agent.memoryStrategy,
                     workingMemory = agent.workingMemory,
-                    messages = agent.messages
+                    messages = agent.messages,
+                    mcpAllowedBindingIds = agent.mcpAllowedBindingIds,
                 )
             )
         }
@@ -525,7 +529,7 @@ class LLMViewModelTest {
     private class FakeAgentManagementUseCase(
         val repo: ChatRepository,
         val streaming: ChatStreamingUseCase
-    ) : AgentManagementUseCase(repo, streaming, UpdateWorkingMemoryUseCase(repo)) {
+    ) : AgentManagementUseCase(repo, streaming, UpdateWorkingMemoryUseCase(repo), EmptyMcpRepository()) {
         
         override suspend fun createAgent(): String {
             val id = Uuid.random().toString()

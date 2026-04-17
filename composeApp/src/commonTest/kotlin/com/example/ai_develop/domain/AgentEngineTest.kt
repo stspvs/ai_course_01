@@ -217,7 +217,7 @@ class AgentEngineTest {
 
     @Test
     fun testProcessToolsFormat1() = runTest {
-        val result = engine.processTools("[TOOL: calculator(5*5)]")
+        val result = engine.processTools(defaultAgent, "[TOOL: calculator(5*5)]")
         assertEquals("executed: 5*5", result)
         assertEquals(1, tool1.callCount)
     }
@@ -225,19 +225,19 @@ class AgentEngineTest {
     @Test
     fun testProcessToolsFormat2() = runTest {
         val text = "TOOL_CALL: calculator\nINPUT: some complex data"
-        val result = engine.processTools(text)
+        val result = engine.processTools(defaultAgent, text)
         assertEquals("executed: some complex data", result)
     }
 
     @Test
     fun testProcessToolsReturnsNullWhenNotFound() = runTest {
-        val result = engine.processTools("[TOOL: unknown_tool(input)]")
+        val result = engine.processTools(defaultAgent, "[TOOL: unknown_tool(input)]")
         assertNull(result)
     }
 
     @Test
     fun testProcessToolsHandlesEmptyString() = runTest {
-        assertNull(engine.processTools(""))
+        assertNull(engine.processTools(defaultAgent, ""))
     }
 
     @Test
@@ -268,15 +268,15 @@ class AgentEngineTest {
 
     @Test
     fun testRegisteredToolNames() {
-        assertEquals(listOf("calculator"), engine.registeredToolNames())
+        assertEquals(listOf("calculator"), engine.registeredToolNames(defaultAgent))
         val empty = AgentEngine(repository, memoryManager, emptyList())
-        assertTrue(empty.registeredToolNames().isEmpty())
+        assertTrue(empty.registeredToolNames(defaultAgent).isEmpty())
     }
 
     @Test
     fun testToolSuppressesLlmFollowUp() {
-        assertFalse(engine.toolSuppressesLlmFollowUp("calculator"))
-        assertFalse(engine.toolSuppressesLlmFollowUp("missing"))
+        assertFalse(engine.toolSuppressesLlmFollowUp(defaultAgent, "calculator"))
+        assertFalse(engine.toolSuppressesLlmFollowUp(defaultAgent, "missing"))
 
         val suppressing = object : AgentTool {
             override val name = "news_search"
@@ -285,14 +285,14 @@ class AgentEngineTest {
             override suspend fun execute(input: String) = "ok"
         }
         val eng = AgentEngine(repository, memoryManager, listOf(suppressing))
-        assertTrue(eng.toolSuppressesLlmFollowUp("news_search"))
-        assertFalse(eng.toolSuppressesLlmFollowUp("calculator"))
+        assertTrue(eng.toolSuppressesLlmFollowUp(defaultAgent, "news_search"))
+        assertFalse(eng.toolSuppressesLlmFollowUp(defaultAgent, "calculator"))
     }
 
     @Test
     fun testExecuteToolCallUnknownReturnsNull() = runTest {
         val call = ParsedToolCall("no_such_tool", "in")
-        assertNull(engine.executeToolCall(call))
+        assertNull(engine.executeToolCall(defaultAgent, call))
     }
 
     @Test

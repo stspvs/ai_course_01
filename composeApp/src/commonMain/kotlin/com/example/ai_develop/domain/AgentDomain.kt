@@ -79,4 +79,6 @@ data class AgentState(
     val branches: List<ChatBranch> = emptyList(),
     val currentBranchId: String? = null,
     val ragEnabled: Boolean = true,
+    /** Id привязок MCP ([McpToolBindingEntity.id]), разрешённых этому агенту; пустой список — без MCP. */
+    val mcpAllowedBindingIds: List<String> = emptyList(),
 )

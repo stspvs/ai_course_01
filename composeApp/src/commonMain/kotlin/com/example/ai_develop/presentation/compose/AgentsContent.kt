@@ -21,7 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.ai_develop.data.McpToolBindingRecord
 import com.example.ai_develop.domain.*
+import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.*
 import kotlinx.coroutines.delay
 
@@ -29,6 +31,7 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun AgentsContent(
     state: LLMStateModel,
+    viewModel: LLMViewModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
@@ -43,6 +46,7 @@ internal fun AgentsContent(
         if (isMobile) {
             MobileAgentsContent(
                 state = state,
+                viewModel = viewModel,
                 templates = templates,
                 onCreateAgent = onCreateAgent,
                 onUpdateAgent = onUpdateAgent,
@@ -54,6 +58,7 @@ internal fun AgentsContent(
         } else {
             DesktopAgentsContent(
                 state = state,
+                viewModel = viewModel,
                 templates = templates,
                 onCreateAgent = onCreateAgent,
                 onUpdateAgent = onUpdateAgent,
@@ -69,6 +74,7 @@ internal fun AgentsContent(
 @Composable
 private fun DesktopAgentsContent(
     state: LLMStateModel,
+    viewModel: LLMViewModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
@@ -94,6 +100,7 @@ private fun DesktopAgentsContent(
             if (selectedAgent != null) {
                 AgentDetails(
                     agent = selectedAgent,
+                    viewModel = viewModel,
                     templates = templates,
                     canDelete = selectedAgent.id != GENERAL_CHAT_ID,
                     onUpdateAgent = { n, p, t, pr, s, m, k, r -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k, r) },
@@ -112,6 +119,7 @@ private fun DesktopAgentsContent(
 @Composable
 private fun MobileAgentsContent(
     state: LLMStateModel,
+    viewModel: LLMViewModel,
     templates: List<AgentTemplate>,
     onCreateAgent: () -> Unit,
     onUpdateAgent: (String, String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
@@ -143,6 +151,7 @@ private fun MobileAgentsContent(
                 )
                 AgentDetails(
                     agent = selectedAgent,
+                    viewModel = viewModel,
                     templates = templates,
                     canDelete = selectedAgent.id != GENERAL_CHAT_ID,
                     onUpdateAgent = { n, p, t, pr, s, m, k, r -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k, r) },
@@ -205,7 +214,7 @@ private fun AvailableToolsOnAgentsPanel(toolNames: List<String>) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            "Актуальный список для всех агентов в чате; обновляется при изменениях в БД (вкладка «MCP»).",
+            "Список для выбранного агента (назначение — вкладка «MCP» в карточке агента).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
         )
@@ -278,6 +287,7 @@ private fun AgentItem(
 @Composable
 private fun AgentDetails(
     agent: Agent,
+    viewModel: LLMViewModel,
     templates: List<AgentTemplate>,
     canDelete: Boolean,
     onUpdateAgent: (String, String, Double, LLMProvider, String, Int, ChatMemoryStrategy, Boolean) -> Unit,
@@ -295,6 +305,9 @@ private fun AgentDetails(
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
                 Text("Память & Персонализация", modifier = Modifier.padding(12.dp))
             }
+            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }) {
+                Text("MCP", modifier = Modifier.padding(12.dp))
+            }
         }
         
         Box(modifier = Modifier.weight(1f).padding(16.dp)) {
@@ -311,6 +324,88 @@ private fun AgentDetails(
                     agent = agent,
                     onUpdateProfile = onUpdateProfile
                 )
+                2 -> AgentMcpAssignmentTab(agent = agent, viewModel = viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentMcpAssignmentTab(
+    agent: Agent,
+    viewModel: LLMViewModel,
+) {
+    var rows by remember { mutableStateOf<List<Pair<String, McpToolBindingRecord>>>(emptyList()) }
+    var selected by remember(agent.id) { mutableStateOf(agent.mcpAllowedBindingIds.toSet()) }
+
+    LaunchedEffect(agent.mcpAllowedBindingIds) {
+        selected = agent.mcpAllowedBindingIds.toSet()
+    }
+
+    LaunchedEffect(agent.id) {
+        rows = viewModel.loadMcpAssignmentCatalog()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Инструменты MCP", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Отметьте привязки из каталога (глобально они настраиваются на вкладке «MCP»). Для агента без отметок MCP не используется.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = {
+                val all = rows.map { it.second.id }.toSet()
+                selected = all
+                viewModel.setMcpAllowedBindingIds(agent.id, all.toList())
+            }) { Text("Все") }
+            TextButton(onClick = {
+                selected = emptySet()
+                viewModel.setMcpAllowedBindingIds(agent.id, emptyList())
+            }) { Text("Снять все") }
+        }
+        if (rows.isEmpty()) {
+            Text(
+                "Нет доступных привязок: включите сервер на вкладке «MCP» и нажмите «Обновить список tools».",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            var lastServer = ""
+            rows.forEach { (serverLabel, binding) ->
+                if (serverLabel != lastServer) {
+                    lastServer = serverLabel
+                    Text(
+                        serverLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = binding.id in selected,
+                        onCheckedChange = { checked ->
+                            selected = if (checked) selected + binding.id else selected - binding.id
+                            viewModel.setMcpAllowedBindingIds(agent.id, selected.toList())
+                        }
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(binding.mcpToolName, style = MaterialTheme.typography.bodyMedium)
+                        if (binding.description.isNotBlank()) {
+                            Text(
+                                binding.description.take(280),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     }

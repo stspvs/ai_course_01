@@ -23,6 +23,9 @@ interface McpRepository {
     /** Все включённые привязки с учётом включённого сервера (для реестра инструментов). */
     suspend fun getEnabledBindingsForRuntime(): List<McpToolBindingRecord>
 
+    /** Все привязки (для экрана назначения MCP агентам). */
+    suspend fun getAllBindings(): List<McpToolBindingRecord>
+
     suspend fun updateServerSyncState(
         serverId: String,
         toolsJson: String,

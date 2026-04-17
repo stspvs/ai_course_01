@@ -4,7 +4,6 @@ import com.example.ai_develop.data.McpRepository
 import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagPipelineSettingsRepository
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 
 /**
@@ -28,7 +27,7 @@ open class ChatStreamingUseCase(
     private val _agentCacheGeneration = MutableStateFlow(0L)
     val agentCacheGeneration: StateFlow<Long> = _agentCacheGeneration.asStateFlow()
 
-    private val engine = AgentEngine(repository, memoryManager) { agentToolRegistry.currentTools() }
+    private val engine = AgentEngine(repository, memoryManager) { agent -> agentToolRegistry.toolsFor(agent) }
 
     /**
      * Подгружает MCP-привязки из БД перед запросом к LLM.
@@ -44,21 +43,17 @@ open class ChatStreamingUseCase(
         return agentToolRegistry.currentMcpToolNames()
     }
 
-    /** Все имена инструментов, видимые агенту (базовые + MCP), в актуальном порядке после [ensureToolsLoaded]. */
-    open suspend fun loadedAllToolNames(): List<String> {
+    /** Имена инструментов для [agent] (базовые + назначенные MCP). */
+    open suspend fun toolNamesForAgent(agent: Agent): List<String> {
         ensureToolsLoaded()
-        return agentToolRegistry.currentAllToolNames().sorted()
+        return agentToolRegistry.toolsFor(agent).map { it.name }.sorted()
     }
 
-    /**
-     * Обновляется при любых изменениях MCP в БД ([McpRepository.observeMcpRegistryChanges]);
-     * после каждого события перечитывается реестр и отдаётся полный список имён инструментов.
-     */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    open fun observeAvailableToolNames(): Flow<List<String>> =
-        mcpRepository.observeMcpRegistryChanges()
-            .mapLatest { loadedAllToolNames() }
-            .distinctUntilChanged()
+    /** Эмит при старте и при любых изменениях MCP в БД — для пересчёта списка инструментов в UI. */
+    open fun observeMcpRegistryRefresh(): Flow<Unit> = merge(
+        flowOf(Unit),
+        mcpRepository.observeMcpRegistryChanges(),
+    )
 
     /**
      * Получает или создает автономного агента.

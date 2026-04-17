@@ -29,8 +29,7 @@ data class LLMStateModel(
     val currentAgentState: AgentState? = null,
     val activeInvariants: List<Invariant> = emptyList(),
     /**
-     * Полный список имён инструментов, доступных агентам в чате (базовые + MCP), общий для всех агентов.
-     * Обновляется при изменениях MCP в БД и при обновлении состояния агентов.
+     * Имена инструментов (базовые + назначенные MCP), актуальные для выбранного агента.
      */
     val availableToolNames: List<String> = emptyList(),
 ) {

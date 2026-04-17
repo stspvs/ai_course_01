@@ -89,6 +89,7 @@ open class AutonomousAgent(
                 workingMemory = state.workingMemory,
                 messages = messages,
                 ragEnabled = state.ragEnabled,
+                mcpAllowedBindingIds = state.mcpAllowedBindingIds,
             )
         }
     }
@@ -145,8 +146,9 @@ open class AutonomousAgent(
             _agent.value?.let { syncWithRepository(it) }
 
             val batchCalls = engine.parseAllToolCalls(responseText)
+            val agentForTools = _agent.value ?: return@flow
             val suppressOnlyBatch =
-                batchCalls.isNotEmpty() && batchCalls.all { engine.toolSuppressesLlmFollowUp(it.toolName) }
+                batchCalls.isNotEmpty() && batchCalls.all { engine.toolSuppressesLlmFollowUp(agentForTools, it.toolName) }
 
             if (suppressOnlyBatch) {
                 runSuppressOnlyToolSequence(
@@ -253,12 +255,18 @@ open class AutonomousAgent(
 
             _agentActivity.value = AgentActivity.RunningTool(toolCall.toolName)
             var toolExecutionFailed = false
+            val agentForExec = _agent.value
             val toolResultText: String = try {
-                engine.executeToolCall(toolCall) ?: run {
+                if (agentForExec == null) {
                     toolExecutionFailed = true
-                    val names = engine.registeredToolNames()
-                    val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
-                    "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
+                    "Tool error: agent state missing."
+                } else {
+                    engine.executeToolCall(agentForExec, toolCall) ?: run {
+                        toolExecutionFailed = true
+                        val names = engine.registeredToolNames(agentForExec)
+                        val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
+                        "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
+                    }
                 }
             } catch (e: Exception) {
                 toolExecutionFailed = true
@@ -356,12 +364,18 @@ open class AutonomousAgent(
 
             _agentActivity.value = AgentActivity.RunningTool(toolCall.toolName)
             var toolExecutionFailed = false
+            val execAgent = _agent.value
             val toolResultText: String = try {
-                engine.executeToolCall(toolCall) ?: run {
+                if (execAgent == null) {
                     toolExecutionFailed = true
-                    val names = engine.registeredToolNames()
-                    val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
-                    "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
+                    "Tool error: agent state missing."
+                } else {
+                    engine.executeToolCall(execAgent, toolCall) ?: run {
+                        toolExecutionFailed = true
+                        val names = engine.registeredToolNames(execAgent)
+                        val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
+                        "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
+                    }
                 }
             } catch (e: Exception) {
                 toolExecutionFailed = true

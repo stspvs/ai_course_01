@@ -96,6 +96,10 @@ class SqlDelightMcpRepository(
                 .map { it.toRecord() }
         }
 
+    override suspend fun getAllBindings(): List<McpToolBindingRecord> = withContext(Dispatchers.Default) {
+        queries.getAllMcpBindings().executeAsList().map { it.toRecord() }
+    }
+
     override suspend fun updateServerSyncState(
         serverId: String,
         toolsJson: String,

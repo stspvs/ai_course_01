@@ -123,6 +123,7 @@ fun ChatScreen(viewModel: LLMViewModel) {
 
                 1 -> AgentsContent(
                     state = state,
+                    viewModel = viewModel,
                     templates = viewModel.agentTemplates,
                     onCreateAgent = { viewModel.createAgent() },
                     onUpdateAgent = { id, n, p, t, pr, s, m, k, r ->

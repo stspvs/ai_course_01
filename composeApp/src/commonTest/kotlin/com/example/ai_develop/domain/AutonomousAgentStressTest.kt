@@ -418,11 +418,11 @@ class AutonomousAgentStressTest {
             }
         }
 
-        override suspend fun executeToolCall(call: ParsedToolCall): String? {
+        override suspend fun executeToolCall(agent: Agent, call: ParsedToolCall): String? {
             if (toolResults.isNotEmpty()) {
                 return toolResults.removeAt(0)
             }
-            return super.executeToolCall(call)
+            return super.executeToolCall(agent, call)
         }
     }
 

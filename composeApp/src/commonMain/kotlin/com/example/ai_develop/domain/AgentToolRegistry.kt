@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * Базовые инструменты + динамические MCP-привязки из БД. Снимок обновляется через [reloadFromDatabase].
+ * MCP на агента: только привязки из [Agent.mcpAllowedBindingIds].
  */
 class AgentToolRegistry(
     private val baseTools: List<AgentTool>,
@@ -16,48 +17,60 @@ class AgentToolRegistry(
     private val transport: McpTransport,
 ) {
     private val mutex = Mutex()
-    private var cachedDynamic: List<AgentTool> = emptyList()
+    /** Все включённые MCP-инструменты по id привязки (после [reloadFromDatabase]). */
+    private var cachedMcpToolsByBindingId: Map<String, AgentTool> = emptyMap()
 
-    fun currentTools(): List<AgentTool> = baseTools + cachedDynamic
+    /**
+     * Инструменты для [agent]: базовые + MCP с id из [Agent.mcpAllowedBindingIds].
+     * Пустой allowlist — только [baseTools].
+     */
+    fun toolsFor(agent: Agent): List<AgentTool> {
+        if (agent.mcpAllowedBindingIds.isEmpty()) return baseTools.toList()
+        val allowed = agent.mcpAllowedBindingIds.toSet()
+        val ordered = agent.mcpAllowedBindingIds.mapNotNull { id -> cachedMcpToolsByBindingId[id] }
+        return baseTools + ordered
+    }
 
-    /** Полный список имён инструментов в промпте агента (базовые + MCP). */
-    fun currentAllToolNames(): List<String> = currentTools().map { it.name }
-
-    /** Имена MCP-привязок, попавших в рантайм ([reloadFromDatabase]). Без встроенных baseTools. */
-    fun currentMcpToolNames(): List<String> = cachedDynamic.map { it.name }
+    /** Полный список имён MCP после синхронизации (для отладки/UI каталога). */
+    fun currentMcpToolNames(): List<String> = cachedMcpToolsByBindingId.values.map { it.name }
 
     suspend fun reloadFromDatabase() {
         mutex.withLock {
             val serversById = mcpRepository.getAllServers().associateBy { it.id }
             val bindings = mcpRepository.getEnabledBindingsForRuntime()
             val exposedByBindingId = resolveExposedToolNames(bindings, serversById)
-            cachedDynamic = bindings.mapNotNull { binding ->
-                val server = serversById[binding.serverId] ?: return@mapNotNull null
-                if (!server.enabled) return@mapNotNull null
-                val exposedName = exposedByBindingId[binding.id] ?: binding.mcpToolName
-                val desc = binding.description.ifBlank {
-                    "MCP tool ${binding.mcpToolName} on ${server.displayName}"
+            cachedMcpToolsByBindingId = buildMap {
+                for (binding in bindings) {
+                    val server = serversById[binding.serverId] ?: continue
+                    if (!server.enabled) continue
+                    val exposedName = exposedByBindingId[binding.id] ?: binding.mcpToolName
+                    val desc = binding.description.ifBlank {
+                        "MCP tool ${binding.mcpToolName} on ${server.displayName}"
+                    }
+                    val schemaHint = when {
+                        binding.inputSchemaJson.isBlank() || binding.inputSchemaJson == "{}" -> ""
+                        binding.inputSchemaJson.length > 500 ->
+                            binding.inputSchemaJson.take(500) + "…"
+                        else -> binding.inputSchemaJson
+                    }
+                    val fullDescription = if (schemaHint.isNotEmpty()) {
+                        "$desc\n\nParameters: $schemaHint"
+                    } else {
+                        desc
+                    }
+                    val primaryArgument = inferPrimaryArgument(binding.inputSchemaJson)
+                    put(
+                        binding.id,
+                        DynamicMcpAgentTool(
+                            name = exposedName,
+                            description = fullDescription,
+                            server = server,
+                            mcpToolName = binding.mcpToolName,
+                            primaryArgument = primaryArgument,
+                            transport = transport,
+                        )
+                    )
                 }
-                val schemaHint = when {
-                    binding.inputSchemaJson.isBlank() || binding.inputSchemaJson == "{}" -> ""
-                    binding.inputSchemaJson.length > 500 ->
-                        binding.inputSchemaJson.take(500) + "…"
-                    else -> binding.inputSchemaJson
-                }
-                val fullDescription = if (schemaHint.isNotEmpty()) {
-                    "$desc\n\nParameters: $schemaHint"
-                } else {
-                    desc
-                }
-                val primaryArgument = inferPrimaryArgument(binding.inputSchemaJson)
-                DynamicMcpAgentTool(
-                    name = exposedName,
-                    description = fullDescription,
-                    server = server,
-                    mcpToolName = binding.mcpToolName,
-                    primaryArgument = primaryArgument,
-                    transport = transport,
-                )
             }
         }
     }

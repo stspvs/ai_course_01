@@ -118,6 +118,8 @@ data class Agent(
     val workingMemory: WorkingMemory = WorkingMemory(),
     /** Подмешивать контекст из локальной RAG-базы в запрос к LLM. */
     val ragEnabled: Boolean = true,
+    /** Id привязок MCP, назначенных агенту; пустой — инструменты MCP не используются. */
+    val mcpAllowedBindingIds: List<String> = emptyList(),
 )
 
 data class AgentUpdate(

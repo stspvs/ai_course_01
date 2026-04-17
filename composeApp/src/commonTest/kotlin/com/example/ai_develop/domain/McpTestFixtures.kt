@@ -25,6 +25,7 @@ internal class EmptyMcpRepository : McpRepository {
     override suspend fun upsertBinding(record: McpToolBindingRecord) {}
     override suspend fun deleteBinding(id: String) {}
     override suspend fun getEnabledBindingsForRuntime(): List<McpToolBindingRecord> = emptyList()
+    override suspend fun getAllBindings(): List<McpToolBindingRecord> = emptyList()
     override suspend fun updateServerSyncState(
         serverId: String,
         toolsJson: String,

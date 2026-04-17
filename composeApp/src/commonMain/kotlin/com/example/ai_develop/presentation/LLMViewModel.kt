@@ -4,6 +4,7 @@ package com.example.ai_develop.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ai_develop.data.McpToolBindingRecord
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -75,8 +76,8 @@ class LLMViewModel(
                             Triple(id, snapshot, loading to activity)
                         }
                     },
-                chatStreamingUseCase.observeAvailableToolNames(),
-            ) { agentsFromDb, pending, tripleWithActivity, toolNames ->
+                chatStreamingUseCase.observeMcpRegistryRefresh(),
+            ) { agentsFromDb, pending, tripleWithActivity, _ ->
                 val (targetId, snapshot, loadingAndActivity) = tripleWithActivity
                 val (loading, activity) = loadingAndActivity
                 val visibleFromDb = agentsFromDb.filter { it.id !in pending }
@@ -84,9 +85,13 @@ class LLMViewModel(
                     ?: visibleFromDb.find { it.id == targetId }
                     ?: createDefaultAgent(targetId)
                 val merged = mergeAgentsFromDbWithSelection(visibleFromDb, targetId, updatedAgent)
-                Triple(merged, loading, toolNames to activity)
-            }.collect { (finalAgents, loading, toolsAndActivity) ->
-                val (toolNames, activity) = toolsAndActivity
+                Triple(merged, loading, activity to targetId)
+            }.collect { (finalAgents, loading, activityAndTarget) ->
+                val (activity, targetId) = activityAndTarget
+                chatStreamingUseCase.ensureToolsLoaded()
+                val agentForTools = finalAgents.find { it.id == targetId }
+                    ?: createDefaultAgent(targetId)
+                val toolNames = chatStreamingUseCase.toolNamesForAgent(agentForTools)
                 _state.updateIfChanged { currentState ->
                     currentState.copy(
                         agents = finalAgents,
@@ -99,10 +104,12 @@ class LLMViewModel(
         }
     }
 
-    /** Принудительно перечитать инструменты из БД (редко нужно: список и так обновляется по [observeMcpRegistryChanges]). */
+    /** Пересчитать имена инструментов для текущего выбранного агента. */
     fun refreshAvailableTools() {
         viewModelScope.launch {
-            val names = chatStreamingUseCase.loadedAllToolNames()
+            val sel = _state.value.selectedAgentId ?: GENERAL_CHAT_ID
+            val agent = _state.value.agents.find { it.id == sel } ?: createDefaultAgent(sel)
+            val names = chatStreamingUseCase.toolNamesForAgent(agent)
             _state.updateIfChanged { it.copy(availableToolNames = names) }
         }
     }
@@ -255,8 +262,18 @@ class LLMViewModel(
             temperature = 0.7,
             provider = LLMProvider.Yandex(),
             stopWord = "",
-            maxTokens = 2000
+            maxTokens = 2000,
+            mcpAllowedBindingIds = emptyList(),
         )
+    }
+
+    suspend fun loadMcpAssignmentCatalog(): List<Pair<String, McpToolBindingRecord>> =
+        agentManagementUseCase.mcpAssignmentCatalogRows()
+
+    fun setMcpAllowedBindingIds(agentId: String, ids: List<String>) {
+        viewModelScope.launch {
+            agentManagementUseCase.setMcpAllowedBindingIds(agentId, ids)
+        }
     }
 
     fun createBranch(fromMessageId: String, branchName: String) {

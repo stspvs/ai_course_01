@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS AgentStateEntity (
     memoryStrategyJson TEXT NOT NULL DEFAULT '', -- JSON ChatMemoryStrategy
     workingMemoryJson TEXT NOT NULL DEFAULT '', -- JSON WorkingMemory
     llmProviderJson TEXT, -- JSON LLMProvider (основная модель чата)
-    ragEnabled INTEGER AS Boolean NOT NULL DEFAULT 0
+    ragEnabled INTEGER AS Boolean NOT NULL DEFAULT 0,
+    mcpAllowedBindingIdsJson TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS ProfileEntity (
@@ -71,9 +72,10 @@ CREATE TABLE IF NOT EXISTS TaskEntity (
 saveAgentState:
 INSERT OR REPLACE INTO AgentStateEntity(
     agentId, name, systemPrompt, temperature, maxTokens, stopWord,
-    currentStage, currentStepId, planJson, memoryStrategyJson, workingMemoryJson, llmProviderJson, ragEnabled
+    currentStage, currentStepId, planJson, memoryStrategyJson, workingMemoryJson, llmProviderJson, ragEnabled,
+    mcpAllowedBindingIdsJson
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getAgentState:
 SELECT * FROM AgentStateEntity WHERE agentId = ?;

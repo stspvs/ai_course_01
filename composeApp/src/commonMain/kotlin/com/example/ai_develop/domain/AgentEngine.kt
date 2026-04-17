@@ -37,7 +37,7 @@ data class PreparedLlmRequest(
 open class AgentEngine(
     private val repository: ChatRepository,
     private val memoryManager: ChatMemoryManager,
-    private val toolsProvider: () -> List<AgentTool> = { emptyList() }
+    private val toolsProvider: (Agent) -> List<AgentTool> = { emptyList() }
 ) {
     constructor(
         repository: ChatRepository,
@@ -45,7 +45,7 @@ open class AgentEngine(
         tools: List<AgentTool>
     ) : this(repository, memoryManager, { tools })
 
-    private val tools: List<AgentTool> get() = toolsProvider()
+    private fun toolsFor(agent: Agent): List<AgentTool> = toolsProvider(agent)
 
     companion object {
         /** Нежадное тело скобок, чтобы в одном ответе было несколько `[TOOL: …][TOOL: …]`. */
@@ -197,23 +197,23 @@ open class AgentEngine(
         }
     }
 
-    open suspend fun executeToolCall(call: ParsedToolCall): String? =
-        tools.find { it.name == call.toolName }?.execute(call.input)
+    open suspend fun executeToolCall(agent: Agent, call: ParsedToolCall): String? =
+        toolsFor(agent).find { it.name == call.toolName }?.execute(call.input)
 
     /** Список имён зарегистрированных инструментов (для сообщений об ошибках). */
-    open fun registeredToolNames(): List<String> = tools.map { it.name }
+    open fun registeredToolNames(agent: Agent): List<String> = toolsFor(agent).map { it.name }
 
     /** После такого инструмента не вызывать LLM повторно (см. [AgentTool.suppressLlmFollowUp]). */
-    open fun toolSuppressesLlmFollowUp(toolName: String): Boolean =
-        tools.find { it.name == toolName }?.suppressLlmFollowUp == true
+    open fun toolSuppressesLlmFollowUp(agent: Agent, toolName: String): Boolean =
+        toolsFor(agent).find { it.name == toolName }?.suppressLlmFollowUp == true
 
     /**
      * Анализирует сообщение на наличие вызовов инструментов (Tool Calling).
      * В реальном мире тут был бы парсинг JSON или специальных тегов.
      */
-    open suspend fun processTools(text: String): String? {
+    open suspend fun processTools(agent: Agent, text: String): String? {
         val call = parseToolCall(text) ?: return null
-        return executeToolCall(call)
+        return executeToolCall(agent, call)
     }
 
     private fun prepareSystemPrompt(
@@ -228,6 +228,7 @@ open class AgentEngine(
 
         // Любой ход с атрибуцией RAG — ответ «из базы», без смешивания с MCP/[TOOL:] (как при ragStructuredOutput).
         val suppressToolsForRagTurn = ragStructuredOutput || ragAttribution != null
+        val tools = toolsFor(agent)
         val toolsContext = if (!suppressToolsForRagTurn && tools.isNotEmpty()) {
             buildString {
                 appendLine()

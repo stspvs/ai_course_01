@@ -1,5 +1,7 @@
 package com.example.ai_develop.domain
 
+import com.example.ai_develop.data.McpRepository
+import com.example.ai_develop.data.McpToolBindingRecord
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlin.uuid.ExperimentalUuidApi
@@ -12,7 +14,8 @@ import kotlin.uuid.Uuid
 open class AgentManagementUseCase(
     private val repository: ChatRepository,
     private val chatStreamingUseCase: ChatStreamingUseCase,
-    private val updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCase
+    private val updateWorkingMemoryUseCase: UpdateWorkingMemoryUseCase,
+    private val mcpRepository: McpRepository,
 ) {
 
     open suspend fun saveAgentState(state: AgentState) {
@@ -30,6 +33,46 @@ open class AgentManagementUseCase(
 
     open suspend fun saveProfile(agentId: String, profile: UserProfile) {
         repository.saveProfile(agentId, profile)
+        refreshAgent(agentId)
+    }
+
+    /** Включённые привязки MCP на включённых серверах — для чекбоксов в настройках агента. */
+    open suspend fun catalogMcpBindingsForAgents(): List<McpToolBindingRecord> {
+        val enabledServerIds = mcpRepository.getAllServers().filter { it.enabled }.map { it.id }.toSet()
+        return mcpRepository.getAllBindings()
+            .filter { it.enabled && it.serverId in enabledServerIds }
+            .sortedWith(compareBy({ it.serverId }, { it.mcpToolName }))
+    }
+
+    /** Пара (отображаемое имя сервера, привязка) для списка в UI. */
+    open suspend fun mcpAssignmentCatalogRows(): List<Pair<String, McpToolBindingRecord>> {
+        val servers = mcpRepository.getAllServers().associateBy { it.id }
+        return catalogMcpBindingsForAgents().map { b ->
+            (servers[b.serverId]?.displayName ?: b.serverId) to b
+        }.sortedWith(compareBy({ it.first }, { it.second.mcpToolName }))
+    }
+
+    open suspend fun setMcpAllowedBindingIds(agentId: String, ids: List<String>) {
+        val state = repository.getAgentState(agentId) ?: return
+        val profile = repository.getProfile(agentId)
+        val agent = Agent(
+            id = state.agentId,
+            name = state.name,
+            systemPrompt = state.systemPrompt,
+            temperature = state.temperature,
+            provider = state.provider,
+            stopWord = state.stopWord,
+            maxTokens = state.maxTokens,
+            memoryStrategy = state.memoryStrategy,
+            workingMemory = state.workingMemory,
+            messages = state.messages,
+            branches = state.branches,
+            currentBranchId = state.currentBranchId,
+            ragEnabled = state.ragEnabled,
+            userProfile = profile,
+            mcpAllowedBindingIds = ids,
+        )
+        repository.saveAgentMetadata(agent)
         refreshAgent(agentId)
     }
 

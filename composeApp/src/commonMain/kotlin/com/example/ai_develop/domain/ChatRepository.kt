@@ -49,6 +49,9 @@ interface ChatRepository {
     suspend fun saveAgentState(state: AgentState)
     suspend fun getAgentState(agentId: String): AgentState?
     suspend fun deleteAgent(agentId: String) {}
+
+    /** Локальные метаданные агента (имя, промпт, назначение MCP и т.д.) без перезаписи сообщений. */
+    suspend fun saveAgentMetadata(agent: Agent): Result<Unit> = Result.success(Unit)
     
     suspend fun getProfile(agentId: String): UserProfile?
     suspend fun saveProfile(agentId: String, profile: UserProfile)
