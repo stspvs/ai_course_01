@@ -72,9 +72,10 @@ val commonModule = module {
     single {
         HttpClient {
             install(HttpTimeout) {
-                requestTimeoutMillis = 60_000
+                // Стриминг LLM / RAG-JSON может дольше минуты; connect/socket оставляем короче.
+                requestTimeoutMillis = 180_000
                 connectTimeoutMillis = 60_000
-                socketTimeoutMillis = 60_000
+                socketTimeoutMillis = 120_000
             }
 
             configurePlatform()

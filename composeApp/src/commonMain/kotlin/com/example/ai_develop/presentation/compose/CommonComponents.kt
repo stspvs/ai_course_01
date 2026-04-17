@@ -479,6 +479,13 @@ internal fun MessageBubble(
                                                 style = MaterialTheme.typography.bodyLarge,
                                             )
                                         }
+                                        segments.isEmpty() && !isUser && message.message.isBlank() -> {
+                                            Text(
+                                                text = "(пустое сообщение)",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
                                         else -> {
                                             segments.forEach { seg ->
                                                 when (seg) {

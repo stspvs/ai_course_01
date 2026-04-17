@@ -70,6 +70,30 @@ fun parseRagStructuredJson(raw: String): Result<RagStructuredJson> = runCatching
 internal fun normalizeForQuoteMatch(s: String): String =
     s.replace(Regex("\\s+"), " ").trim()
 
+/**
+ * Если модель указала в цитате несуществующий [RagQuoteJsonItem.chunkId], но текст цитаты — подстрока
+ * ровно одного чанка из [RagAttribution.sources], подставляет корректный [RagSourceRef.chunkId].
+ */
+internal fun healRagStructuredQuoteChunkIds(
+    parsed: RagStructuredJson,
+    attribution: RagAttribution,
+): RagStructuredJson {
+    val byId = attribution.sources.associateBy { it.chunkId }
+    val healedQuotes = parsed.quotes.map { q ->
+        if (byId[q.chunkId] != null) return@map q
+        val nq = normalizeForQuoteMatch(q.text)
+        if (nq.isEmpty()) return@map q
+        val candidates = attribution.sources.filter { src ->
+            normalizeForQuoteMatch(src.chunkText).contains(nq)
+        }
+        when (candidates.size) {
+            1 -> RagQuoteJsonItem(text = q.text, chunkId = candidates.single().chunkId)
+            else -> q
+        }
+    }
+    return parsed.copy(quotes = healedQuotes)
+}
+
 fun validateRagStructuredAgainstAttribution(
     parsed: RagStructuredJson,
     attribution: RagAttribution,
@@ -153,12 +177,13 @@ fun processRagAssistantRawJson(
             parseWarning = "Не удалось разобрать JSON ответа модели.",
             structuredPayload = null,
         )
-    val issues = validateRagStructuredAgainstAttribution(parsed, attr)
-    val formatted = formatRagStructuredForChat(parsed, issues)
+    val healed = healRagStructuredQuoteChunkIds(parsed, attr)
+    val issues = validateRagStructuredAgainstAttribution(healed, attr)
+    val formatted = formatRagStructuredForChat(healed, issues)
     val note = issues.takeIf { it.isNotEmpty() }?.joinToString(" ")
     return RagStructuredParseResult(
         formattedChatText = formatted,
         parseWarning = note,
-        structuredPayload = toRagStructuredChatPayload(parsed, note),
+        structuredPayload = toRagStructuredChatPayload(healed, note),
     )
 }

@@ -248,12 +248,11 @@ class AutonomousAgentRagTest {
     }
 
     @Test
-    fun ragEnabled_emptyDb_jsonMode_insufficientStructuredResponse() = runTest {
+    fun ragEnabled_emptyDb_ungrounded_noJsonMode_plainReply() = runTest {
         val repo = RagMockChatRepository()
         repo.agentStateMap[agentId] = AgentState(agentId = agentId, name = "RAG on", ragEnabled = true)
         val engine = RagFakeAgentEngine(repo, ChatMemoryManager())
-        val jsonOut = """{"answer":"Не знаю","sources":[],"quotes":[]}"""
-        engine.queueResponse(listOf(jsonOut))
+        engine.queueResponse(listOf("В базе нет данных, отвечаю без цитат."))
         val agent = AutonomousAgent(
             agentId,
             repo,
@@ -268,13 +267,14 @@ class AutonomousAgentRagTest {
         advanceUntilIdle()
         val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
-        assertTrue(assistant.llmRequestSnapshot?.isJsonMode == true)
+        assertFalse(assistant.llmRequestSnapshot?.isJsonMode == true)
         val attr = assistant.llmRequestSnapshot?.ragAttribution
         assertNotNull(attr)
         assertFalse(attr.used)
         assertNotNull(attr.debug)
         assertEquals("В базе нет проиндексированных чанков", attr.debug?.emptyReason)
-        assertNotNull(assistant.llmRequestSnapshot?.ragStructuredContent)
+        assertEquals(null, assistant.llmRequestSnapshot?.ragStructuredContent)
+        assertEquals("В базе нет данных, отвечаю без цитат.", assistant.message.trim())
         agent.dispose()
     }
 

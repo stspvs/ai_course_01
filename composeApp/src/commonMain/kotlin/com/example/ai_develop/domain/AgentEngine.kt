@@ -226,7 +226,9 @@ open class AgentEngine(
         val basePrompt = memoryManager.wrapSystemPrompt(agent)
         val stageContext = "\n[SYSTEM INFO] CURRENT STAGE: $stage\n"
 
-        val toolsContext = if (!ragStructuredOutput && tools.isNotEmpty()) {
+        // Любой ход с атрибуцией RAG — ответ «из базы», без смешивания с MCP/[TOOL:] (как при ragStructuredOutput).
+        val suppressToolsForRagTurn = ragStructuredOutput || ragAttribution != null
+        val toolsContext = if (!suppressToolsForRagTurn && tools.isNotEmpty()) {
             buildString {
                 appendLine()
                 appendLine("AVAILABLE TOOLS:")
@@ -247,12 +249,46 @@ open class AgentEngine(
         val ragSection = when {
             ragStructuredOutput && ragAttribution != null ->
                 buildRagStructuredSystemSection(ragContext, ragAttribution)
+            !ragStructuredOutput && ragAttribution != null ->
+                buildRagUnstructuredKnowledgeBaseSection(ragContext, ragAttribution)
             !ragContext.isNullOrBlank() ->
                 "\n\n[RELEVANT CONTEXT FROM KNOWLEDGE BASE]\n${ragContext.trim()}\n"
             else -> ""
         }
 
         return basePrompt + stageContext + toolsContext + ragSection
+    }
+
+    /**
+     * RAG без JSON: статус базы и/или контекст — модель отвечает обычным текстом (стриминг не отключается).
+     */
+    private fun buildRagUnstructuredKnowledgeBaseSection(
+        ragContext: String?,
+        attribution: RagAttribution,
+    ): String = buildString {
+        val grounded = attribution.used && !attribution.insufficientRelevance &&
+            !ragContext.isNullOrBlank()
+        if (grounded) {
+            appendLine()
+            appendLine("[RELEVANT CONTEXT FROM KNOWLEDGE BASE]")
+            appendLine(ragContext!!.trim())
+            appendLine()
+            appendLine("Опирайся на фрагменты выше. Ответь на русском обычным текстом, без JSON.")
+        } else {
+            appendLine()
+            appendLine("[KNOWLEDGE BASE STATUS]")
+            when {
+                attribution.insufficientRelevance ->
+                    appendLine("Релевантность найденных фрагментов ниже порога или контекст недоступен.")
+                attribution.debug?.emptyReason != null ->
+                    appendLine(attribution.debug?.emptyReason.orEmpty())
+                else ->
+                    appendLine("Контекст из базы знаний для этого запроса не использован.")
+            }
+            appendLine()
+            appendLine("Ответь на русском обычным текстом, без JSON. Если опереться на базу нельзя — скажи честно и предложи уточнить вопрос.")
+        }
+        appendLine()
     }
 
     private fun buildRagStructuredSystemSection(
@@ -287,6 +323,10 @@ open class AgentEngine(
         appendLine("- \"quotes\": массив { \"text\": string, \"chunk_id\": string } — text дословно из фрагмента с этим chunk_id в блоке контекста.")
         if (grounded) {
             appendLine("При наличии контекста заполни sources и quotes по фрагментам выше; каждая цитата — подстрока соответствующего чанка.")
+            appendLine(
+                "Каждый chunk_id в sources и quotes скопируй из заголовка фрагмента (значение после `chunk_id=` в строке " +
+                    "`--- Fragment ... ---`) символ в символ, без сокращений. Не подставляй chunk_index вместо chunk_id и не выдумывай новые идентификаторы."
+            )
         } else {
             appendLine("Сейчас sources и quotes должны быть пустыми массивами []. Не выдумывай источники.")
         }

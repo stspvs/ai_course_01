@@ -180,6 +180,27 @@ class AgentEngineTest {
         assertEquals(attr, prepared.snapshot.ragAttribution)
     }
 
+    @Test
+    fun prepareChatRequest_ragAttributionUnstructured_suppressesToolsWhenToolsRegistered() {
+        val attr = RagAttribution(
+            used = false,
+            debug = RagRetrievalDebug(emptyReason = "В базе нет проиндексированных чанков"),
+        )
+        val prepared = engine.prepareChatRequest(
+            defaultAgent,
+            AgentStage.EXECUTION,
+            isJsonMode = false,
+            ragContext = null,
+            ragAttribution = attr,
+            ragStructuredOutput = false,
+        )
+        assertFalse(
+            prepared.systemPrompt.contains("AVAILABLE TOOLS"),
+            "RAG с атрибуцией не должен подмешивать список инструментов",
+        )
+        assertTrue(prepared.systemPrompt.contains("[KNOWLEDGE BASE STATUS]"))
+    }
+
     // --- 2: Error Handling ---
 
     @Test

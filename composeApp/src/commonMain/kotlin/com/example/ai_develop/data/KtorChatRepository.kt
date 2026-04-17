@@ -8,6 +8,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.utils.io.*
 import io.ktor.utils.io.charsets.*
+import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -63,17 +64,23 @@ class KtorChatRepository(
                 if (response.status.isSuccess()) {
                     val channel: ByteReadChannel = response.bodyAsChannel()
                     val context = StreamContext()
-                    
+                    var streamedChars = 0
                     while (!channel.isClosedForRead) {
                         val line = channel.readUTF8Line() ?: break
                         when (val result = handler.parseStreamChunk(line, context)) {
-                            is StreamChunkResult.Content -> emit(Result.success(result.delta))
+                            is StreamChunkResult.Content -> {
+                                streamedChars += result.delta.length
+                                emit(Result.success(result.delta))
+                            }
                             is StreamChunkResult.Done -> break
                             is StreamChunkResult.Ignore -> continue
                         }
                     }
+                    println("[ChatStreaming] ok status=${response.status} chars=$streamedChars")
                 } else {
                     val errorBody = response.bodyAsText(fallbackCharset = Charsets.UTF_8)
+                    val preview = errorBody.substring(0, min(errorBody.length, 400))
+                    println("[ChatStreaming] fail status=${response.status} bodyPreview=$preview")
                     emit(Result.failure(Exception("HTTP ${response.status}: $errorBody")))
                 }
             }

@@ -494,16 +494,29 @@ open class AutonomousAgent(
             config = config,
             rewriteApplied = rewriteApplied,
         )
-        val structuredRag = retrieved != null
+        val ragGrounded = retrieved != null &&
+            retrieved.attribution.used &&
+            retrieved.contextText.isNotBlank()
         return if (retrieved != null) {
-            engine.prepareChatRequest(
-                agent,
-                stage,
-                isJsonMode = structuredRag,
-                ragContext = if (retrieved.attribution.used) retrieved.contextText else null,
-                ragAttribution = retrieved.attribution,
-                ragStructuredOutput = structuredRag,
-            )
+            if (ragGrounded) {
+                engine.prepareChatRequest(
+                    agent,
+                    stage,
+                    isJsonMode = true,
+                    ragContext = retrieved.contextText,
+                    ragAttribution = retrieved.attribution,
+                    ragStructuredOutput = true,
+                )
+            } else {
+                engine.prepareChatRequest(
+                    agent,
+                    stage,
+                    isJsonMode = false,
+                    ragContext = null,
+                    ragAttribution = retrieved.attribution,
+                    ragStructuredOutput = false,
+                )
+            }
         } else {
             engine.prepareChatRequest(
                 agent,
@@ -562,15 +575,23 @@ open class AutonomousAgent(
         } else {
             null
         }
-        if (ragJsonMode && processedRag != null) {
-            _partialResponse.emit(processedRag.formattedChatText)
-            collector.emit(processedRag.formattedChatText)
+        var content = processedRag?.formattedChatText
+            ?: stripLeadingJsonColonLabel(rawOut)
+        if (content.isBlank()) {
+            val warn = processedRag?.parseWarning?.takeIf { it.isNotBlank() }
+            content = when {
+                warn != null -> warn
+                rawOut.isBlank() -> "Пустой ответ модели."
+                else -> "Ответ не содержит распознаваемого текста."
+            }
+        }
+        if (ragJsonMode) {
+            _partialResponse.emit(content)
+            collector.emit(content)
         }
 
         processingMutex.withLock {
             val msgs = _agent.value?.messages ?: return@withLock
-            val content = processedRag?.formattedChatText
-                ?: stripLeadingJsonColonLabel(rawOut)
             val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
             val snapshotForMessage = snapshotWithRagStructured(prepared.snapshot, processedRag)
             if (replaceLastAssistant && lastAssistant != null) {

@@ -120,6 +120,64 @@ class RagStructuredResponseValidationTest {
     }
 
     @Test
+    fun heal_healsWrongChunkIdWhenQuoteUniquelyMatchesOneChunk() {
+        val attr = RagAttribution(used = true, insufficientRelevance = false, sources = listOf(chunkA))
+        val parsed = RagStructuredJson(
+            answer = "ok",
+            sources = listOf(RagSourceJsonItem(source = "a.md", chunkId = "id-a", chunkIndex = 0L)),
+            quotes = listOf(RagQuoteJsonItem(text = "Альфа", chunkId = "wrong-id")),
+        )
+        val healed = healRagStructuredQuoteChunkIds(parsed, attr)
+        assertTrue(validateRagStructuredAgainstAttribution(healed, attr).isEmpty())
+        assertEquals("id-a", healed.quotes.single().chunkId)
+    }
+
+    @Test
+    fun heal_doesNotHealWhenAmbiguousSubstring() {
+        val chunkB = RagSourceRef(
+            documentTitle = "Doc",
+            sourceFileName = "b.md",
+            chunkIndex = 1L,
+            score = 0.8,
+            chunkId = "id-b",
+            chunkText = "Префикс общая подстрока суффикс.",
+        )
+        val chunkC = RagSourceRef(
+            documentTitle = "Doc",
+            sourceFileName = "c.md",
+            chunkIndex = 2L,
+            score = 0.8,
+            chunkId = "id-c",
+            chunkText = "Другой префикс общая подстрока другой суффикс.",
+        )
+        val attr = RagAttribution(used = true, insufficientRelevance = false, sources = listOf(chunkB, chunkC))
+        val parsed = RagStructuredJson(
+            answer = "ok",
+            sources = listOf(
+                RagSourceJsonItem(source = "b.md", chunkId = "id-b", chunkIndex = 1L),
+                RagSourceJsonItem(source = "c.md", chunkId = "id-c", chunkIndex = 2L),
+            ),
+            quotes = listOf(RagQuoteJsonItem(text = "общая подстрока", chunkId = "unknown")),
+        )
+        val healed = healRagStructuredQuoteChunkIds(parsed, attr)
+        assertEquals("unknown", healed.quotes.single().chunkId)
+        val issues = validateRagStructuredAgainstAttribution(healed, attr)
+        assertTrue(issues.any { it.contains("неизвестный chunk_id") })
+    }
+
+    @Test
+    fun processRagAssistantRawJson_healsWrongQuoteChunkId_endToEnd() {
+        val attr = RagAttribution(used = true, insufficientRelevance = false, sources = listOf(chunkA))
+        val raw =
+            """{"answer":"Да","sources":[{"source":"a.md","chunk_id":"id-a","chunk_index":0}],"quotes":[{"text":"Альфа","chunk_id":"wrong-id"}]}"""
+        val r = processRagAssistantRawJson(raw, attr)
+        assertNull(r.parseWarning)
+        val p = r.structuredPayload
+        assertNotNull(p)
+        assertEquals("id-a", p.quotes.single().chunkId)
+    }
+
+    @Test
     fun format_includesSections() {
         val parsed = RagStructuredJson(
             answer = "Текст",
