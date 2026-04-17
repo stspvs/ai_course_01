@@ -170,6 +170,19 @@ class LLMViewModelTest {
         assertTrue(duplicatedAgent!!.name.contains("(Copy)"), "Name should contain (Copy), but was ${duplicatedAgent.name}")
     }
 
+    @Test
+    fun `sendMessage should persist user message to repository`() = runTest {
+        advanceUntilIdle()
+        viewModel.onEvent(LLMEvent.SendMessage("hi"))
+        advanceUntilIdle()
+        val stored = fakeRepository.getAgentState(GENERAL_CHAT_ID)
+        assertNotNull(stored)
+        assertTrue(
+            stored!!.messages.any { it.role == "user" && it.message == "hi" },
+            "expected user message in persisted state: ${stored.messages}"
+        )
+    }
+
     // --- 2. Flow Tests ---
 
     @Test

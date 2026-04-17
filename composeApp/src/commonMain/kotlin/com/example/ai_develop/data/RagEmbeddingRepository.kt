@@ -122,7 +122,7 @@ class RagEmbeddingRepository(
                 chunkIndex = row.chunkIndex,
                 text = row.chunkText,
                 embedding = EmbeddingFloatCodec.littleEndianBytesToFloatArray(row.embeddingBlob),
-                ollamaModel = row.ollamaModel,
+                ollamaModel = row.ollamaModel.trim(),
                 documentTitle = row.documentTitle,
                 sourceFileName = row.sourceFileName,
             )
@@ -131,8 +131,9 @@ class RagEmbeddingRepository(
 
     /**
      * Сохраняет документ и чанки. Перед вставкой удаляются все строки для того же источника:
-     * то же [RagDocumentEntity.sourceFileName], и путь совпадает с нормализованным [RagDocumentEntity.sourcePath],
-     * либо это строка после миграции БД (`sourcePath = id`), чтобы не плодить дубли.
+     * то же [RagDocumentEntity.sourceFileName], и путь совпадает с нормализованным [RagDocumentEntity.sourcePath].
+     * Если вставляется путь к файлу (есть `/` или `\`), дополнительно удаляются старые строки с тем же именем файла,
+     * где `sourcePath = id` (миграция со старых версий).
      *
      * @return true, если до вставки уже были строки для этого источника
      */
@@ -141,6 +142,7 @@ class RagEmbeddingRepository(
         chunks: List<RagChunkEntity>,
     ): Boolean = withContext(Dispatchers.Default) {
         val pathKey = normalizeRagSourcePath(document.sourcePath)
+        val looksLikeRealPathOnDisk = pathKey.contains('/') || pathKey.contains('\\')
         var replaced = false
         db.transaction {
             replaced = queries.selectRagDocumentIdsForSameFileSource(
@@ -151,6 +153,11 @@ class RagEmbeddingRepository(
                 sourceFileName = document.sourceFileName,
                 sourcePath = pathKey,
             )
+            if (looksLikeRealPathOnDisk) {
+                queries.deleteRagDocumentsLegacySourcePathEqualsIdForFileName(
+                    sourceFileName = document.sourceFileName,
+                )
+            }
             queries.insertRagDocument(
                 id = document.id,
                 title = document.title,

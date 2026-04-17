@@ -9,6 +9,7 @@ import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagEmbeddingRepository
 import com.example.ai_develop.data.RagPipelineSettingsRepository
 import com.example.ai_develop.data.RagStoredChunk
+import com.example.ai_develop.data.ragSyntheticSourcePath
 import com.example.ai_develop.domain.ChatRepository
 import com.example.ai_develop.domain.ChunkStrategy
 import com.example.ai_develop.domain.LLMProvider
@@ -68,6 +69,9 @@ class RagEmbeddingsViewModel(
     private val chatRepository: ChatRepository,
 ) : ViewModel() {
 
+    private val ragPipelineUserTouchedLock = Any()
+    private var ragPipelineUserTouched = false
+
     private val _ui = MutableStateFlow(RagEmbeddingsUiState())
     val uiState: StateFlow<RagEmbeddingsUiState> = _ui.asStateFlow()
 
@@ -79,14 +83,21 @@ class RagEmbeddingsViewModel(
 
     init {
         viewModelScope.launch {
-            runCatching { ragPipelineSettingsRepository.getConfig() }.getOrNull()?.let { cfg ->
-                _ui.update { it.copy(ragPipelineConfig = cfg, savedRagPipelineConfig = cfg) }
+            val cfg = runCatching { ragPipelineSettingsRepository.getConfig() }.getOrNull()
+                ?: RagRetrievalConfig.Default
+            _ui.update { cur ->
+                val skip = synchronized(ragPipelineUserTouchedLock) { ragPipelineUserTouched }
+                if (skip) return@update cur
+                cur.copy(ragPipelineConfig = cfg, savedRagPipelineConfig = cfg)
             }
         }
         viewModelScope.launch { refreshOllamaModelList() }
     }
 
     fun updateRagPipeline(transform: (RagRetrievalConfig) -> RagRetrievalConfig) {
+        synchronized(ragPipelineUserTouchedLock) {
+            ragPipelineUserTouched = true
+        }
         _ui.update { it.copy(ragPipelineConfig = transform(it.ragPipelineConfig)) }
     }
 
@@ -289,11 +300,15 @@ class RagEmbeddingsViewModel(
                 val docId = Uuid.random().toString()
                 val title = s.sourceFileName.ifBlank { "Документ" }
                 val now = System.currentTimeMillis()
+                // Без выбранного файла путь пустой — общий ключ "" затирал бы предыдущие документы с тем же именем.
+                val pathForDb = s.sourcePath?.trim().orEmpty().ifEmpty {
+                    ragSyntheticSourcePath(docId)
+                }
                 val doc = RagDocumentEntity(
                     id = docId,
                     title = title,
                     sourceFileName = s.sourceFileName.ifBlank { "(вставка)" },
-                    sourcePath = s.sourcePath.orEmpty(),
+                    sourcePath = pathForDb,
                     ollamaModel = s.ollamaModel.trim().ifEmpty { OllamaDefaultModelName },
                     chunkSize = s.chunkSize.toLong(),
                     overlap = s.overlap.toLong(),
@@ -397,5 +412,16 @@ class RagEmbeddingsViewModel(
             )
         }
         recomputeChunks()
+    }
+
+    /**
+     * Для unit-тестов: задаёт конфиг пайплайна и помечает его как изменённый пользователем,
+     * чтобы асинхронная гидратация из БД не перезаписала значение.
+     */
+    internal fun setRagPipelineConfigForTests(cfg: RagRetrievalConfig) {
+        synchronized(ragPipelineUserTouchedLock) {
+            ragPipelineUserTouched = true
+        }
+        _ui.update { it.copy(ragPipelineConfig = cfg, savedRagPipelineConfig = cfg) }
     }
 }

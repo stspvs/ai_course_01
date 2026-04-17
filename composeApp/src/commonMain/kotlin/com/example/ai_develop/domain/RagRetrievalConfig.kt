@@ -30,9 +30,21 @@ data class RagEvaluationStepsEnabled(
 
 @Serializable
 data class RagRetrievalConfig(
+    /**
+     * Если false — в ответах агентов контекст из базы не подмешивается, даже если у агента включён RAG.
+     * Панель RAG (настройки пайплайна, dry-run, эмбеддинги, запись в БД) остаётся доступной.
+     * По умолчанию true.
+     */
+    val globalRagEnabled: Boolean = true,
     val pipelineMode: RagPipelineMode = RagPipelineMode.Baseline,
     val recallTopK: Int = 5,
     val finalTopK: Int = 5,
+    /**
+     * Если true — в отбор попадают все проиндексированные чанки (после косинусного скоринга и фильтров),
+     * ограничение только жёстким потолком (500 чанков на запрос); поля recallTopK/finalTopK не режут выдачу.
+     * Удобно, когда нужно подмешать в промпт максимум корпуса, а не top-K фрагментов.
+     */
+    val scanAllChunks: Boolean = false,
     /** Порог косинусной близости; null — не применять (кроме режимов, где порог обязателен — тогда трактуем как 0). */
     val minSimilarity: Float? = null,
     /**
@@ -47,6 +59,12 @@ data class RagRetrievalConfig(
     val llmRerankMaxCandidates: Int = 10,
     val evaluationScope: RagEvaluationScope = RagEvaluationScope.ALL,
     val evaluationStepsEnabled: RagEvaluationStepsEnabled = RagEvaluationStepsEnabled(),
+    /**
+     * Минимальный итоговый скор лучшего чанка (тот же, что используется для ранжирования: косинус или combined/LLM).
+     * Если задан и лучший скор ниже порога — контекст не подмешивается, режим «не знаю» (insufficientRelevance).
+     * null — не применять.
+     */
+    val answerRelevanceThreshold: Float? = null,
 ) {
     companion object {
         val Default = RagRetrievalConfig()

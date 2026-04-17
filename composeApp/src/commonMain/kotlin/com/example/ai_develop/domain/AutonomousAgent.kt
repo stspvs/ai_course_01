@@ -4,6 +4,8 @@ package com.example.ai_develop.domain
 
 import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagPipelineSettingsRepository
+import com.example.ai_develop.data.RagStructuredParseResult
+import com.example.ai_develop.data.processRagAssistantRawJson
 import com.example.ai_develop.data.stripLeadingJsonColonLabel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -465,10 +467,14 @@ open class AutonomousAgent(
                 isJsonMode = false,
                 ragContext = null,
                 ragAttribution = RagAttribution(used = false),
+                ragStructuredOutput = false,
             )
         }
         val config = runCatching { ragPipelineSettingsRepository?.getConfig() }.getOrNull()
             ?: RagRetrievalConfig.Default
+        if (!config.globalRagEnabled) {
+            return engine.prepareChatRequest(agent, stage, isJsonMode = false)
+        }
         var retrievalQuery = query
         var rewriteApplied = false
         if (config.queryRewriteEnabled) {
@@ -488,13 +494,15 @@ open class AutonomousAgent(
             config = config,
             rewriteApplied = rewriteApplied,
         )
+        val structuredRag = retrieved != null
         return if (retrieved != null) {
             engine.prepareChatRequest(
                 agent,
                 stage,
-                isJsonMode = false,
+                isJsonMode = structuredRag,
                 ragContext = if (retrieved.attribution.used) retrieved.contextText else null,
                 ragAttribution = retrieved.attribution,
+                ragStructuredOutput = structuredRag,
             )
         } else {
             engine.prepareChatRequest(
@@ -503,8 +511,17 @@ open class AutonomousAgent(
                 isJsonMode = false,
                 ragContext = null,
                 ragAttribution = RagAttribution(used = false),
+                ragStructuredOutput = false,
             )
         }
+    }
+
+    private fun snapshotWithRagStructured(
+        base: LlmRequestSnapshot,
+        processedRag: RagStructuredParseResult?,
+    ): LlmRequestSnapshot {
+        val p = processedRag?.structuredPayload ?: return base
+        return base.copy(ragStructuredContent = p)
     }
 
     private fun resolveRewriteProvider(agent: Agent, config: RagRetrievalConfig): LLMProvider {
@@ -521,13 +538,16 @@ open class AutonomousAgent(
         replaceLastAssistant: Boolean = false
     ): String {
         val sb = StringBuilder()
+        val ragJsonMode = prepared.snapshot.isJsonMode && prepared.snapshot.ragAttribution != null
         _agentActivity.value = AgentActivity.Streaming
         try {
             engine.streamFromPrepared(agent, prepared).collect { chunk ->
                 currentCoroutineContext().ensureActive()
                 sb.append(chunk)
-                _partialResponse.emit(chunk)
-                collector.emit(chunk)
+                if (!ragJsonMode) {
+                    _partialResponse.emit(chunk)
+                    collector.emit(chunk)
+                }
             }
         } catch (e: Exception) {
             _partialResponse.emit("Error during streaming: ${e.message}")
@@ -536,10 +556,23 @@ open class AutonomousAgent(
             _agentActivity.value = AgentActivity.Working
         }
 
+        val rawOut = sb.toString()
+        val processedRag = if (ragJsonMode) {
+            processRagAssistantRawJson(rawOut, prepared.snapshot.ragAttribution)
+        } else {
+            null
+        }
+        if (ragJsonMode && processedRag != null) {
+            _partialResponse.emit(processedRag.formattedChatText)
+            collector.emit(processedRag.formattedChatText)
+        }
+
         processingMutex.withLock {
             val msgs = _agent.value?.messages ?: return@withLock
-            val content = stripLeadingJsonColonLabel(sb.toString())
+            val content = processedRag?.formattedChatText
+                ?: stripLeadingJsonColonLabel(rawOut)
             val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
+            val snapshotForMessage = snapshotWithRagStructured(prepared.snapshot, processedRag)
             if (replaceLastAssistant && lastAssistant != null) {
                 val newTokens = estimateTokens(content)
                 val updated = msgs.map { msg ->
@@ -547,7 +580,7 @@ open class AutonomousAgent(
                         msg.copy(
                             message = content,
                             tokensUsed = newTokens,
-                            llmRequestSnapshot = prepared.snapshot
+                            llmRequestSnapshot = snapshotForMessage
                         )
                     } else msg
                 }
@@ -559,13 +592,13 @@ open class AutonomousAgent(
                     content,
                     parentId,
                     stage,
-                    prepared.snapshot
+                    snapshotForMessage
                 )
                 _agent.update { it?.copy(messages = it.messages + aiMsg) }
             }
         }
 
-        return sb.toString()
+        return rawOut
     }
 
     private companion object {

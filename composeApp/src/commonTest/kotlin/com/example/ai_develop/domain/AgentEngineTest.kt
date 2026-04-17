@@ -120,6 +120,66 @@ class AgentEngineTest {
         assertEquals("Done", results.first())
     }
 
+    @Test
+    fun prepareChatRequest_withRagContext_includesKnowledgeBlockAndSnapshot() {
+        val engineNoTools = AgentEngine(repository, memoryManager, emptyList())
+        val attr = RagAttribution(
+            used = true,
+            insufficientRelevance = false,
+            sources = listOf(
+                RagSourceRef(
+                    documentTitle = "Doc",
+                    sourceFileName = "f.md",
+                    chunkIndex = 0L,
+                    chunkId = "c1",
+                    chunkText = "chunk body",
+                ),
+            ),
+        )
+        val prepared = engineNoTools.prepareChatRequest(
+            defaultAgent,
+            AgentStage.EXECUTION,
+            isJsonMode = false,
+            ragContext = "retrieved context line",
+            ragAttribution = attr,
+            ragStructuredOutput = false,
+        )
+        assertTrue(prepared.systemPrompt.contains("[RELEVANT CONTEXT FROM KNOWLEDGE BASE]"))
+        assertTrue(prepared.systemPrompt.contains("retrieved context line"))
+        assertEquals(attr, prepared.snapshot.ragAttribution)
+        assertFalse(prepared.snapshot.isJsonMode)
+    }
+
+    @Test
+    fun prepareChatRequest_ragStructuredOutput_addsJsonInstructionsAndJsonMode() {
+        val engineNoTools = AgentEngine(repository, memoryManager, emptyList())
+        val attr = RagAttribution(
+            used = true,
+            insufficientRelevance = false,
+            sources = listOf(
+                RagSourceRef(
+                    documentTitle = "Doc",
+                    sourceFileName = "f.md",
+                    chunkIndex = 0L,
+                    chunkId = "c1",
+                    chunkText = "alpha beta",
+                ),
+            ),
+        )
+        val prepared = engineNoTools.prepareChatRequest(
+            defaultAgent,
+            AgentStage.EXECUTION,
+            isJsonMode = true,
+            ragContext = "alpha beta",
+            ragAttribution = attr,
+            ragStructuredOutput = true,
+        )
+        assertTrue(prepared.systemPrompt.contains("[RAG OUTPUT FORMAT — REQUIRED]"))
+        assertTrue(prepared.systemPrompt.contains("[RELEVANT CONTEXT FROM KNOWLEDGE BASE]"))
+        assertTrue(prepared.snapshot.isJsonMode)
+        assertEquals(attr, prepared.snapshot.ragAttribution)
+    }
+
     // --- 2: Error Handling ---
 
     @Test

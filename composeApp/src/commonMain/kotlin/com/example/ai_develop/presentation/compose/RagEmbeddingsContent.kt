@@ -223,8 +223,13 @@ private fun RagPipelineSettingsCard(
                         Text("Пайплайн поиска RAG", style = MaterialTheme.typography.titleMedium)
                         if (!panelExpanded) {
                             Text(
-                                text = "${cfg.pipelineMode} · recall ${cfg.recallTopK} / final ${cfg.finalTopK}" +
-                                    if (cfg.queryRewriteEnabled) " · rewrite" else "",
+                                text = buildString {
+                                    append("${cfg.pipelineMode} · ")
+                                    if (cfg.scanAllChunks) append("все чанки (≤500)")
+                                    else append("recall ${cfg.recallTopK} / final ${cfg.finalTopK}")
+                                    if (cfg.queryRewriteEnabled) append(" · rewrite")
+                                    if (!cfg.globalRagEnabled) append(" · чаты: без RAG")
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.secondary,
                             )
@@ -244,6 +249,31 @@ private fun RagPipelineSettingsCard(
                     Modifier.padding(horizontal = 12.dp, vertical = 4.dp).padding(bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Switch(
+                    checked = cfg.globalRagEnabled,
+                    onCheckedChange = { viewModel.updateRagPipeline { c -> c.copy(globalRagEnabled = it) } },
+                )
+                Column(Modifier.weight(1f)) {
+                    Text("RAG в чатах агентов", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Если выключено — ни один агент не подмешивает контекст из базы в ответы, даже при включённом RAG в настройках агента. Панель индекса и проверки поиска ниже доступны всегда.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (!cfg.globalRagEnabled) {
+                Text(
+                    "В чатах контекст из базы не используется; индексация и dry-run на этой панели работают как обычно.",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 "Базовый шаг (эмбеддинг + recall) всегда активен. Остальное — по режиму и порогам.",
                 style = MaterialTheme.typography.bodySmall,
@@ -290,6 +320,22 @@ private fun RagPipelineSettingsCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Checkbox(
+                    checked = cfg.scanAllChunks,
+                    onCheckedChange = { viewModel.updateRagPipeline { c -> c.copy(scanAllChunks = it) } },
+                )
+                Text(
+                    "Все чанки из БД (до лимита)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                "Включено: в промпт попадают все проиндексированные фрагменты после ранжирования (не более 500 за запрос); Recall/Final K ниже не ограничивают.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = cfg.recallTopK.toString(),
@@ -297,6 +343,7 @@ private fun RagPipelineSettingsCard(
                     label = { Text("Recall top-K") },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
+                    enabled = !cfg.scanAllChunks,
                 )
                 OutlinedTextField(
                     value = cfg.finalTopK.toString(),
@@ -304,6 +351,7 @@ private fun RagPipelineSettingsCard(
                     label = { Text("Final top-K") },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
+                    enabled = !cfg.scanAllChunks,
                 )
             }
             OutlinedTextField(
@@ -316,6 +364,23 @@ private fun RagPipelineSettingsCard(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 placeholder = { Text("напр. 0.28") },
+            )
+            OutlinedTextField(
+                value = cfg.answerRelevanceThreshold?.toString().orEmpty(),
+                onValueChange = { s ->
+                    val v = s.toFloatOrNull()
+                    viewModel.updateRagPipeline { c -> c.copy(answerRelevanceThreshold = v) }
+                },
+                label = { Text("Порог релевантности для ответа (пусто = выкл.)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("ниже — «не знаю», без контекста") },
+                supportingText = {
+                    Text(
+                        "Если лучший чанк ниже порога, контекст не подмешивается; модель отвечает в режиме «не знаю».",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
             )
             OutlinedTextField(
                 value = cfg.hybridLexicalWeight.toString(),

@@ -1,10 +1,15 @@
 package com.example.ai_develop.presentation.compose
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -244,8 +249,181 @@ internal fun MemoryStrategySelector(
 }
 
 @Composable
+internal fun RagChunkMaterialDialog(
+    chunkId: String,
+    attribution: RagAttribution,
+    onDismiss: () -> Unit,
+) {
+    val src = attribution.sources.find { it.chunkId == chunkId }
+    val scroll = rememberScrollState()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(src?.documentTitle ?: "Фрагмент") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(scroll),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (src == null) {
+                    Text(
+                        text = "Фрагмент с chunk_id не найден в атрибуции запроса.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    Text(
+                        text = buildString {
+                            append(src.sourceFileName)
+                            append(" · chunk_index=${src.chunkIndex}")
+                            append(" · chunk_id=${src.chunkId}")
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                    )
+                    SelectionContainer {
+                        Text(
+                            text = src.chunkText.ifBlank { "(пустой текст)" },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        },
+    )
+}
+
+@Composable
+private fun CollapsibleRagMetaSection(
+    title: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "$title ($count)",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun RagStructuredAssistantContent(
+    payload: RagStructuredChatPayload,
+    onChunkClick: (String) -> Unit,
+    onOpenRagPipeline: (() -> Unit)?,
+) {
+    var sourcesExpanded by remember { mutableStateOf(false) }
+    var quotesExpanded by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SelectionContainer {
+            Text(
+                text = payload.answer,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        payload.validationNote?.let { note ->
+            Text(
+                text = "— $note —",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                fontStyle = FontStyle.Italic,
+            )
+        }
+        if (payload.sources.isNotEmpty()) {
+            CollapsibleRagMetaSection(
+                title = "Источники",
+                count = payload.sources.size,
+                expanded = sourcesExpanded,
+                onToggle = { sourcesExpanded = !sourcesExpanded },
+            ) {
+                payload.sources.forEachIndexed { i, s ->
+                    Text(
+                        text = "${i + 1}. ${s.source} · chunk ${s.chunkIndex} (${s.chunkId})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { onChunkClick(s.chunkId) },
+                    )
+                }
+            }
+        }
+        if (payload.quotes.isNotEmpty()) {
+            CollapsibleRagMetaSection(
+                title = "Цитаты",
+                count = payload.quotes.size,
+                expanded = quotesExpanded,
+                onToggle = { quotesExpanded = !quotesExpanded },
+            ) {
+                payload.quotes.forEachIndexed { i, q ->
+                    Text(
+                        text = "${i + 1}. [${q.chunkId}] «${q.text}»",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .clickable { onChunkClick(q.chunkId) }
+                            .padding(vertical = 2.dp),
+                    )
+                }
+            }
+        }
+        onOpenRagPipeline?.let { open ->
+            TextButton(onClick = open) {
+                Icon(
+                    Icons.Default.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Пайплайн поиска RAG")
+            }
+        }
+    }
+}
+
+/**
+ * Если в снимке есть [LlmRequestSnapshot.ragStructuredContent], но поля JSON пустые,
+ * [RagStructuredAssistantContent] нечего показать — нужен fallback на [ChatMessage.message].
+ */
+internal fun RagStructuredChatPayload?.shouldRenderStructuredBubble(): Boolean {
+    val p = this ?: return false
+    return !p.answer.isBlank() ||
+        p.sources.isNotEmpty() ||
+        p.quotes.isNotEmpty() ||
+        !p.validationNote.isNullOrBlank()
+}
+
+@Composable
 internal fun MessageBubble(
     message: ChatMessage,
+    onRagChunkClick: ((String) -> Unit)? = null,
+    onOpenRagPipelineDialog: (() -> Unit)? = null,
 ) {
     if (message.isSystemNotification) {
         SystemNotificationBubble(message.message)
@@ -253,6 +431,10 @@ internal fun MessageBubble(
     }
 
     val isUser = message.source == SourceType.USER
+    val snap = message.llmRequestSnapshot
+    val structured = snap?.ragStructuredContent
+    val ragAttr = snap?.ragAttribution
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
@@ -271,29 +453,46 @@ internal fun MessageBubble(
         ) {
             Column {
                 val segments = remember(message.message) { parseMessageBodySegments(message.message) }
-                SelectionContainer {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        when {
-                            segments.isEmpty() && message.message.isNotBlank() -> {
-                                Text(
-                                    text = message.message,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                            }
-                            else -> {
-                                segments.forEach { seg ->
-                                    when (seg) {
-                                        is MessageBodySegment.Text -> Text(
-                                            text = seg.content,
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
-                                        is MessageBodySegment.Image -> ChatImageFromUrl(
-                                            url = seg.url,
-                                            modifier = Modifier.padding(vertical = 2.dp)
-                                        )
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    when {
+                        structured != null &&
+                            structured.shouldRenderStructuredBubble() &&
+                            ragAttr != null &&
+                            onRagChunkClick != null &&
+                            !isUser -> {
+                            RagStructuredAssistantContent(
+                                payload = structured,
+                                onChunkClick = onRagChunkClick,
+                                onOpenRagPipeline = onOpenRagPipelineDialog,
+                            )
+                        }
+                        else -> {
+                            SelectionContainer {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    when {
+                                        segments.isEmpty() && message.message.isNotBlank() -> {
+                                            Text(
+                                                text = message.message,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                            )
+                                        }
+                                        else -> {
+                                            segments.forEach { seg ->
+                                                when (seg) {
+                                                    is MessageBodySegment.Text -> Text(
+                                                        text = seg.content,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                    )
+                                                    is MessageBodySegment.Image -> ChatImageFromUrl(
+                                                        url = seg.url,
+                                                        modifier = Modifier.padding(vertical = 2.dp),
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

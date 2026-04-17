@@ -75,8 +75,10 @@ open class AgentEngine(
         isJsonMode: Boolean = false,
         ragContext: String? = null,
         ragAttribution: RagAttribution? = null,
+        /** Структурированный JSON-ответ RAG: без блока инструментов, схема answer/sources/quotes. */
+        ragStructuredOutput: Boolean = false,
     ): PreparedLlmRequest {
-        val systemPrompt = prepareSystemPrompt(agent, stage, ragContext)
+        val systemPrompt = prepareSystemPrompt(agent, stage, ragContext, ragAttribution, ragStructuredOutput)
         val inputMessages = prepareInputMessages(agent)
         val snapshot = LlmRequestSnapshot(
             effectiveSystemPrompt = systemPrompt,
@@ -214,11 +216,17 @@ open class AgentEngine(
         return executeToolCall(call)
     }
 
-    private fun prepareSystemPrompt(agent: Agent, stage: AgentStage, ragContext: String? = null): String {
+    private fun prepareSystemPrompt(
+        agent: Agent,
+        stage: AgentStage,
+        ragContext: String? = null,
+        ragAttribution: RagAttribution? = null,
+        ragStructuredOutput: Boolean = false,
+    ): String {
         val basePrompt = memoryManager.wrapSystemPrompt(agent)
         val stageContext = "\n[SYSTEM INFO] CURRENT STAGE: $stage\n"
 
-        val toolsContext = if (tools.isNotEmpty()) {
+        val toolsContext = if (!ragStructuredOutput && tools.isNotEmpty()) {
             buildString {
                 appendLine()
                 appendLine("AVAILABLE TOOLS:")
@@ -233,14 +241,56 @@ open class AgentEngine(
                 appendLine("- If the user asks to fetch data AND save/export/write to a file in one request: emit ALL required [TOOL: ...] lines in this single reply (data first, then write/save). Do not stop after only the first tool.")
                 appendLine("- After the last [TOOL: ...] line, add a short user-facing confirmation in the user's language (e.g. Russian): that data was saved, with file path or name when known. This text is shown in chat together with tool results; do not rely on tool JSON alone for that reassurance.")
                 appendLine("- Long requests (several charts + save file, etc.) may require multiple [TOOL: ...] lines in one reply, or a second model turn after the first tool results appear — the app will continue automatically; still prefer packing all tools into one reply when possible.")
-            }.toString()
+            }
         } else ""
 
-        val ragSection = if (!ragContext.isNullOrBlank()) {
-            "\n\n[RELEVANT CONTEXT FROM KNOWLEDGE BASE]\n${ragContext.trim()}\n"
-        } else ""
+        val ragSection = when {
+            ragStructuredOutput && ragAttribution != null ->
+                buildRagStructuredSystemSection(ragContext, ragAttribution)
+            !ragContext.isNullOrBlank() ->
+                "\n\n[RELEVANT CONTEXT FROM KNOWLEDGE BASE]\n${ragContext.trim()}\n"
+            else -> ""
+        }
 
         return basePrompt + stageContext + toolsContext + ragSection
+    }
+
+    private fun buildRagStructuredSystemSection(
+        ragContext: String?,
+        attribution: RagAttribution,
+    ): String = buildString {
+        val grounded = attribution.used && !attribution.insufficientRelevance &&
+            !ragContext.isNullOrBlank()
+        if (grounded) {
+            appendLine()
+            appendLine("[RELEVANT CONTEXT FROM KNOWLEDGE BASE]")
+            appendLine(ragContext.trim())
+            appendLine()
+        } else {
+            appendLine()
+            appendLine("[KNOWLEDGE BASE STATUS]")
+            when {
+                attribution.insufficientRelevance ->
+                    appendLine("Релевантность найденных фрагментов ниже порога или контекст недоступен.")
+                attribution.debug?.emptyReason != null ->
+                    appendLine(attribution.debug?.emptyReason.orEmpty())
+                else ->
+                    appendLine("Контекст из базы знаний для этого запроса не использован.")
+            }
+            appendLine()
+        }
+        appendLine("[RAG OUTPUT FORMAT — REQUIRED]")
+        appendLine("Ответь ОДНИМ JSON-объектом (без markdown-кодов, без текста до или после JSON).")
+        appendLine("Ключи:")
+        appendLine("- \"answer\": строка на русском. Если нельзя опереться на фрагменты ниже — честно скажи, что не знаешь, и попроси уточнить формулировку вопроса.")
+        appendLine("- \"sources\": массив объектов { \"source\": string (имя файла), \"chunk_id\": string, \"chunk_index\": number }")
+        appendLine("- \"quotes\": массив { \"text\": string, \"chunk_id\": string } — text дословно из фрагмента с этим chunk_id в блоке контекста.")
+        if (grounded) {
+            appendLine("При наличии контекста заполни sources и quotes по фрагментам выше; каждая цитата — подстрока соответствующего чанка.")
+        } else {
+            appendLine("Сейчас sources и quotes должны быть пустыми массивами []. Не выдумывай источники.")
+        }
+        appendLine()
     }
 
     private fun prepareInputMessages(agent: Agent): List<ChatMessage> {

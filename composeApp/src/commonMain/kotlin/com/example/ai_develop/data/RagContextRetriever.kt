@@ -50,7 +50,7 @@ class RagContextRetriever(
             )
         }
 
-        val byModel = chunks.groupBy { it.ollamaModel }
+        val byModel = chunks.groupBy { it.ollamaModel.trim() }
         val scored = mutableListOf<ScoredChunk>()
         for ((model, list) in byModel) {
             val qVec = runCatching { ollamaEmbeddingClient.embed(model, q) }.getOrNull() ?: continue
@@ -76,9 +76,7 @@ class RagContextRetriever(
             )
         }
 
-        val recallK = effectiveRecallTopK(config)
-        val finalK = effectiveFinalTopK(config)
-
+        val recallK = effectiveRecallTopK(config, scored.size)
         var ordered = scored
             .sortedByDescending { it.cosine }
             .distinctBy { it.chunk.chunkId }
@@ -114,8 +112,10 @@ class RagContextRetriever(
                         val final = (llm ?: sc.cosine).toDouble()
                         sc to final
                     }.sortedByDescending { it.second }
-                    ordered = scoredList.map { it.first }
-                    finalScores = scoredList
+                    val rerankedHead = scoredList.map { it.first }
+                    val tail = ordered.drop(limit)
+                    ordered = rerankedHead + tail
+                    finalScores = scoredList + tail.map { it to it.cosine.toDouble() }
                 } else {
                     finalScores = ordered.map { it to it.cosine.toDouble() }
                 }
@@ -125,6 +125,7 @@ class RagContextRetriever(
         val candidatesAfterRerank = ordered.size
         val scoreMap = finalScores.associate { (sc, fs) -> sc.chunk.chunkId to fs }
 
+        val finalK = effectiveFinalTopK(config, ordered.size)
         val top = ordered.take(finalK)
 
         if (top.isEmpty()) {
@@ -137,6 +138,28 @@ class RagContextRetriever(
                         config, originalQuery, q, rewriteApplied,
                         recallK, finalK, candidatesAfterRecall, candidatesAfterThreshold, candidatesAfterRerank, min,
                         emptyReason = "После фильтрации не осталось релевантных чанков",
+                    ),
+                ),
+            )
+        }
+
+        val bestScore = top.maxOf { sc ->
+            scoreMap[sc.chunk.chunkId] ?: sc.cosine.toDouble()
+        }
+        val answerTh = config.answerRelevanceThreshold
+        if (answerTh != null && bestScore < answerTh) {
+            return RagRetrievalResult(
+                contextText = "",
+                attribution = RagAttribution(
+                    used = false,
+                    insufficientRelevance = true,
+                    sources = emptyList(),
+                    debug = debugBlock(
+                        config, originalQuery, q, rewriteApplied,
+                        recallK, finalK, candidatesAfterRecall, candidatesAfterThreshold, candidatesAfterRerank, min,
+                        emptyReason = "Релевантность ниже порога для ответа (answerRelevanceThreshold)",
+                        answerRelevanceThreshold = answerTh,
+                        bestRetrievalScore = bestScore,
                     ),
                 ),
             )
@@ -165,7 +188,10 @@ class RagContextRetriever(
             top.forEachIndexed { i, sc ->
                 val ch = sc.chunk
                 if (i > 0) appendLine()
-                appendLine("--- Fragment ${i + 1} (${ch.documentTitle} / ${ch.sourceFileName}, chunk ${ch.chunkIndex}) ---")
+                appendLine(
+                    "--- Fragment ${i + 1} | chunk_id=${ch.chunkId} | chunk_index=${ch.chunkIndex} | " +
+                        "${ch.documentTitle} / ${ch.sourceFileName} ---"
+                )
                 appendLine(ch.text.trim())
             }
         }
@@ -196,6 +222,8 @@ class RagContextRetriever(
         candidatesAfterRerank: Int,
         minSimilarity: Float?,
         emptyReason: String?,
+        answerRelevanceThreshold: Float? = null,
+        bestRetrievalScore: Double? = null,
     ) = RagRetrievalDebug(
         pipelineMode = config.pipelineMode,
         originalQuery = originalQuery,
@@ -214,6 +242,8 @@ class RagContextRetriever(
             null
         },
         emptyReason = emptyReason,
+        answerRelevanceThreshold = answerRelevanceThreshold,
+        bestRetrievalScore = bestRetrievalScore,
     )
 
 }

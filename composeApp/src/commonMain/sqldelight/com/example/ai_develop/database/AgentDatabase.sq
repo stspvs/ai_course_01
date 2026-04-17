@@ -263,12 +263,18 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 getRagDocumentBySource:
 SELECT * FROM RagDocumentEntity WHERE sourceFileName = ? AND sourcePath = ? LIMIT 1;
 
--- Тот же файл, что и при сохранении: имя + нормализованный путь, либо старая строка миграции (sourcePath = id)
+-- Тот же источник: только точное совпадение имени файла и нормализованного пути.
+-- Не использовать sourcePath = id в этом DELETE: для строк с путём = id документа условие истинно на каждой строке
+-- и при повторной вставке удалялись бы все такие документы с тем же sourceFileName.
 selectRagDocumentIdsForSameFileSource:
-SELECT id FROM RagDocumentEntity WHERE sourceFileName = ? AND (sourcePath = ? OR sourcePath = id);
+SELECT id FROM RagDocumentEntity WHERE sourceFileName = ? AND sourcePath = ?;
 
 deleteRagDocumentsForSameFileSource:
-DELETE FROM RagDocumentEntity WHERE sourceFileName = ? AND (sourcePath = ? OR sourcePath = id);
+DELETE FROM RagDocumentEntity WHERE sourceFileName = ? AND sourcePath = ?;
+
+-- Старые строки, где sourcePath совпадал с id; вызывать только при вставке документа с реальным путём к файлу (есть / или \).
+deleteRagDocumentsLegacySourcePathEqualsIdForFileName:
+DELETE FROM RagDocumentEntity WHERE sourceFileName = ? AND sourcePath = id;
 
 insertRagChunk:
 INSERT OR REPLACE INTO RagChunkEntity(

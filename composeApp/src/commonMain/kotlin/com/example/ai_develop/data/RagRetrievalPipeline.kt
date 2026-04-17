@@ -59,8 +59,29 @@ fun rerankHybrid(
         }
 }
 
-fun effectiveRecallTopK(config: RagRetrievalConfig): Int =
-    config.recallTopK.coerceAtLeast(1)
+/** Жёсткий верхний предел чанков в одном запросе (контекст модели и время). */
+const val RAG_MAX_CHUNKS_IN_CONTEXT = 500
 
-fun effectiveFinalTopK(config: RagRetrievalConfig): Int =
-    config.finalTopK.coerceAtLeast(1)
+/**
+ * @param scoredSize число чанков после глобального скоринга (до recall).
+ */
+fun effectiveRecallTopK(config: RagRetrievalConfig, scoredSize: Int): Int {
+    if (scoredSize <= 0) return 1
+    val cap = minOf(scoredSize, RAG_MAX_CHUNKS_IN_CONTEXT)
+    if (config.scanAllChunks) {
+        return cap.coerceAtLeast(1)
+    }
+    return minOf(config.recallTopK.coerceAtLeast(1), cap)
+}
+
+/**
+ * @param orderedSize длина списка кандидатов после recall, порога и rerank (перед take final).
+ */
+fun effectiveFinalTopK(config: RagRetrievalConfig, orderedSize: Int): Int {
+    if (orderedSize <= 0) return 1
+    val cap = minOf(orderedSize, RAG_MAX_CHUNKS_IN_CONTEXT)
+    if (config.scanAllChunks) {
+        return cap.coerceAtLeast(1)
+    }
+    return minOf(config.finalTopK.coerceAtLeast(1), cap)
+}

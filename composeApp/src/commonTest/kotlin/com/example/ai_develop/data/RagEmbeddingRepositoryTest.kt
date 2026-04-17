@@ -112,6 +112,22 @@ class RagEmbeddingRepositoryTest {
     }
 
     @Test
+    fun insertDocumentWithChunks_sameSourceFileName_differentPaths_keepsBoth() = runTest {
+        val id1 = Uuid.random().toString()
+        val id2 = Uuid.random().toString()
+        repository.insertDocumentWithChunks(
+            doc(id1, sourceFileName = "(вставка)", sourcePath = ragSyntheticSourcePath(id1), fullText = "a"),
+            listOf(chunk(Uuid.random().toString(), id1, 0)),
+        )
+        repository.insertDocumentWithChunks(
+            doc(id2, sourceFileName = "(вставка)", sourcePath = ragSyntheticSourcePath(id2), fullText = "b"),
+            listOf(chunk(Uuid.random().toString(), id2, 0)),
+        )
+        val list = repository.observeAllDocuments().first()
+        assertEquals(2, list.size)
+    }
+
+    @Test
     fun insertDocumentWithChunks_sameSource_replaces_returnsReplacedTrue() = runTest {
         val id1 = Uuid.random().toString()
         val id2 = Uuid.random().toString()

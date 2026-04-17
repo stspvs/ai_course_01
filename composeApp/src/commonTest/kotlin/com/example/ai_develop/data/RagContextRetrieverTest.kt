@@ -386,6 +386,27 @@ class RagContextRetrieverTest {
     }
 
     @Test
+    fun answerRelevanceThreshold_belowBestScore_emptiesContextAndFlagsInsufficient() = runTest {
+        insertTwoOrthogonalChunks()
+        val sut = RagContextRetriever(
+            embeddingClientFixedQueryVector(),
+            ragRepository,
+            rerankClientStub(),
+        )
+        val cfg = RagRetrievalConfig(
+            pipelineMode = RagPipelineMode.Baseline,
+            answerRelevanceThreshold = 1.01f,
+        )
+        val r = sut.retrieve("q", "hello", cfg, rewriteApplied = false)
+        assertNotNull(r)
+        assertEquals("", r.contextText)
+        assertFalse(r.attribution.used)
+        assertTrue(r.attribution.insufficientRelevance)
+        assertTrue(r.attribution.sources.isEmpty())
+        assertTrue(r.attribution.debug?.emptyReason?.contains("answerRelevanceThreshold") == true)
+    }
+
+    @Test
     fun recallAndFinalTopK_respectLimits() = runTest {
         insertTwoOrthogonalChunks()
         val sut = RagContextRetriever(
@@ -454,5 +475,104 @@ class RagContextRetrieverTest {
         val dbg5 = r.attribution.debug
         assertNotNull(dbg5)
         assertEquals(5, dbg5.candidatesAfterRecall)
+    }
+
+    @Test
+    fun retrieve_scanAllChunks_includesAllChunksDespiteSmallTopK() = runTest {
+        val docId = Uuid.random().toString()
+        val shared = floatArrayOf(1f, 0f)
+        val chunks = (0 until 40).map { i ->
+            RagChunkEntity(
+                id = Uuid.random().toString(),
+                documentId = docId,
+                chunkIndex = i.toLong(),
+                startOffset = 0L,
+                endOffset = 1L,
+                text = "chunk $i",
+                embeddingBlob = EmbeddingFloatCodec.floatArrayToLittleEndianBytes(shared),
+            )
+        }
+        ragRepository.insertDocumentWithChunks(
+            RagDocumentEntity(
+                id = docId,
+                title = "Big",
+                sourceFileName = "big.txt",
+                sourcePath = "c:/big.txt",
+                ollamaModel = "m1",
+                chunkSize = 10L,
+                overlap = 0L,
+                chunkStrategy = "FIXED_WINDOW",
+                createdAt = 1L,
+                fullText = "x",
+            ),
+            chunks
+        )
+        val sut = RagContextRetriever(
+            embeddingClientFixedQueryVector(),
+            ragRepository,
+            rerankClientStub(),
+        )
+        val cfg = RagRetrievalConfig(
+            pipelineMode = RagPipelineMode.Baseline,
+            recallTopK = 3,
+            finalTopK = 3,
+            scanAllChunks = true,
+        )
+        val r = sut.retrieve("q", "stress", cfg, rewriteApplied = false)
+        assertNotNull(r)
+        assertTrue(r.attribution.used)
+        assertEquals(40, r.attribution.sources.size)
+        val dbg = r.attribution.debug
+        assertNotNull(dbg)
+        assertEquals(40, dbg.candidatesAfterRecall)
+        assertEquals(40, dbg.finalTopK)
+    }
+
+    @Test
+    fun retrieve_llmRerank_keepsTailAfterRerankedHead() = runTest {
+        val docId = Uuid.random().toString()
+        val shared = floatArrayOf(1f, 0f)
+        val chunkEntities = (0 until 5).map { i ->
+            RagChunkEntity(
+                id = Uuid.random().toString(),
+                documentId = docId,
+                chunkIndex = i.toLong(),
+                startOffset = 0L,
+                endOffset = 1L,
+                text = "c$i",
+                embeddingBlob = EmbeddingFloatCodec.floatArrayToLittleEndianBytes(shared),
+            )
+        }
+        ragRepository.insertDocumentWithChunks(
+            RagDocumentEntity(
+                id = docId,
+                title = "Multi",
+                sourceFileName = "m.txt",
+                sourcePath = "c:/m.txt",
+                ollamaModel = "m1",
+                chunkSize = 10L,
+                overlap = 0L,
+                chunkStrategy = "FIXED_WINDOW",
+                createdAt = 1L,
+                fullText = "x",
+            ),
+            chunkEntities
+        )
+        val sut = RagContextRetriever(
+            embeddingClientFixedQueryVector(),
+            ragRepository,
+            rerankClientStub("9"),
+        )
+        val cfg = RagRetrievalConfig(
+            pipelineMode = RagPipelineMode.LlmRerank,
+            recallTopK = 10,
+            finalTopK = 5,
+            llmRerankOllamaModel = "rank-model",
+            llmRerankMaxCandidates = 2,
+        )
+        val r = sut.retrieve("q", "x", cfg, rewriteApplied = false)
+        assertNotNull(r)
+        assertTrue(r.attribution.used)
+        assertEquals(5, r.attribution.sources.size)
     }
 }

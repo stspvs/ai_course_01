@@ -696,22 +696,34 @@ private fun TaskMessageBubbleFrame(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember(message.id) { mutableStateOf(false) }
+    var selectedRagChunkId by remember(message.id) { mutableStateOf<String?>(null) }
     val segments = remember(message.message) { parseMessageBodySegments(message.message) }
     val textOnly = remember(message.message) { messageBodyTextOnly(segments) }
     val collapsible = taskBubbleCollapsible(textOnly, DEFAULT_TASK_BUBBLE_PREVIEW_CHARS)
     val collapsedPreviewText = taskBubbleDisplayText(textOnly, expanded, DEFAULT_TASK_BUBBLE_PREVIEW_CHARS)
+    val structured = message.llmRequestSnapshot?.ragStructuredContent
+    val ragAttr = message.llmRequestSnapshot?.ragAttribution
+    val hasStructuredRag =
+        structured != null &&
+            structured.shouldRenderStructuredBubble() &&
+            ragAttr != null &&
+            message.source != SourceType.USER
     val showInterleaved = expanded || !collapsible
 
     val stageColor = message.taskState?.let { getStageColor(it, task) } ?: MaterialTheme.colorScheme.secondaryContainer
     val bgColor = if (message.source == SourceType.USER) MaterialTheme.colorScheme.primaryContainer else stageColor.copy(alpha = 0.1f)
     val hasLog = message.llmRequestSnapshot != null
-    val gestureModifier = Modifier.pointerInput(message.id, collapsible) {
-        detectTapGestures(
-            onDoubleTap = {
-                if (collapsible) expanded = !expanded
-            },
-            onTap = { onOpenLog() }
-        )
+    val gestureModifier = if (!hasStructuredRag) {
+        Modifier.pointerInput(message.id, collapsible) {
+            detectTapGestures(
+                onDoubleTap = {
+                    if (collapsible) expanded = !expanded
+                },
+                onTap = { onOpenLog() }
+            )
+        }
+    } else {
+        Modifier
     }
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -731,38 +743,48 @@ private fun TaskMessageBubbleFrame(
                 )
                 Spacer(Modifier.height(4.dp))
             }
-            SelectionContainer {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (showInterleaved) {
-                        segments.forEach { seg ->
-                            when (seg) {
-                                is MessageBodySegment.Text -> Text(
-                                    text = seg.content,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                                is MessageBodySegment.Image -> ChatImageFromUrl(
-                                    url = seg.url,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (hasStructuredRag && structured != null && ragAttr != null) {
+                    RagStructuredAssistantContent(
+                        payload = structured,
+                        onChunkClick = { selectedRagChunkId = it },
+                        onOpenRagPipeline = { onOpenLog() },
+                    )
+                } else {
+                    SelectionContainer {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (showInterleaved) {
+                                segments.forEach { seg ->
+                                    when (seg) {
+                                        is MessageBodySegment.Text -> Text(
+                                            text = seg.content,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        is MessageBodySegment.Image -> ChatImageFromUrl(
+                                            url = seg.url,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            } else {
+                                if (collapsedPreviewText.isNotEmpty()) {
+                                    Text(
+                                        text = collapsedPreviewText,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                }
+                                segments.filterIsInstance<MessageBodySegment.Image>().forEach { seg ->
+                                    ChatImageFromUrl(
+                                        url = seg.url,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
-                        }
-                    } else {
-                        if (collapsedPreviewText.isNotEmpty()) {
-                            Text(
-                                text = collapsedPreviewText,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
-                        segments.filterIsInstance<MessageBodySegment.Image>().forEach { seg ->
-                            ChatImageFromUrl(
-                                url = seg.url,
-                                modifier = Modifier.fillMaxWidth()
-                            )
                         }
                     }
                 }
             }
-            if (collapsible) {
+            if (collapsible && !hasStructuredRag) {
                 Spacer(Modifier.height(6.dp))
                 Row(
                     modifier = Modifier
@@ -818,6 +840,15 @@ private fun TaskMessageBubbleFrame(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
+        }
+    }
+    selectedRagChunkId?.let { chunkId ->
+        ragAttr?.let { attr ->
+            RagChunkMaterialDialog(
+                chunkId = chunkId,
+                attribution = attr,
+                onDismiss = { selectedRagChunkId = null },
+            )
         }
     }
 }

@@ -96,9 +96,28 @@ class RagRetrievalPipelineTest {
 
     @Test
     fun effectiveRecallTopK_and_finalTopK_coerceAtLeastOne() {
-        assertEquals(1, effectiveRecallTopK(RagRetrievalConfig(recallTopK = 0)))
-        assertEquals(1, effectiveRecallTopK(RagRetrievalConfig(recallTopK = -100)))
-        assertEquals(1, effectiveFinalTopK(RagRetrievalConfig(finalTopK = 0)))
+        assertEquals(1, effectiveRecallTopK(RagRetrievalConfig(recallTopK = 0), scoredSize = 100))
+        assertEquals(1, effectiveRecallTopK(RagRetrievalConfig(recallTopK = -100), scoredSize = 100))
+        assertEquals(1, effectiveFinalTopK(RagRetrievalConfig(finalTopK = 0), orderedSize = 100))
+    }
+
+    @Test
+    fun effectiveRecallTopK_respectsScoredSizeCap() {
+        assertEquals(3, effectiveRecallTopK(RagRetrievalConfig(recallTopK = 99), scoredSize = 3))
+    }
+
+    @Test
+    fun effectiveRecallTopK_scanAllChunks_usesAllScoredUpToMax() {
+        assertEquals(
+            RAG_MAX_CHUNKS_IN_CONTEXT,
+            effectiveRecallTopK(RagRetrievalConfig(scanAllChunks = true, recallTopK = 1), scoredSize = 9999),
+        )
+        assertEquals(7, effectiveRecallTopK(RagRetrievalConfig(scanAllChunks = true, recallTopK = 1), scoredSize = 7))
+    }
+
+    @Test
+    fun effectiveFinalTopK_scanAllChunks_usesOrderedSizeUpToMax() {
+        assertEquals(4, effectiveFinalTopK(RagRetrievalConfig(scanAllChunks = true, finalTopK = 1), orderedSize = 4))
     }
 
     @Test

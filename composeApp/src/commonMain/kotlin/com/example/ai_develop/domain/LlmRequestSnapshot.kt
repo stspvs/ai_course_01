@@ -38,6 +38,34 @@ data class RagRetrievalDebug(
     val llmRerankModel: String? = null,
     /** Причина пустого контекста: отсечены по порогу, нет чанков в БД и т.д. */
     val emptyReason: String? = null,
+    /** Порог [RagRetrievalConfig.answerRelevanceThreshold], если участвовал в решении. */
+    val answerRelevanceThreshold: Float? = null,
+    /** Лучший скор среди отобранных чанков до проверки answerRelevanceThreshold. */
+    val bestRetrievalScore: Double? = null,
+)
+
+/**
+ * Структурированный ответ RAG для UI (кликабельные источники, цитаты).
+ */
+@Serializable
+data class RagStructuredChatPayload(
+    val answer: String,
+    val sources: List<RagStructuredSourceLine> = emptyList(),
+    val quotes: List<RagStructuredQuoteLine> = emptyList(),
+    val validationNote: String? = null,
+)
+
+@Serializable
+data class RagStructuredSourceLine(
+    val source: String,
+    val chunkId: String,
+    val chunkIndex: Long,
+)
+
+@Serializable
+data class RagStructuredQuoteLine(
+    val text: String,
+    val chunkId: String,
 )
 
 /**
@@ -46,6 +74,8 @@ data class RagRetrievalDebug(
 @Serializable
 data class RagAttribution(
     val used: Boolean = false,
+    /** Лучший найденный чанк ниже [RagRetrievalConfig.answerRelevanceThreshold] — ответ только из режима «не знаю». */
+    val insufficientRelevance: Boolean = false,
     val sources: List<RagSourceRef> = emptyList(),
     val debug: RagRetrievalDebug? = null,
 )
@@ -67,6 +97,8 @@ data class LlmRequestSnapshot(
     /** PLANNING: в системном промпте есть блок замечаний инспектора плана (после отката из PLAN_VERIFICATION). */
     val planningInspectorRevisionMode: Boolean = false,
     val ragAttribution: RagAttribution? = null,
+    /** Разобранный JSON-ответ RAG для отображения ссылок на чанки; null если не JSON или ошибка разбора. */
+    val ragStructuredContent: RagStructuredChatPayload? = null,
 )
 
 fun formatLlmInputMessagesText(messages: List<ChatMessage>): String =
@@ -94,4 +126,5 @@ fun buildLlmRequestSnapshot(
     stopWord = agent.stopWord,
     planningInspectorRevisionMode = planningInspectorRevisionMode,
     ragAttribution = null,
+    ragStructuredContent = null,
 )

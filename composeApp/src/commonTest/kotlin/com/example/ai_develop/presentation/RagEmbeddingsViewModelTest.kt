@@ -517,6 +517,28 @@ class RagEmbeddingsViewModelTest {
     }
 
     @Test
+    fun saveToDatabase_twoSavesWithoutFilePath_bothDocumentsPersist() = runBlocking {
+        newViewModel(clientFixedEmbedding(dim = 2))
+        viewModel.setSourceTextForTests("first", sourcePath = "")
+        viewModel.setOverlap(0)
+        viewModel.setChunkSize(50)
+        viewModel.generateEmbeddings()
+        waitUntilNotGenerating()
+        viewModel.saveToDatabase()
+        waitUntil { viewModel.uiState.value.saveMessage != null }
+        viewModel.dismissMessages()
+
+        viewModel.setSourceTextForTests("second text longer", sourcePath = "")
+        viewModel.setChunkSize(50)
+        viewModel.generateEmbeddings()
+        waitUntilNotGenerating()
+        viewModel.saveToDatabase()
+        waitUntil { viewModel.uiState.value.saveMessage != null }
+
+        assertEquals(2, ragRepository.observeAllDocuments().first().size)
+    }
+
+    @Test
     fun saveToDatabase_usesDefaultModelWhenBlank() = runBlocking {
         newViewModel(clientFixedEmbedding(dim = 2))
         viewModel.setSourceTextForTests("hi")
@@ -677,5 +699,76 @@ class RagEmbeddingsViewModelTest {
         assertTrue(text.contains("Исходный запрос"))
         assertTrue(text.contains("переписанный"))
         assertTrue(text.contains("Запрос для поиска"))
+    }
+
+    @Test
+    fun runRagPreviewDryRun_globalRagOff_stillRuns() = runBlocking {
+        val docId = Uuid.random().toString()
+        val body = "hello rag body"
+        ragRepository.insertDocumentWithChunks(
+            RagDocumentEntity(
+                id = docId,
+                title = "DocTitle",
+                sourceFileName = "preview.txt",
+                sourcePath = "c:/preview.txt",
+                ollamaModel = "embed-model",
+                chunkSize = 10L,
+                overlap = 0L,
+                chunkStrategy = "FIXED_WINDOW",
+                createdAt = 1L,
+                fullText = body,
+            ),
+            listOf(
+                RagChunkEntity(
+                    id = Uuid.random().toString(),
+                    documentId = docId,
+                    chunkIndex = 0L,
+                    startOffset = 0L,
+                    endOffset = body.length.toLong(),
+                    text = body,
+                    embeddingBlob = EmbeddingFloatCodec.floatArrayToLittleEndianBytes(floatArrayOf(1f, 1f)),
+                )
+            )
+        )
+        newViewModel(clientFixedEmbedding(dim = 2))
+        viewModel.updateRagPipeline { it.copy(globalRagEnabled = false) }
+        viewModel.setRagPreviewQuery("search me")
+        viewModel.runRagPreviewDryRun()
+        waitUntil { !viewModel.uiState.value.ragPreviewLoading }
+        assertNull(viewModel.uiState.value.error)
+        val text = requireNotNull(viewModel.uiState.value.ragPreviewText)
+        assertTrue(text.contains("Использован RAG"))
+    }
+
+    @Test
+    fun generateEmbeddings_globalRagOff_succeeds() = runBlocking {
+        val cfgOff = RagRetrievalConfig(globalRagEnabled = false)
+        assertFalse(cfgOff.globalRagEnabled)
+        newViewModel(clientFixedEmbedding())
+        delay(50L)
+        viewModel.setRagPipelineConfigForTests(cfgOff)
+        assertFalse(viewModel.uiState.value.ragPipelineConfig.globalRagEnabled)
+        viewModel.setSourceTextForTests("hello world long enough")
+        viewModel.setChunkSize(50)
+        viewModel.generateEmbeddings()
+        waitUntilNotGenerating()
+        assertNull(viewModel.uiState.value.error)
+        assertNotNull(viewModel.uiState.value.embeddings)
+    }
+
+    @Test
+    fun saveToDatabase_globalRagOff_succeeds() = runBlocking {
+        newViewModel(clientFixedEmbedding())
+        delay(50L)
+        viewModel.setRagPipelineConfigForTests(RagRetrievalConfig(globalRagEnabled = false))
+        viewModel.setSourceTextForTests("hello world long enough")
+        viewModel.setChunkSize(50)
+        viewModel.generateEmbeddings()
+        waitUntilNotGenerating()
+        assertNotNull(viewModel.uiState.value.embeddings)
+        viewModel.saveToDatabase()
+        waitUntil { viewModel.uiState.value.saveMessage != null }
+        assertNull(viewModel.uiState.value.error)
+        assertNotNull(viewModel.uiState.value.saveMessage)
     }
 }

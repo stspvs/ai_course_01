@@ -39,6 +39,7 @@ private fun ChatMessage.supportsRagDetailDialog(): Boolean {
     if (source != SourceType.AI && role.lowercase() != "assistant") return false
     val attr = llmRequestSnapshot?.ragAttribution ?: return false
     if (attr.debug != null) return true
+    if (attr.insufficientRelevance) return true
     return attr.used && attr.sources.isNotEmpty()
 }
 
@@ -685,8 +686,10 @@ private fun MessageItem(
 ) {
     var showBranchDialog by remember { mutableStateOf(false) }
     var branchName by remember { mutableStateOf("") }
+    var selectedRagChunkId by remember(message.id) { mutableStateOf<String?>(null) }
 
-    val openRagOnClick = message.supportsRagDetailDialog()
+    val hasStructuredRag = message.llmRequestSnapshot?.ragStructuredContent.shouldRenderStructuredBubble()
+    val openRagOnClick = message.supportsRagDetailDialog() && !hasStructuredRag
 
     val outerModifier = when {
         isBranchingMode && openRagOnClick -> Modifier.combinedClickable(
@@ -702,7 +705,30 @@ private fun MessageItem(
     }
 
     Box(modifier = outerModifier) {
-        MessageBubble(message = message)
+        MessageBubble(
+            message = message,
+            onRagChunkClick = if (hasStructuredRag) {
+                { id -> selectedRagChunkId = id }
+            } else {
+                null
+            },
+            onOpenRagPipelineDialog = if (hasStructuredRag && message.supportsRagDetailDialog()) {
+                { onOpenRagDialog(message) }
+            } else {
+                null
+            },
+        )
+    }
+
+    val ragAttr = message.llmRequestSnapshot?.ragAttribution
+    selectedRagChunkId?.let { chunkId ->
+        if (ragAttr != null) {
+            RagChunkMaterialDialog(
+                chunkId = chunkId,
+                attribution = ragAttr,
+                onDismiss = { selectedRagChunkId = null },
+            )
+        }
     }
 
     if (showBranchDialog && isBranchingMode) {
