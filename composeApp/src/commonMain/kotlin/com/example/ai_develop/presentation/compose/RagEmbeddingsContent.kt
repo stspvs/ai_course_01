@@ -49,6 +49,12 @@ import com.example.ai_develop.domain.OllamaUiModelNames
 import com.example.ai_develop.domain.RagEvaluationScope
 import com.example.ai_develop.domain.RagPipelineMode
 import com.example.ai_develop.domain.TextChunk
+import com.example.ai_develop.domain.showsEvaluationHeuristicStep
+import com.example.ai_develop.domain.showsEvaluationLlmRerankStep
+import com.example.ai_develop.domain.showsEvaluationThresholdStep
+import com.example.ai_develop.domain.showsHybridLexicalWeight
+import com.example.ai_develop.domain.showsLlmRerankControls
+import com.example.ai_develop.domain.showsMinSimilarity
 import com.example.ai_develop.domain.ragPipelineModeDescription
 import com.example.ai_develop.domain.ragPipelineModeMenuSubtitle
 import com.example.ai_develop.domain.ragPipelinePanelHelpText
@@ -227,6 +233,11 @@ private fun RagPipelineSettingsCard(
                                     append("${cfg.pipelineMode} · ")
                                     if (cfg.scanAllChunks) append("все чанки (≤500)")
                                     else append("recall ${cfg.recallTopK} / final ${cfg.finalTopK}")
+                                    if (cfg.pipelineMode.showsMinSimilarity() && cfg.minSimilarity != null) {
+                                        append(" · min sim")
+                                    }
+                                    if (cfg.pipelineMode.showsHybridLexicalWeight()) append(" · hybrid")
+                                    if (cfg.pipelineMode.showsLlmRerankControls()) append(" · LLM rerank")
                                     if (cfg.queryRewriteEnabled) append(" · rewrite")
                                     if (!cfg.globalRagEnabled) append(" · чаты: без RAG")
                                 },
@@ -354,17 +365,19 @@ private fun RagPipelineSettingsCard(
                     enabled = !cfg.scanAllChunks,
                 )
             }
-            OutlinedTextField(
-                value = cfg.minSimilarity?.toString().orEmpty(),
-                onValueChange = { s ->
-                    val v = s.toFloatOrNull()
-                    viewModel.updateRagPipeline { c -> c.copy(minSimilarity = v) }
-                },
-                label = { Text("Мин. similarity (пусто = не задан)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                placeholder = { Text("напр. 0.28") },
-            )
+            if (cfg.pipelineMode.showsMinSimilarity()) {
+                OutlinedTextField(
+                    value = cfg.minSimilarity?.toString().orEmpty(),
+                    onValueChange = { s ->
+                        val v = s.toFloatOrNull()
+                        viewModel.updateRagPipeline { c -> c.copy(minSimilarity = v) }
+                    },
+                    label = { Text("Мин. similarity (пусто = не задан)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("напр. 0.28") },
+                )
+            }
             OutlinedTextField(
                 value = cfg.answerRelevanceThreshold?.toString().orEmpty(),
                 onValueChange = { s ->
@@ -382,23 +395,21 @@ private fun RagPipelineSettingsCard(
                     )
                 },
             )
-            OutlinedTextField(
-                value = cfg.hybridLexicalWeight.toString(),
-                onValueChange = { it.toFloatOrNull()?.let { v -> viewModel.updateRagPipeline { c -> c.copy(hybridLexicalWeight = v.coerceIn(0f, 1f)) } } },
-                label = { Text("Hybrid: w (косинус vs Jaccard), 0…1") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                supportingText = if (cfg.pipelineMode == RagPipelineMode.Hybrid) {
-                    {
+            if (cfg.pipelineMode.showsHybridLexicalWeight()) {
+                OutlinedTextField(
+                    value = cfg.hybridLexicalWeight.toString(),
+                    onValueChange = { it.toFloatOrNull()?.let { v -> viewModel.updateRagPipeline { c -> c.copy(hybridLexicalWeight = v.coerceIn(0f, 1f)) } } },
+                    label = { Text("Hybrid: w (косинус vs Jaccard), 0…1") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    supportingText = {
                         Text(
                             "Итог: w·cosine + (1−w)·Jaccard по токенам. Больше w — сильнее эмбеддинги; меньше — сильнее совпадение слов.",
                             style = MaterialTheme.typography.bodySmall,
                         )
-                    }
-                } else {
-                    null
-                },
-            )
+                    },
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Checkbox(
                     checked = cfg.queryRewriteEnabled,
@@ -406,29 +417,33 @@ private fun RagPipelineSettingsCard(
                 )
                 Text("Query rewrite (LLM)")
             }
-            OllamaEmbedModelDropdown(
-                models = modelChoices,
-                value = cfg.rewriteOllamaModel.ifBlank { OllamaDefaultModelName },
-                onValueChange = { viewModel.updateRagPipeline { c -> c.copy(rewriteOllamaModel = it) } },
-                labelText = "Модель для query rewrite (если Ollama)",
-            )
-            OllamaEmbedModelDropdown(
-                models = modelChoices,
-                value = cfg.llmRerankOllamaModel.ifBlank { OllamaDefaultModelName },
-                onValueChange = { viewModel.updateRagPipeline { c -> c.copy(llmRerankOllamaModel = it) } },
-                labelText = "Модель для LLM-rerank",
-            )
-            OutlinedTextField(
-                value = cfg.llmRerankMaxCandidates.toString(),
-                onValueChange = {
-                    it.toIntOrNull()?.let { v ->
-                        viewModel.updateRagPipeline { c -> c.copy(llmRerankMaxCandidates = v.coerceAtLeast(1)) }
-                    }
-                },
-                label = { Text("Макс. кандидатов для LLM-rerank") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
+            if (cfg.queryRewriteEnabled) {
+                OllamaEmbedModelDropdown(
+                    models = modelChoices,
+                    value = cfg.rewriteOllamaModel.ifBlank { OllamaDefaultModelName },
+                    onValueChange = { viewModel.updateRagPipeline { c -> c.copy(rewriteOllamaModel = it) } },
+                    labelText = "Модель для query rewrite (если Ollama)",
+                )
+            }
+            if (cfg.pipelineMode.showsLlmRerankControls()) {
+                OllamaEmbedModelDropdown(
+                    models = modelChoices,
+                    value = cfg.llmRerankOllamaModel.ifBlank { OllamaDefaultModelName },
+                    onValueChange = { viewModel.updateRagPipeline { c -> c.copy(llmRerankOllamaModel = it) } },
+                    labelText = "Модель для LLM-rerank",
+                )
+                OutlinedTextField(
+                    value = cfg.llmRerankMaxCandidates.toString(),
+                    onValueChange = {
+                        it.toIntOrNull()?.let { v ->
+                            viewModel.updateRagPipeline { c -> c.copy(llmRerankMaxCandidates = v.coerceAtLeast(1)) }
+                        }
+                    },
+                    label = { Text("Макс. кандидатов для LLM-rerank") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            }
             Text("Охват панели оценки (dry-run)", style = MaterialTheme.typography.labelMedium)
             Text(
                 "Не влияет на поиск в чате и на проверку «Запустить»; только для теста и будущей отладки.",
@@ -453,18 +468,25 @@ private fun RagPipelineSettingsCard(
             }
             if (cfg.evaluationScope == RagEvaluationScope.SUBSET) {
                 val ev = cfg.evaluationStepsEnabled
+                val mode = cfg.pipelineMode
                 Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(ev.threshold, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(threshold = v)) } })
-                        Text("Порог")
+                    if (mode.showsEvaluationThresholdStep()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(ev.threshold, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(threshold = v)) } })
+                            Text("Порог")
+                        }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(ev.heuristic, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(heuristic = v)) } })
-                        Text("Эвристика")
+                    if (mode.showsEvaluationHeuristicStep()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(ev.heuristic, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(heuristic = v)) } })
+                            Text("Эвристика")
+                        }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(ev.llmRerank, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(llmRerank = v)) } })
-                        Text("LLM rerank")
+                    if (mode.showsEvaluationLlmRerankStep()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(ev.llmRerank, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(llmRerank = v)) } })
+                            Text("LLM rerank")
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(ev.queryRewrite, { v -> viewModel.updateRagPipeline { c -> c.copy(evaluationStepsEnabled = c.evaluationStepsEnabled.copy(queryRewrite = v)) } })
