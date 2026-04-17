@@ -47,6 +47,7 @@ open class AgentManagementUseCase(
 
     open suspend fun updateAgent(params: UpdateAgentParams) {
         val state = repository.getAgentState(params.id) ?: AgentState(params.id)
+        val ragToggled = state.ragEnabled != params.ragEnabled
         repository.saveAgentState(state.copy(
             name = params.name,
             systemPrompt = params.systemPrompt,
@@ -57,6 +58,9 @@ open class AgentManagementUseCase(
             memoryStrategy = params.memoryStrategy,
             ragEnabled = params.ragEnabled,
         ))
+        if (ragToggled) {
+            chatStreamingUseCase.evictAgent(params.id)
+        }
         refreshAgent(params.id)
     }
 

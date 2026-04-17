@@ -359,19 +359,40 @@ private fun MemorySidePanel(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Текущая задача:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        val wm = agent.workingMemory
+                        Text("Цель диалога:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Text(
-                            text = agent.workingMemory.currentTask ?: "Активная задача не определена",
+                            text = wm.dialogueGoal ?: wm.currentTask ?: "Не определена",
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        val progress = agent.workingMemory.progress
+                        Spacer(Modifier.height(6.dp))
+                        Text("Текущая задача (метка):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = wm.currentTask ?: "—",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (wm.currentTask.isNullOrBlank()) {
+                                Color.Gray
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        val progress = wm.progress
                         if (!progress.isNullOrBlank()) {
                             Spacer(Modifier.height(4.dp))
                             Text("Прогресс:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             Text(text = progress, style = MaterialTheme.typography.bodySmall, color = Color(0xFF1B5E20))
                         }
-                        
-                        val wmFacts = agent.workingMemory.extractedFacts.facts
+                        if (wm.userClarifications.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("Уточнения пользователя:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            wm.userClarifications.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                        }
+                        if (wm.fixedTermsAndConstraints.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("Термины и ограничения:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            wm.fixedTermsAndConstraints.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                        }
+                        val wmFacts = wm.extractedFacts.facts
                         if (wmFacts.isNotEmpty()) {
                             Spacer(Modifier.height(8.dp))
                             Text("Извлеченные факты задачи:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)

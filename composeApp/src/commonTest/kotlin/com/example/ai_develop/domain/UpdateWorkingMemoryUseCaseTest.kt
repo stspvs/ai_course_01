@@ -18,7 +18,15 @@ class UpdateWorkingMemoryUseCaseTest : KoinTest {
         override suspend fun analyzeTask(messages: List<ChatMessage>, instruction: String, provider: LLMProvider) = Result.success(TaskAnalysisResult())
         
         override suspend fun analyzeWorkingMemory(messages: List<ChatMessage>, instruction: String, provider: LLMProvider): Result<WorkingMemoryAnalysis> {
-            return Result.success(WorkingMemoryAnalysis(currentTask = "Новая задача", progress = "80%"))
+            return Result.success(
+                WorkingMemoryAnalysis(
+                    currentTask = "Новая задача",
+                    progress = "80%",
+                    dialogueGoal = "Цель теста",
+                    clarifications = listOf("Уточнение А"),
+                    fixedTermsAndConstraints = listOf("Термин Б"),
+                ),
+            )
         }
 
         override suspend fun saveAgentState(state: AgentState) {}
@@ -40,6 +48,10 @@ class UpdateWorkingMemoryUseCaseTest : KoinTest {
         val result = useCase.update(agent)
 
         assertTrue(result.isSuccess)
-        assertEquals("Новая задача", result.getOrNull()?.currentTask)
+        val wm = result.getOrNull()
+        assertEquals("Новая задача", wm?.currentTask)
+        assertEquals("Цель теста", wm?.dialogueGoal)
+        assertEquals(listOf("Уточнение А"), wm?.userClarifications)
+        assertEquals(listOf("Термин Б"), wm?.fixedTermsAndConstraints)
     }
 }

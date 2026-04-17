@@ -22,6 +22,7 @@ class CliAgentManager(
     fun start() {
         println("🚀 Autonomous Agent CLI Ready.")
         println("Commands: /state, /plan, /invariants, /add-invariant \"rule\", /next, /exit")
+        println("(После каждого сообщения в консоль выводится блок «Источники (RAG)», если применимо.)")
         
         // Подписка на обновления состояния агента для вывода в консоль (опционально)
         scope.launch {
@@ -125,5 +126,37 @@ class CliAgentManager(
         
         job.join()
         println("\n")
+        printRagSourcesFromLastAssistant()
+    }
+
+    private fun printRagSourcesFromLastAssistant() {
+        val state = agent.agent.value
+        val lastAssistant = state?.messages?.lastOrNull { it.role.equals("assistant", ignoreCase = true) }
+        val attr = lastAssistant?.llmRequestSnapshot?.ragAttribution
+        println("--- Источники (RAG) ---")
+        if (attr == null) {
+            println("RAG не использовался для этого ответа (нет атрибуции в снимке запроса).")
+            return
+        }
+        println(
+            "База использована: ${attr.used}; низкая релевантность: ${attr.insufficientRelevance}",
+        )
+        if (attr.sources.isEmpty()) {
+            println(
+                "(Список чанков пуст — контекст из базы не подмешивался в промпт или фрагменты недоступны.)",
+            )
+        } else {
+            attr.sources.forEachIndexed { i, s ->
+                val score = s.score?.let { " · cos ${"%.3f".format(it)}" } ?: ""
+                val fin = s.finalScore?.let { " · итог ${"%.3f".format(it)}" } ?: ""
+                println(
+                    "${i + 1}. ${s.documentTitle} · ${s.sourceFileName} · чанк ${s.chunkIndex}$score$fin",
+                )
+                if (s.chunkId.isNotBlank()) {
+                    println("   id: ${s.chunkId}")
+                }
+            }
+        }
+        println()
     }
 }

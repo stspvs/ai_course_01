@@ -39,11 +39,20 @@ class PromptBuilderTest {
     @Test
     fun `buildWorkingMemoryPrompt should contain task and progress`() {
         val messages = listOf(ChatMessage(message = "Работаем над кодом", role = "user", source = SourceType.USER))
-        val prompt = PromptBuilder.buildWorkingMemoryPrompt("Пишем тесты", "20%", messages)
-        
+        val prompt = PromptBuilder.buildWorkingMemoryPrompt(
+            currentTask = "Пишем тесты",
+            progress = "20%",
+            dialogueGoal = "Покрытие модуля",
+            clarifications = listOf("JUnit 5"),
+            fixedTermsAndConstraints = listOf("Kotlin"),
+            messages = messages,
+        )
+
         assertTrue(prompt.contains("Пишем тесты"))
         assertTrue(prompt.contains("20%"))
         assertTrue(prompt.contains("Работаем над кодом"))
-        assertTrue(prompt.contains("ТЕКУЩУЮ ЗАДАЧУ"))
+        assertTrue(prompt.contains("ПАМЯТЬ ЗАДАЧИ"))
+        assertTrue(prompt.contains("Покрытие модуля"))
+        assertTrue(prompt.contains("JUnit 5"))
     }
 }

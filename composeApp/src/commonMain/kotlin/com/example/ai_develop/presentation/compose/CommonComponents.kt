@@ -358,13 +358,19 @@ internal fun RagStructuredAssistantContent(
                 fontStyle = FontStyle.Italic,
             )
         }
-        if (payload.sources.isNotEmpty()) {
-            CollapsibleRagMetaSection(
-                title = "Источники",
-                count = payload.sources.size,
-                expanded = sourcesExpanded,
-                onToggle = { sourcesExpanded = !sourcesExpanded },
-            ) {
+        CollapsibleRagMetaSection(
+            title = "Источники",
+            count = payload.sources.size,
+            expanded = sourcesExpanded,
+            onToggle = { sourcesExpanded = !sourcesExpanded },
+        ) {
+            if (payload.sources.isEmpty()) {
+                Text(
+                    text = "Фрагменты из базы не привязаны к ответу (список пуст). Контекст мог не подмешиваться или модель не вернула ссылки.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
                 payload.sources.forEachIndexed { i, s ->
                     Text(
                         text = "${i + 1}. ${s.source} · chunk ${s.chunkIndex} (${s.chunkId})",

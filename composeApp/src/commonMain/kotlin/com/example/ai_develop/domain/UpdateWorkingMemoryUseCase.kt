@@ -12,13 +12,21 @@ open class UpdateWorkingMemoryUseCase(
         val prompt = PromptBuilder.buildWorkingMemoryPrompt(
             currentTask = agent.workingMemory.currentTask,
             progress = agent.workingMemory.progress,
+            dialogueGoal = agent.workingMemory.dialogueGoal,
+            clarifications = agent.workingMemory.userClarifications,
+            fixedTermsAndConstraints = agent.workingMemory.fixedTermsAndConstraints,
             messages = agent.messages
         )
-        
+
         return repository.analyzeWorkingMemory(agent.messages, prompt, agent.memoryProvider).map { result ->
             agent.workingMemory.copy(
                 currentTask = result.currentTask ?: agent.workingMemory.currentTask,
-                progress = result.progress ?: agent.workingMemory.progress
+                progress = result.progress ?: agent.workingMemory.progress,
+                dialogueGoal = result.dialogueGoal ?: agent.workingMemory.dialogueGoal,
+                userClarifications = result.clarifications.ifEmpty { agent.workingMemory.userClarifications },
+                fixedTermsAndConstraints = result.fixedTermsAndConstraints.ifEmpty {
+                    agent.workingMemory.fixedTermsAndConstraints
+                },
             )
         }
     }

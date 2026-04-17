@@ -452,17 +452,20 @@ open class AutonomousAgent(
     )
 
     private suspend fun prepareLlmRequestWithOptionalRag(agent: Agent, stage: AgentStage): PreparedLlmRequest {
-        if (!agent.ragEnabled) {
-            return engine.prepareChatRequest(agent, stage, isJsonMode = false)
+        // Актуальный флаг из БД: локальный снимок [_agent] может отставать сразу после смены настроек в UI.
+        val persistedRag = repository.getAgentState(agentId)?.ragEnabled
+        val a = agent.copy(ragEnabled = persistedRag ?: agent.ragEnabled)
+        if (!a.ragEnabled) {
+            return engine.prepareChatRequest(a, stage, isJsonMode = false)
         }
-        val last = agent.messages.lastOrNull()
+        val last = a.messages.lastOrNull()
         if (last == null || last.role.lowercase() != "user") {
-            return engine.prepareChatRequest(agent, stage, isJsonMode = false)
+            return engine.prepareChatRequest(a, stage, isJsonMode = false)
         }
         val query = last.message.trim()
         if (query.isEmpty()) {
             return engine.prepareChatRequest(
-                agent,
+                a,
                 stage,
                 isJsonMode = false,
                 ragContext = null,
@@ -473,12 +476,12 @@ open class AutonomousAgent(
         val config = runCatching { ragPipelineSettingsRepository?.getConfig() }.getOrNull()
             ?: RagRetrievalConfig.Default
         if (!config.globalRagEnabled) {
-            return engine.prepareChatRequest(agent, stage, isJsonMode = false)
+            return engine.prepareChatRequest(a, stage, isJsonMode = false)
         }
         var retrievalQuery = query
         var rewriteApplied = false
         if (config.queryRewriteEnabled) {
-            val rewriteProvider = resolveRewriteProvider(agent, config)
+            val rewriteProvider = resolveRewriteProvider(a, config)
             repository.rewriteQueryForRag(query, rewriteProvider).onSuccess { rw ->
                 if (rw.isNotBlank()) {
                     retrievalQuery = rw.trim()
@@ -500,7 +503,7 @@ open class AutonomousAgent(
         return if (retrieved != null) {
             if (ragGrounded) {
                 engine.prepareChatRequest(
-                    agent,
+                    a,
                     stage,
                     isJsonMode = true,
                     ragContext = retrieved.contextText,
@@ -509,7 +512,7 @@ open class AutonomousAgent(
                 )
             } else {
                 engine.prepareChatRequest(
-                    agent,
+                    a,
                     stage,
                     isJsonMode = false,
                     ragContext = null,
@@ -519,7 +522,7 @@ open class AutonomousAgent(
             }
         } else {
             engine.prepareChatRequest(
-                agent,
+                a,
                 stage,
                 isJsonMode = false,
                 ragContext = null,

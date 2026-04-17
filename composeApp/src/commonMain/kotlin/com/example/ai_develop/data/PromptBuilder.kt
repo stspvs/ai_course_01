@@ -53,24 +53,37 @@ internal object PromptBuilder {
     fun buildWorkingMemoryPrompt(
         currentTask: String?,
         progress: String?,
+        dialogueGoal: String?,
+        clarifications: List<String>,
+        fixedTermsAndConstraints: List<String>,
         messages: List<ChatMessage>
     ): String {
+        val clarText =
+            clarifications.takeIf { it.isNotEmpty() }?.joinToString(" | ") ?: "(пусто)"
+        val termsText =
+            fixedTermsAndConstraints.takeIf { it.isNotEmpty() }?.joinToString(" | ") ?: "(пусто)"
         return """
-            Проанализируй переписку и извлеки ТЕКУЩУЮ ЗАДАЧУ и ПРОГРЕСС.
+            Проанализируй переписку и обнови ПАМЯТЬ ЗАДАЧИ (task state).
             
             Текущая задача в памяти: ${currentTask ?: "Нет"}
-            Текущий прогресс: ${progress ?: "0%"}
+            Текущий прогресс: ${progress ?: "не задан"}
+            Цель диалога (если была): ${dialogueGoal ?: "Нет"}
+            Уже зафиксированные уточнения: $clarText
+            Уже зафиксированные термины и ограничения: $termsText
             
             История переписки:
             ${messages.takeLast(15).joinToString("\n") { "${it.role}: ${it.content}" }}
             
             Инструкции:
-            1. Определи, над чем сейчас работают пользователь и ассистент.
-            2. Оцени прогресс выполнения этой задачи (например, "Начато", "В процессе (50%)", "Почти готово").
-            3. Ответ должен быть НА РУССКОМ ЯЗЫКЕ.
-            4. Верни ТОЛЬКО JSON-объект с полями "currentTask" и "progress".
+            1. Сформулируй цель диалога (поле dialogueGoal) — что пользователь хочет получить в итоге.
+            2. Поле currentTask — короткая метка текущей работы; progress — оценка прогресса (на русском).
+            3. clarifications — список того, что пользователь УЖЕ уточнил или о чём договорились.
+            4. fixedTermsAndConstraints — зафиксированные термины, определения, технические ограничения и рамки.
+            5. Всё на РУССКОМ. Верни ТОЛЬКО JSON-объект с полями:
+               currentTask, progress, dialogueGoal (строки или null),
+               clarifications (массив строк), fixedTermsAndConstraints (массив строк).
             
-            Пример: {"currentTask": "Написание функции на Kotlin", "progress": "60%"}
+            Пример: {"currentTask":"Рефакторинг модуля","progress":"40%","dialogueGoal":"Чистый Kotlin без лишних зависимостей","clarifications":["Нужна только JVM"],"fixedTermsAndConstraints":["Kotlin 2.0","без Retrofit"]}
         """.trimIndent()
     }
 }

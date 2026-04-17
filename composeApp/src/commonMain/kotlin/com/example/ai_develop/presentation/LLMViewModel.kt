@@ -225,7 +225,7 @@ class LLMViewModel(
     fun updateAgent(
         id: String, name: String, systemPrompt: String, temperature: Double,
         provider: LLMProvider, stopWord: String, maxTokens: Int, memoryStrategy: ChatMemoryStrategy,
-        ragEnabled: Boolean = false,
+        ragEnabled: Boolean = true,
     ) {
         onEvent(LLMEvent.UpdateAgent(UpdateAgentParams(
             id, name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy, ragEnabled

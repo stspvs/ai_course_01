@@ -79,5 +79,8 @@ data class TaskAnalysisResult(
 @Serializable
 data class WorkingMemoryAnalysis(
     val currentTask: String? = null,
-    val progress: String? = null
+    val progress: String? = null,
+    val dialogueGoal: String? = null,
+    val clarifications: List<String> = emptyList(),
+    val fixedTermsAndConstraints: List<String> = emptyList(),
 )

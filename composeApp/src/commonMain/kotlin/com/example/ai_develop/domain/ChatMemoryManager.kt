@@ -122,9 +122,21 @@ class ChatMemoryManager {
         if (includeAgentWorkingMemoryInSystem) {
             val wm = agent.workingMemory
             promptBuilder.append("\n=== WORKING MEMORY (Current Status) ===\n")
-            wm.currentTask?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT GOAL: $it\n") }
+            val dialogueGoal = wm.dialogueGoal ?: wm.currentTask
+            dialogueGoal?.let { if (it.isNotEmpty()) promptBuilder.append("DIALOGUE GOAL: $it\n") }
+            wm.currentTask?.let {
+                if (it.isNotEmpty() && it != wm.dialogueGoal) promptBuilder.append("CURRENT TASK (label): $it\n")
+            }
             wm.progress?.let { if (it.isNotEmpty()) promptBuilder.append("CURRENT PROGRESS: $it\n") }
-            
+            if (wm.userClarifications.isNotEmpty()) {
+                promptBuilder.append("\nUSER CLARIFICATIONS (already established):\n")
+                wm.userClarifications.forEach { c -> promptBuilder.append("- $c\n") }
+            }
+            if (wm.fixedTermsAndConstraints.isNotEmpty()) {
+                promptBuilder.append("\nFIXED TERMS AND CONSTRAINTS:\n")
+                wm.fixedTermsAndConstraints.forEach { t -> promptBuilder.append("- $t\n") }
+            }
+
             val extractedFacts = wm.extractedFacts.facts
             if (extractedFacts.isNotEmpty()) {
                 promptBuilder.append("\n=== RELEVANT CONTEXT (Extracted Facts) ===\n")

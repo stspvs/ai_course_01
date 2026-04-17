@@ -89,6 +89,12 @@ data class WorkingMemory(
     val currentTask: String? = null,
     val progress: String? = null,
     val extractedFacts: ChatFacts = ChatFacts(),
+    /** Явная цель диалога (может совпадать по смыслу с [currentTask]). */
+    val dialogueGoal: String? = null,
+    /** Что пользователь уже уточнил или о чём договорились. */
+    val userClarifications: List<String> = emptyList(),
+    /** Зафиксированные термины, определения и ограничения по задаче. */
+    val fixedTermsAndConstraints: List<String> = emptyList(),
     val updateInterval: Int = 10,
     val analysisWindowSize: Int = 5,
     val isAutoUpdateEnabled: Boolean = true
@@ -111,7 +117,7 @@ data class Agent(
     val userProfile: UserProfile? = null,
     val workingMemory: WorkingMemory = WorkingMemory(),
     /** Подмешивать контекст из локальной RAG-базы в запрос к LLM. */
-    val ragEnabled: Boolean = false,
+    val ragEnabled: Boolean = true,
 )
 
 data class AgentUpdate(
@@ -130,7 +136,10 @@ fun Agent.applyUpdate(update: AgentUpdate): Agent {
 fun WorkingMemory.clearConversation(): WorkingMemory = copy(
     currentTask = null,
     progress = null,
-    extractedFacts = ChatFacts()
+    extractedFacts = ChatFacts(),
+    dialogueGoal = null,
+    userClarifications = emptyList(),
+    fixedTermsAndConstraints = emptyList(),
 )
 
 /** Убирает данные прошлых диалогов из стратегии, сохраняя настройки (размер окна, промпты и т.д.). */

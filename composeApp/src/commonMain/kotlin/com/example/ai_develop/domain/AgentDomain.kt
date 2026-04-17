@@ -46,7 +46,7 @@ data class UpdateAgentParams(
     val stopWord: String,
     val maxTokens: Int,
     val memoryStrategy: ChatMemoryStrategy,
-    val ragEnabled: Boolean = false,
+    val ragEnabled: Boolean = true,
 )
 
 /**
@@ -78,5 +78,5 @@ data class AgentState(
     val messages: List<ChatMessage> = emptyList(),
     val branches: List<ChatBranch> = emptyList(),
     val currentBranchId: String? = null,
-    val ragEnabled: Boolean = false,
+    val ragEnabled: Boolean = true,
 )
