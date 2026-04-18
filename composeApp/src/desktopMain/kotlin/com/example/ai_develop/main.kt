@@ -4,8 +4,8 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.example.ai_develop.di.initKoin
 import com.example.ai_develop.di.pauseAllTasksOnAppLaunch
-import com.example.ai_develop.domain.ChatRepository
-import com.example.ai_develop.domain.ChatStreamingUseCase
+import com.example.ai_develop.domain.chat.ChatRepository
+import com.example.ai_develop.domain.chat.ChatStreamingUseCase
 import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.mcp.bootstrapDefaultMcpIfNeeded
 import com.example.ai_develop.presentation.compose.App

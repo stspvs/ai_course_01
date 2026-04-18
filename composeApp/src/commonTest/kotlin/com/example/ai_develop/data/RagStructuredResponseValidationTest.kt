@@ -1,8 +1,8 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.RagAttribution
-import com.example.ai_develop.domain.RagRetrievalDebug
-import com.example.ai_develop.domain.RagSourceRef
+import com.example.ai_develop.domain.rag.RagAttribution
+import com.example.ai_develop.domain.rag.RagRetrievalDebug
+import com.example.ai_develop.domain.rag.RagSourceRef
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals

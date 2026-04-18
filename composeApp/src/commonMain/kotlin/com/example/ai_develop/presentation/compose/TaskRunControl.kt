@@ -4,7 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.example.ai_develop.domain.TaskContext
+import com.example.ai_develop.domain.task.TaskContext
 
 /** Иконка кнопки запуска / паузы в чате задачи (▶ пока не запущена или на паузе, ⏸ во время работы). */
 fun taskRunControlIcon(task: TaskContext): ImageVector =

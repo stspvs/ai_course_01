@@ -28,7 +28,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.agent.*
+import com.example.ai_develop.domain.chat.*
+import com.example.ai_develop.domain.task.*
+import com.example.ai_develop.domain.rag.*
+import com.example.ai_develop.domain.llm.*
 import com.example.ai_develop.presentation.TaskViewModel
 import com.example.ai_develop.presentation.TaskEvent
 import kotlinx.coroutines.Job

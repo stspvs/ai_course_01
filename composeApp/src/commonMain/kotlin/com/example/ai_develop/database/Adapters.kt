@@ -1,7 +1,7 @@
 package com.example.ai_develop.database
 
 import app.cash.sqldelight.ColumnAdapter
-import com.example.ai_develop.domain.AgentStage
+import com.example.ai_develop.domain.agent.AgentStage
 
 val stageAdapter = object : ColumnAdapter<AgentStage, String> {
     override fun decode(databaseValue: String): AgentStage = AgentStage.valueOf(databaseValue)

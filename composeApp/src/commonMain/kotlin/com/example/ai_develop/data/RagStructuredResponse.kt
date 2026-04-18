@@ -1,9 +1,9 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.RagAttribution
-import com.example.ai_develop.domain.RagStructuredChatPayload
-import com.example.ai_develop.domain.RagStructuredQuoteLine
-import com.example.ai_develop.domain.RagStructuredSourceLine
+import com.example.ai_develop.domain.rag.RagAttribution
+import com.example.ai_develop.domain.rag.RagStructuredChatPayload
+import com.example.ai_develop.domain.rag.RagStructuredQuoteLine
+import com.example.ai_develop.domain.rag.RagStructuredSourceLine
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json

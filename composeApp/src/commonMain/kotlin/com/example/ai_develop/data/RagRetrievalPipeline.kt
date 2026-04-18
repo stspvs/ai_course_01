@@ -1,6 +1,7 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.RagRetrievalConfig
+import com.example.ai_develop.domain.rag.RagPipelineMode
+import com.example.ai_develop.domain.rag.RagRetrievalConfig
 
 /**
  * Лексическое пересечение (Jaccard) по токенам; для скоринга в [0, 1].
@@ -32,6 +33,84 @@ data class ScoredChunk(
     val chunk: RagIndexedChunk,
     val cosine: Float,
 )
+
+/**
+ * Упорядоченные кандидаты после этапа rerank и итоговые скоры по [RagIndexedChunk.chunkId].
+ */
+data class RankedCandidates(
+    val ordered: List<ScoredChunk>,
+    val finalScoreByChunkId: Map<String, Double>,
+)
+
+/**
+ * Глобальный косинусный скоринг: один эмбеддинг запроса на модель Ollama, dot product с чанками той же размерности.
+ */
+suspend fun scoreChunksByEmbeddingModels(
+    chunks: List<RagIndexedChunk>,
+    query: String,
+    embed: suspend (model: String, query: String) -> FloatArray?,
+): List<ScoredChunk> {
+    val byModel = chunks.groupBy { it.ollamaModel.trim() }
+    val scored = mutableListOf<ScoredChunk>()
+    for ((model, list) in byModel) {
+        val qVec = runCatching { embed(model, query) }.getOrNull() ?: continue
+        for (ch in list) {
+            if (ch.embedding.size != qVec.size) continue
+            val s = dotProduct(qVec, ch.embedding)
+            scored.add(ScoredChunk(ch, s))
+        }
+    }
+    return scored
+}
+
+/**
+ * Baseline/Threshold — косинус; Hybrid — лексика; LlmRerank — Ollama scores на префиксе списка.
+ */
+suspend fun applyPipelineMode(
+    query: String,
+    orderedAfterThreshold: List<ScoredChunk>,
+    config: RagRetrievalConfig,
+    rerankClient: OllamaRagRerankClient,
+): RankedCandidates {
+    when (config.pipelineMode) {
+        RagPipelineMode.Baseline, RagPipelineMode.Threshold -> {
+            val pairs = orderedAfterThreshold.map { it to it.cosine.toDouble() }
+            return RankedCandidates(
+                orderedAfterThreshold,
+                pairs.associate { (sc, d) -> sc.chunk.chunkId to d },
+            )
+        }
+        RagPipelineMode.Hybrid -> {
+            val ordered = rerankHybrid(query, orderedAfterThreshold, config.hybridLexicalWeight)
+            val pairs = ordered.map { sc ->
+                val lex = lexicalJaccard(query, sc.chunk.text)
+                val comb = hybridCombinedScore(sc.cosine, lex, config.hybridLexicalWeight).toDouble()
+                sc to comb
+            }
+            return RankedCandidates(ordered, pairs.associate { (sc, d) -> sc.chunk.chunkId to d })
+        }
+        RagPipelineMode.LlmRerank -> {
+            var ordered = orderedAfterThreshold
+            val model = config.llmRerankOllamaModel.trim().ifBlank { null }
+            val limit = config.llmRerankMaxCandidates.coerceAtLeast(1)
+            val slice = ordered.take(limit)
+            val pairs = if (model != null) {
+                val scoredList = slice.map { sc ->
+                    val llm = rerankClient.scoreRelevance(model, query, sc.chunk.text)
+                    val final = (llm ?: sc.cosine).toDouble()
+                    sc to final
+                }.sortedByDescending { it.second }
+                val rerankedHead = scoredList.map { it.first }
+                val tail = ordered.drop(limit)
+                ordered = rerankedHead + tail
+                scoredList + tail.map { it to it.cosine.toDouble() }
+            } else {
+                ordered.map { it to it.cosine.toDouble() }
+            }
+            return RankedCandidates(ordered, pairs.associate { (sc, d) -> sc.chunk.chunkId to d })
+        }
+    }
+}
 
 /**
  * После recall: опциональный порог по косинусу.

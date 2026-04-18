@@ -1,9 +1,9 @@
 package com.example.ai_develop.presentation.strategy
 
-import com.example.ai_develop.domain.ChatMemoryStrategy
-import com.example.ai_develop.domain.ExtractFactsUseCase
-import com.example.ai_develop.domain.SummarizeChatUseCase
-import com.example.ai_develop.domain.UpdateWorkingMemoryUseCase
+import com.example.ai_develop.domain.chat.ChatMemoryStrategy
+import com.example.ai_develop.domain.chat.ExtractFactsUseCase
+import com.example.ai_develop.domain.chat.SummarizeChatUseCase
+import com.example.ai_develop.domain.chat.UpdateWorkingMemoryUseCase
 
 class StrategyDelegateFactory(
     private val extractFactsUseCase: ExtractFactsUseCase,

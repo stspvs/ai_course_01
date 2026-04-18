@@ -1,10 +1,10 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.RagAttribution
-import com.example.ai_develop.domain.RagPipelineMode
-import com.example.ai_develop.domain.RagRetrievalConfig
-import com.example.ai_develop.domain.RagRetrievalDebug
-import com.example.ai_develop.domain.RagSourceRef
+import com.example.ai_develop.domain.rag.RagAttribution
+import com.example.ai_develop.domain.rag.RagPipelineMode
+import com.example.ai_develop.domain.rag.RagRetrievalConfig
+import com.example.ai_develop.domain.rag.RagRetrievalDebug
+import com.example.ai_develop.domain.rag.RagSourceRef
 
 /**
  * Результат поиска: текст для системного промпта и атрибуция для UI.
@@ -12,6 +12,14 @@ import com.example.ai_develop.domain.RagSourceRef
 data class RagRetrievalResult(
     val contextText: String,
     val attribution: RagAttribution,
+)
+
+private data class RetrievalStageCounts(
+    val recallTopK: Int,
+    val finalTopK: Int,
+    val candidatesAfterRecall: Int,
+    val candidatesAfterThreshold: Int,
+    val candidatesAfterRerank: Int,
 )
 
 class RagContextRetriever(
@@ -35,44 +43,19 @@ class RagContextRetriever(
 
         val chunks = ragEmbeddingRepository.loadAllChunksForRetrieval()
         if (chunks.isEmpty()) {
-            return RagRetrievalResult(
-                contextText = "",
-                attribution = RagAttribution(
-                    used = false,
-                    debug = RagRetrievalDebug(
-                        pipelineMode = config.pipelineMode,
-                        originalQuery = originalQuery,
-                        retrievalQuery = q,
-                        rewriteApplied = rewriteApplied,
-                        emptyReason = "В базе нет проиндексированных чанков",
-                    ),
-                ),
-            )
+            return unusedResult(config, originalQuery, q, rewriteApplied, "В базе нет проиндексированных чанков")
         }
 
-        val byModel = chunks.groupBy { it.ollamaModel.trim() }
-        val scored = mutableListOf<ScoredChunk>()
-        for ((model, list) in byModel) {
-            val qVec = runCatching { ollamaEmbeddingClient.embed(model, q) }.getOrNull() ?: continue
-            for (ch in list) {
-                if (ch.embedding.size != qVec.size) continue
-                val s = dotProduct(qVec, ch.embedding)
-                scored.add(ScoredChunk(ch, s))
-            }
+        val scored = scoreChunksByEmbeddingModels(chunks, q) { model, query ->
+            ollamaEmbeddingClient.embed(model, query)
         }
         if (scored.isEmpty()) {
-            return RagRetrievalResult(
-                contextText = "",
-                attribution = RagAttribution(
-                    used = false,
-                    debug = RagRetrievalDebug(
-                        pipelineMode = config.pipelineMode,
-                        originalQuery = originalQuery,
-                        retrievalQuery = q,
-                        rewriteApplied = rewriteApplied,
-                        emptyReason = "Не удалось получить эмбеддинг запроса (Ollama или размерность)",
-                    ),
-                ),
+            return unusedResult(
+                config,
+                originalQuery,
+                q,
+                rewriteApplied,
+                "Не удалось получить эмбеддинг запроса (Ollama или размерность)",
             )
         }
 
@@ -90,56 +73,31 @@ class RagContextRetriever(
         }
         val candidatesAfterThreshold = ordered.size
 
-        var finalScores: List<Pair<ScoredChunk, Double>> = ordered.map { it to it.cosine.toDouble() }
-
-        when (config.pipelineMode) {
-            RagPipelineMode.Baseline, RagPipelineMode.Threshold -> { /* finalScores = cosine */ }
-            RagPipelineMode.Hybrid -> {
-                ordered = rerankHybrid(q, ordered, config.hybridLexicalWeight)
-                finalScores = ordered.map { sc ->
-                    val lex = lexicalJaccard(q, sc.chunk.text)
-                    val comb = hybridCombinedScore(sc.cosine, lex, config.hybridLexicalWeight).toDouble()
-                    sc to comb
-                }
-            }
-            RagPipelineMode.LlmRerank -> {
-                val model = config.llmRerankOllamaModel.trim().ifBlank { null }
-                val limit = config.llmRerankMaxCandidates.coerceAtLeast(1)
-                val slice = ordered.take(limit)
-                if (model != null) {
-                    val scoredList = slice.map { sc ->
-                        val llm = ollamaRerankClient.scoreRelevance(model, q, sc.chunk.text)
-                        val final = (llm ?: sc.cosine).toDouble()
-                        sc to final
-                    }.sortedByDescending { it.second }
-                    val rerankedHead = scoredList.map { it.first }
-                    val tail = ordered.drop(limit)
-                    ordered = rerankedHead + tail
-                    finalScores = scoredList + tail.map { it to it.cosine.toDouble() }
-                } else {
-                    finalScores = ordered.map { it to it.cosine.toDouble() }
-                }
-            }
-        }
+        val ranked = applyPipelineMode(q, ordered, config, ollamaRerankClient)
+        ordered = ranked.ordered
+        val scoreMap = ranked.finalScoreByChunkId
 
         val candidatesAfterRerank = ordered.size
-        val scoreMap = finalScores.associate { (sc, fs) -> sc.chunk.chunkId to fs }
-
         val finalK = effectiveFinalTopK(config, ordered.size)
         val top = ordered.take(finalK)
 
+        val counts = RetrievalStageCounts(
+            recallTopK = recallK,
+            finalTopK = finalK,
+            candidatesAfterRecall = candidatesAfterRecall,
+            candidatesAfterThreshold = candidatesAfterThreshold,
+            candidatesAfterRerank = candidatesAfterRerank,
+        )
+
         if (top.isEmpty()) {
-            return RagRetrievalResult(
-                contextText = "",
-                attribution = RagAttribution(
-                    used = false,
-                    sources = emptyList(),
-                    debug = debugBlock(
-                        config, originalQuery, q, rewriteApplied,
-                        recallK, finalK, candidatesAfterRecall, candidatesAfterThreshold, candidatesAfterRerank, min,
-                        emptyReason = "После фильтрации не осталось релевантных чанков",
-                    ),
-                ),
+            return unusedResultWithSources(
+                config = config,
+                originalQuery = originalQuery,
+                retrievalQuery = q,
+                rewriteApplied = rewriteApplied,
+                counts = counts,
+                minSimilarity = min,
+                emptyReason = "После фильтрации не осталось релевантных чанков",
             )
         }
 
@@ -148,43 +106,115 @@ class RagContextRetriever(
         }
         val answerTh = config.answerRelevanceThreshold
         if (answerTh != null && bestScore < answerTh) {
-            return RagRetrievalResult(
-                contextText = "",
-                attribution = RagAttribution(
-                    used = false,
-                    insufficientRelevance = true,
-                    sources = emptyList(),
-                    debug = debugBlock(
-                        config, originalQuery, q, rewriteApplied,
-                        recallK, finalK, candidatesAfterRecall, candidatesAfterThreshold, candidatesAfterRerank, min,
-                        emptyReason = "Релевантность ниже порога для ответа (answerRelevanceThreshold)",
-                        answerRelevanceThreshold = answerTh,
-                        bestRetrievalScore = bestScore,
-                    ),
-                ),
+            return unusedResultWithSources(
+                config = config,
+                originalQuery = originalQuery,
+                retrievalQuery = q,
+                rewriteApplied = rewriteApplied,
+                counts = counts,
+                minSimilarity = min,
+                emptyReason = "Релевантность ниже порога для ответа (answerRelevanceThreshold)",
+                insufficientRelevance = true,
+                answerRelevanceThreshold = answerTh,
+                bestRetrievalScore = bestScore,
             )
         }
 
-        val sources = top.map { sc ->
-            val fs = scoreMap[sc.chunk.chunkId]
+        val sources = buildRagSources(top, scoreMap, config.pipelineMode)
+        val contextText = buildContextText(top)
+
+        return RagRetrievalResult(
+            contextText = contextText,
+            attribution = RagAttribution(
+                used = true,
+                sources = sources,
+                debug = debugBlock(
+                    config = config,
+                    originalQuery = originalQuery,
+                    retrievalQuery = q,
+                    rewriteApplied = rewriteApplied,
+                    counts = counts,
+                    minSimilarity = min,
+                    emptyReason = null,
+                ),
+            ),
+        )
+    }
+
+    private fun unusedResult(
+        config: RagRetrievalConfig,
+        originalQuery: String,
+        retrievalQuery: String,
+        rewriteApplied: Boolean,
+        emptyReason: String,
+    ) = RagRetrievalResult(
+        contextText = "",
+        attribution = RagAttribution(
+            used = false,
+            debug = RagRetrievalDebug(
+                pipelineMode = config.pipelineMode,
+                originalQuery = originalQuery,
+                retrievalQuery = retrievalQuery,
+                rewriteApplied = rewriteApplied,
+                emptyReason = emptyReason,
+            ),
+        ),
+    )
+
+    private fun unusedResultWithSources(
+        config: RagRetrievalConfig,
+        originalQuery: String,
+        retrievalQuery: String,
+        rewriteApplied: Boolean,
+        counts: RetrievalStageCounts,
+        minSimilarity: Float?,
+        emptyReason: String,
+        insufficientRelevance: Boolean = false,
+        answerRelevanceThreshold: Float? = null,
+        bestRetrievalScore: Double? = null,
+    ) = RagRetrievalResult(
+        contextText = "",
+        attribution = RagAttribution(
+            used = false,
+            insufficientRelevance = insufficientRelevance,
+            sources = emptyList(),
+            debug = debugBlock(
+                config = config,
+                originalQuery = originalQuery,
+                retrievalQuery = retrievalQuery,
+                rewriteApplied = rewriteApplied,
+                counts = counts,
+                minSimilarity = minSimilarity,
+                emptyReason = emptyReason,
+                answerRelevanceThreshold = answerRelevanceThreshold,
+                bestRetrievalScore = bestRetrievalScore,
+            ),
+        ),
+    )
+
+    private fun buildRagSources(
+        top: List<ScoredChunk>,
+        finalScoreByChunkId: Map<String, Double>,
+        pipelineMode: RagPipelineMode,
+    ): List<RagSourceRef> {
+        val baselineLike =
+            pipelineMode == RagPipelineMode.Baseline || pipelineMode == RagPipelineMode.Threshold
+        return top.map { sc ->
+            val fs = finalScoreByChunkId[sc.chunk.chunkId]
             RagSourceRef(
                 documentTitle = sc.chunk.documentTitle,
                 sourceFileName = sc.chunk.sourceFileName,
                 chunkIndex = sc.chunk.chunkIndex,
                 score = sc.cosine.toDouble(),
-                finalScore = if (config.pipelineMode == RagPipelineMode.Baseline ||
-                    config.pipelineMode == RagPipelineMode.Threshold
-                ) {
-                    null
-                } else {
-                    fs
-                },
+                finalScore = if (baselineLike) null else fs,
                 chunkId = sc.chunk.chunkId,
                 chunkText = sc.chunk.text.trim(),
             )
         }
+    }
 
-        val contextText = buildString {
+    private fun buildContextText(top: List<ScoredChunk>): String =
+        buildString {
             top.forEachIndexed { i, sc ->
                 val ch = sc.chunk
                 if (i > 0) appendLine()
@@ -194,32 +224,14 @@ class RagContextRetriever(
                 )
                 appendLine(ch.text.trim())
             }
-        }
-
-        return RagRetrievalResult(
-            contextText = contextText.trim(),
-            attribution = RagAttribution(
-                used = true,
-                sources = sources,
-                debug = debugBlock(
-                    config, originalQuery, q, rewriteApplied,
-                    recallK, finalK, candidatesAfterRecall, candidatesAfterThreshold, candidatesAfterRerank, min,
-                    emptyReason = null,
-                ),
-            ),
-        )
-    }
+        }.trim()
 
     private fun debugBlock(
         config: RagRetrievalConfig,
         originalQuery: String,
         retrievalQuery: String,
         rewriteApplied: Boolean,
-        recallTopK: Int,
-        finalTopK: Int,
-        candidatesAfterRecall: Int,
-        candidatesAfterThreshold: Int,
-        candidatesAfterRerank: Int,
+        counts: RetrievalStageCounts,
         minSimilarity: Float?,
         emptyReason: String?,
         answerRelevanceThreshold: Float? = null,
@@ -229,11 +241,11 @@ class RagContextRetriever(
         originalQuery = originalQuery,
         retrievalQuery = retrievalQuery,
         rewriteApplied = rewriteApplied,
-        recallTopK = recallTopK,
-        finalTopK = finalTopK,
-        candidatesAfterRecall = candidatesAfterRecall,
-        candidatesAfterThreshold = candidatesAfterThreshold,
-        candidatesAfterRerank = candidatesAfterRerank,
+        recallTopK = counts.recallTopK,
+        finalTopK = counts.finalTopK,
+        candidatesAfterRecall = counts.candidatesAfterRecall,
+        candidatesAfterThreshold = counts.candidatesAfterThreshold,
+        candidatesAfterRerank = counts.candidatesAfterRerank,
         minSimilarity = minSimilarity,
         hybridLexicalWeight = if (config.pipelineMode == RagPipelineMode.Hybrid) config.hybridLexicalWeight else null,
         llmRerankModel = if (config.pipelineMode == RagPipelineMode.LlmRerank) {
@@ -245,5 +257,4 @@ class RagContextRetriever(
         answerRelevanceThreshold = answerRelevanceThreshold,
         bestRetrievalScore = bestRetrievalScore,
     )
-
 }

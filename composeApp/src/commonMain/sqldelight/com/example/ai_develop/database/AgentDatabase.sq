@@ -1,4 +1,4 @@
-import com.example.ai_develop.domain.AgentStage;
+import com.example.ai_develop.domain.agent.AgentStage;
 import kotlin.Boolean;
 
 CREATE TABLE IF NOT EXISTS AgentStateEntity (

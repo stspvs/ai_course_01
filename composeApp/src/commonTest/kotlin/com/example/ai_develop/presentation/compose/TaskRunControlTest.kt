@@ -3,10 +3,10 @@ package com.example.ai_develop.presentation.compose
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import com.example.ai_develop.domain.AgentTaskState
-import com.example.ai_develop.domain.DefaultAgentFactory
-import com.example.ai_develop.domain.TaskContext
-import com.example.ai_develop.domain.TaskState
+import com.example.ai_develop.domain.task.AgentTaskState
+import com.example.ai_develop.domain.agent.DefaultAgentFactory
+import com.example.ai_develop.domain.task.TaskContext
+import com.example.ai_develop.domain.task.TaskState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

@@ -2,13 +2,17 @@
 
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.DefaultAgentFactory
+import com.example.ai_develop.domain.agent.DefaultAgentFactory
 
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.example.ai_develop.database.AgentDatabase
 import com.example.ai_develop.database.stageAdapter
-import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.agent.*
+import com.example.ai_develop.domain.chat.*
+import com.example.ai_develop.domain.task.*
+import com.example.ai_develop.domain.rag.*
+import com.example.ai_develop.domain.llm.*
 import com.example.ai_develop.util.currentTimeMillis
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow

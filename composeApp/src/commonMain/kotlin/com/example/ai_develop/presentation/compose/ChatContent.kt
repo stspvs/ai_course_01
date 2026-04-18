@@ -37,7 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.agent.*
+import com.example.ai_develop.domain.chat.*
+import com.example.ai_develop.domain.task.*
+import com.example.ai_develop.domain.rag.*
+import com.example.ai_develop.domain.llm.*
 import kotlin.math.min
 
 private fun ChatMessage.supportsRagDetailDialog(): Boolean {

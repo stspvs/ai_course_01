@@ -1,6 +1,6 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.RagRetrievalConfig
+import com.example.ai_develop.domain.rag.RagRetrievalConfig
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals

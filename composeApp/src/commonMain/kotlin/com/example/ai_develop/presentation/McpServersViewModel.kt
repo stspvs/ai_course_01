@@ -13,9 +13,9 @@ import com.example.ai_develop.data.McpToolBindingRecord
 import com.example.ai_develop.data.classifyMcpLinkFailure
 import com.example.ai_develop.data.buildMcpPrimaryArgumentMap
 import com.example.ai_develop.data.inferPrimaryArgument
-import com.example.ai_develop.domain.AgentToolRegistry
-import com.example.ai_develop.domain.ChatStreamingUseCase
-import com.example.ai_develop.domain.McpTransport
+import com.example.ai_develop.domain.agent.AgentToolRegistry
+import com.example.ai_develop.domain.chat.ChatStreamingUseCase
+import com.example.ai_develop.domain.llm.McpTransport
 import com.example.ai_develop.platform.GraylogPlatform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

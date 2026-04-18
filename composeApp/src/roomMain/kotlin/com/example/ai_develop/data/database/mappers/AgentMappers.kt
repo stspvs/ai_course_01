@@ -2,7 +2,11 @@ package com.example.ai_develop.data.database.mappers
 
 import com.example.ai_develop.data.database.AgentEntity
 import com.example.ai_develop.data.database.MessageEntity
-import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.agent.*
+import com.example.ai_develop.domain.chat.*
+import com.example.ai_develop.domain.task.*
+import com.example.ai_develop.domain.rag.*
+import com.example.ai_develop.domain.llm.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString

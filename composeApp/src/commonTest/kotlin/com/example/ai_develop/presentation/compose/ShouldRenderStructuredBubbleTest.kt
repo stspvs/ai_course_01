@@ -1,8 +1,8 @@
 package com.example.ai_develop.presentation.compose
 
-import com.example.ai_develop.domain.RagStructuredChatPayload
-import com.example.ai_develop.domain.RagStructuredQuoteLine
-import com.example.ai_develop.domain.RagStructuredSourceLine
+import com.example.ai_develop.domain.rag.RagStructuredChatPayload
+import com.example.ai_develop.domain.rag.RagStructuredQuoteLine
+import com.example.ai_develop.domain.rag.RagStructuredSourceLine
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

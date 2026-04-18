@@ -1,9 +1,9 @@
 package com.example.ai_develop.presentation
 
-import com.example.ai_develop.domain.ChatFacts
-import com.example.ai_develop.domain.ChatMemoryStrategy
-import com.example.ai_develop.domain.LLMProvider
-import com.example.ai_develop.domain.WorkingMemory
+import com.example.ai_develop.domain.chat.ChatFacts
+import com.example.ai_develop.domain.chat.ChatMemoryStrategy
+import com.example.ai_develop.domain.llm.LLMProvider
+import com.example.ai_develop.domain.chat.WorkingMemory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals

@@ -1,7 +1,7 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.ChatFacts
-import com.example.ai_develop.domain.ChatMessage
+import com.example.ai_develop.domain.chat.ChatFacts
+import com.example.ai_develop.domain.chat.ChatMessage
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 

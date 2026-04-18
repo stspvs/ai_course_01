@@ -1,6 +1,6 @@
 package com.example.ai_develop.mcp
 
-import com.example.ai_develop.domain.AgentToolRegistry
+import com.example.ai_develop.domain.agent.AgentToolRegistry
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 

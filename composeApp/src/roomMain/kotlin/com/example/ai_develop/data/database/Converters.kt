@@ -1,7 +1,11 @@
 package com.example.ai_develop.data.database
 
 import androidx.room.TypeConverter
-import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.agent.*
+import com.example.ai_develop.domain.chat.*
+import com.example.ai_develop.domain.task.*
+import com.example.ai_develop.domain.rag.*
+import com.example.ai_develop.domain.llm.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 

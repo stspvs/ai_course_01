@@ -1,11 +1,11 @@
 package com.example.ai_develop.presentation.strategy
 
-import com.example.ai_develop.domain.Agent
-import com.example.ai_develop.domain.ChatFacts
-import com.example.ai_develop.domain.ChatMemoryStrategy
-import com.example.ai_develop.domain.ExtractFactsUseCase
-import com.example.ai_develop.domain.UpdateWorkingMemoryUseCase
-import com.example.ai_develop.domain.WorkingMemory
+import com.example.ai_develop.domain.chat.Agent
+import com.example.ai_develop.domain.chat.ChatFacts
+import com.example.ai_develop.domain.chat.ChatMemoryStrategy
+import com.example.ai_develop.domain.chat.ExtractFactsUseCase
+import com.example.ai_develop.domain.chat.UpdateWorkingMemoryUseCase
+import com.example.ai_develop.domain.chat.WorkingMemory
 import io.mockk.called
 import io.mockk.clearAllMocks
 import io.mockk.coEvery

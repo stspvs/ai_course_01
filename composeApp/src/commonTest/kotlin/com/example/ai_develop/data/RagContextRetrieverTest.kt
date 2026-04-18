@@ -9,8 +9,8 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.example.ai_develop.database.AgentDatabase
 import com.example.ai_develop.database.stageAdapter
-import com.example.ai_develop.domain.RagPipelineMode
-import com.example.ai_develop.domain.RagRetrievalConfig
+import com.example.ai_develop.domain.rag.RagPipelineMode
+import com.example.ai_develop.domain.rag.RagRetrievalConfig
 import com.example.aidevelop.database.RagChunkEntity
 import com.example.aidevelop.database.RagDocumentEntity
 import io.ktor.client.HttpClient

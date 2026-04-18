@@ -1,8 +1,8 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.ChatFacts
-import com.example.ai_develop.domain.ChatMessage
-import com.example.ai_develop.domain.SourceType
+import com.example.ai_develop.domain.chat.ChatFacts
+import com.example.ai_develop.domain.chat.ChatMessage
+import com.example.ai_develop.domain.chat.SourceType
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertTrue

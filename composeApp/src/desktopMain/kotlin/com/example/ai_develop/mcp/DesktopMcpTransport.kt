@@ -5,9 +5,9 @@ package com.example.ai_develop.mcp
 import com.example.ai_develop.data.McpServerRecord
 import com.example.ai_develop.data.stripLeadingJsonColonLabel
 import com.example.ai_develop.data.McpWireKind
-import com.example.ai_develop.domain.McpListToolsResult
-import com.example.ai_develop.domain.McpToolInfo
-import com.example.ai_develop.domain.McpTransport
+import com.example.ai_develop.domain.llm.McpListToolsResult
+import com.example.ai_develop.domain.llm.McpToolInfo
+import com.example.ai_develop.domain.llm.McpTransport
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.defaultRequest

@@ -1,8 +1,8 @@
 package com.example.ai_develop.data.database.mappers
 
 import com.example.ai_develop.data.database.TaskEntity
-import com.example.ai_develop.domain.TaskContext
-import com.example.ai_develop.domain.TaskRuntimeStatePersistence
+import com.example.ai_develop.domain.task.TaskContext
+import com.example.ai_develop.domain.task.TaskRuntimeStatePersistence
 
 fun TaskEntity.toDomain() = TaskContext(
     taskId = taskId,

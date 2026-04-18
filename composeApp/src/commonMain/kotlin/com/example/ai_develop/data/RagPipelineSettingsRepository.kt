@@ -1,6 +1,6 @@
 package com.example.ai_develop.data
 
-import com.example.ai_develop.domain.RagRetrievalConfig
+import com.example.ai_develop.domain.rag.RagRetrievalConfig
 import kotlinx.coroutines.flow.Flow
 
 interface RagPipelineSettingsRepository {

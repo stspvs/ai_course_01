@@ -3,7 +3,7 @@ package com.example.ai_develop.data
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToOneOrNull
 import com.example.ai_develop.database.AgentDatabase
-import com.example.ai_develop.domain.RagRetrievalConfig
+import com.example.ai_develop.domain.rag.RagRetrievalConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map

@@ -1,7 +1,7 @@
 package com.example.ai_develop.data.database
 
 import androidx.room.*
-import com.example.ai_develop.domain.TaskState
+import com.example.ai_develop.domain.task.TaskState
 import kotlinx.coroutines.flow.Flow
 
 @Dao

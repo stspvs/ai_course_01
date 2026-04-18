@@ -14,7 +14,11 @@ import com.example.ai_develop.data.McpRepository
 import com.example.ai_develop.data.SqlDelightChatRepository
 import com.example.ai_develop.data.SqlDelightGraylogSettingsRepository
 import com.example.ai_develop.data.SqlDelightMcpRepository
-import com.example.ai_develop.domain.*
+import com.example.ai_develop.domain.agent.*
+import com.example.ai_develop.domain.chat.*
+import com.example.ai_develop.domain.task.*
+import com.example.ai_develop.domain.rag.*
+import com.example.ai_develop.domain.llm.*
 import com.example.ai_develop.presentation.AgentManager
 import com.example.ai_develop.presentation.ChatInteractor
 import com.example.ai_develop.presentation.LLMViewModel

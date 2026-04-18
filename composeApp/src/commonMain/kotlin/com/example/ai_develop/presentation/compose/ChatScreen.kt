@@ -14,7 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.example.ai_develop.domain.GENERAL_CHAT_ID
+import com.example.ai_develop.domain.llm.GENERAL_CHAT_ID
 import com.example.ai_develop.presentation.LLMViewModel
 import com.example.ai_develop.presentation.TaskViewModel
 import org.koin.compose.viewmodel.koinViewModel

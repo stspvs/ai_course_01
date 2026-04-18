@@ -6,7 +6,7 @@ import com.example.ai_develop.data.database.LocalChatRepository
 import com.example.ai_develop.database.AgentDatabase
 import com.example.ai_develop.database.DriverFactory
 import com.example.ai_develop.database.stageAdapter
-import com.example.ai_develop.domain.McpTransport
+import com.example.ai_develop.domain.llm.McpTransport
 import com.example.ai_develop.mcp.DesktopMcpTransport
 import com.example.aidevelop.database.AgentMessageEntity
 import com.example.aidevelop.database.AgentStateEntity
