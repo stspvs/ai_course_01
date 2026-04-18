@@ -26,7 +26,9 @@ data class ChatMessage(
     val isSystemNotification: Boolean = false,
     val taskId: String? = null,
     val taskState: TaskState? = null,
-    val llmRequestSnapshot: LlmRequestSnapshot? = null
+    val llmRequestSnapshot: LlmRequestSnapshot? = null,
+    /** Длительности фаз ответа (детали по тапу на сообщение). */
+    val phaseTimings: AgentPhaseTimings? = null,
 ) {
     val content: String get() = message
     val tokenCount: Int get() = tokensUsed ?: 0

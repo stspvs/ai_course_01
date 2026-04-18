@@ -492,23 +492,21 @@ class LLMViewModelTest {
         scope: CoroutineScope,
         taskIdForMessagePersistence: String? = null
     ) : AutonomousAgent(id, repo, AgentEngine(repo, ChatMemoryManager(), emptyList()), scope, taskIdForMessagePersistence) {
-        
-        private val _agentFlow = MutableStateFlow<Agent?>(null)
-        override val agent: StateFlow<Agent?> = _agentFlow.asStateFlow()
 
-        private val _processingFlow = MutableStateFlow(false)
-        override val isProcessing: StateFlow<Boolean> = _processingFlow.asStateFlow()
+        fun emitAgent(agent: Agent) {
+            uiStateHub.update { it.copy(agent = agent) }
+            syncMirrorsFromHub()
+        }
 
-        private val _agentActivityFlow = MutableStateFlow<AgentActivity>(AgentActivity.Idle)
-        override val agentActivity: StateFlow<AgentActivity> = _agentActivityFlow.asStateFlow()
-
-        fun emitAgent(agent: Agent) { _agentFlow.value = agent }
-        fun setProcessing(loading: Boolean) { _processingFlow.value = loading }
+        fun setProcessing(loading: Boolean) {
+            uiStateHub.update { it.copy(isProcessing = loading) }
+            syncMirrorsFromHub()
+        }
 
         override suspend fun refreshAgent() {
             val state = repo.getAgentState(agentId)
-            if (state != null) {
-                _agentFlow.value = Agent(
+            val agent = if (state != null) {
+                Agent(
                     id = state.agentId,
                     name = state.name,
                     systemPrompt = state.systemPrompt,
@@ -518,11 +516,13 @@ class LLMViewModelTest {
                     maxTokens = state.maxTokens,
                     messages = state.messages,
                     memoryStrategy = state.memoryStrategy,
-                    workingMemory = state.workingMemory
+                    workingMemory = state.workingMemory,
                 )
             } else {
-                _agentFlow.value = Agent(id = agentId, name = "New Agent", systemPrompt = "", temperature = 0.7, provider = LLMProvider.Yandex(), stopWord = "", maxTokens = 2000)
+                Agent(id = agentId, name = "New Agent", systemPrompt = "", temperature = 0.7, provider = LLMProvider.Yandex(), stopWord = "", maxTokens = 2000)
             }
+            uiStateHub.update { it.copy(agent = agent) }
+            syncMirrorsFromHub()
         }
     }
 

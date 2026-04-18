@@ -4,9 +4,6 @@ package com.example.ai_develop.domain
 
 import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagPipelineSettingsRepository
-import com.example.ai_develop.data.RagStructuredParseResult
-import com.example.ai_develop.data.processRagAssistantRawJson
-import com.example.ai_develop.data.stripLeadingJsonColonLabel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -14,8 +11,26 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.uuid.Uuid
 
 /**
- * Автономный агент — координатор состояния и жизненного цикла.
- * Делегирует исполнение AgentEngine.
+ * Автономный агент — **оркестратор** жизненного цикла и сценариев чата.
+ *
+ * **Принципы (контракт класса):**
+ * 1. Оркестратор, не реализация — RAG, стриминг, инструменты вынесены в коллабораторы.
+ * 2. Один публичный снимок для UI — [uiState].
+ * 3. Узкое горлышко входа — [resolveRuntimeSnapshot] перед запросами к LLM/RAG.
+ * 4. Один режим инференса на шаг — [AgentInferenceStrategy] по [Agent.ragEnabled].
+ * 5. RAG и tools — последовательные фазы; парсинг [TOOL:] после завершения раунда LLM.
+ * 6. Стриминг и буфер — одна цепочка; [AutonomousAgentUiState.delivery] и [phaseHint].
+ * 7. Телеметрия фаз — [AgentPhaseTimings] на assistant-сообщении; детали по тапу в UI.
+ * 8. Не раздувать этот файл — новая логика в отдельных типах.
+ *
+ * @param agentId Идентификатор агента в хранилище (тот же id, что у чата в БД).
+ * @param repository Репозиторий чата: состояние агента, сообщения, профиль.
+ * @param engine Движок LLM: подготовка запроса, стриминг, инструменты, обслуживание памяти.
+ * @param externalScope Внешняя область корутин; жизненный цикл агента привязан к ней (отмена при dispose).
+ * @param taskIdForMessagePersistence Если задан (например id задачи), новые [ChatMessage] получают [ChatMessage.taskId] для связи с задачей.
+ * @param ragContextRetriever Опционально: поиск контекста в RAG; без него RAG-стратегия не подтянет базу знаний.
+ * @param ragPipelineSettingsRepository Опционально: настройки пайплайна RAG (rewrite и т.д.).
+ * @param uiStateHub Внутренний изменяемый поток UI-состояния; наследники/тесты могут подставить свой экземпляр.
  */
 open class AutonomousAgent(
     val agentId: String,
@@ -25,634 +40,466 @@ open class AutonomousAgent(
     private val taskIdForMessagePersistence: String? = null,
     private val ragContextRetriever: RagContextRetriever? = null,
     private val ragPipelineSettingsRepository: RagPipelineSettingsRepository? = null,
+    protected val uiStateHub: MutableStateFlow<AutonomousAgentUiState> = MutableStateFlow(AutonomousAgentUiState()),
 ) {
+    /** Дочерний job: при [dispose] отменяет все корутины агента. */
     private val job = SupervisorJob(externalScope.coroutineContext[Job])
+
+    /** Область корутин агента: подписка на БД, отправка сообщений и т.д. */
     private val scope = CoroutineScope(externalScope.coroutineContext.minusKey(Job) + job)
 
-    private val _agent = MutableStateFlow<Agent?>(null)
-    open val agent: StateFlow<Agent?> = _agent.asStateFlow()
+    /**
+     * Главный поток состояния для интерфейса: агент, флаги обработки, активность, превью стрима, подсказки фаз, ошибки, тайминги.
+     * Имеет смысл подписываться на него вместо разрозненных [agent] / [isProcessing] / [agentActivity].
+     */
+    val uiState: StateFlow<AutonomousAgentUiState> = uiStateHub.asStateFlow()
 
-    private val _stateMachine = MutableStateFlow<AgentStateMachine?>(null)
+    /** Зеркало [AutonomousAgentUiState.agent] для обратной совместимости и тестов. */
+    private val _agentMirror = MutableStateFlow<Agent?>(uiStateHub.value.agent)
 
+    /** Текущий агент с сообщениями и настройками; значения синхронизированы с [uiState]. */
+    open val agent: StateFlow<Agent?> = _agentMirror.asStateFlow()
+
+    /** Поток фрагментов ответа модели по мере генерации (для CLI и старых подписчиков). Превью в UI — [AutonomousAgentUiState.streamingPreview]. */
     private val _partialResponse = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 64)
     val partialResponse: SharedFlow<String> = _partialResponse.asSharedFlow()
 
-    private val _isProcessing = MutableStateFlow(false)
-    open val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+    /** Зеркало [AutonomousAgentUiState.isProcessing]. */
+    private val _isProcessingMirror = MutableStateFlow(uiStateHub.value.isProcessing)
 
-    private val _agentActivity = MutableStateFlow<AgentActivity>(AgentActivity.Idle)
-    open val agentActivity: StateFlow<AgentActivity> = _agentActivity.asStateFlow()
+    /** Идёт ли сейчас обработка пользовательского сообщения или приветствия. */
+    open val isProcessing: StateFlow<Boolean> = _isProcessingMirror.asStateFlow()
 
+    /** Зеркало [AutonomousAgentUiState.agentActivity]. */
+    private val _agentActivityMirror = MutableStateFlow(uiStateHub.value.agentActivity)
+
+    /** Что делает агент сейчас: простой, стриминг, вызов инструмента и т.д. */
+    open val agentActivity: StateFlow<AgentActivity> = _agentActivityMirror.asStateFlow()
+
+    /** Конечный автомат по стадиям агента (планирование, исполнение…); обновляется из [AgentState] в БД. */
+    private val _stateMachine = MutableStateFlow<AgentStateMachine?>(null)
+
+    /** Сборка запроса к LLM с опциональным RAG (поиск, rewrite). */
+    private val ragPreparer = RagAwareChatRequestPreparer(
+        agentId,
+        repository,
+        engine,
+        ragContextRetriever,
+        ragPipelineSettingsRepository,
+    )
+
+    /** Режим «просто чат»: без retrieval. */
+    private val directInferenceStrategy = DirectChatInferenceStrategy(engine)
+
+    /** Режим с RAG: retrieval и подготовка запроса через [ragPreparer]. */
+    private val ragInferenceStrategy = RagAugmentedInferenceStrategy(ragPreparer)
+
+    /** Один шаг стриминга: чанки, буфер JSON для RAG, запись в сообщения. */
+    private val streamHandler = LlmStreamingTurnHandler(engine)
+
+    /** Цепочка [TOOL:…]: выполнение, слияние в ответ, следующий раунд LLM. */
+    private val toolOrchestrator = ToolInvocationOrchestrator(engine, MAX_TOOL_CHAIN_ITERATIONS)
+
+    /** Не даёт двум операциям одновременно менять сообщения и UI-состояние. */
     private val processingMutex = Mutex()
+
+    /** Корутина подписки на изменения агента в БД. */
     private var stateSyncJob: Job? = null
+
+    /** Стартует первую загрузку и дальше слушает [ChatRepository.observeAgentState]. */
+    private val repositorySynchronizer = AgentRepositorySynchronizer(
+        agentId,
+        repository,
+        scope,
+        ::updateSnapshot,
+    )
 
     init {
         loadAndSubscribe()
     }
 
-    private fun loadAndSubscribe() {
-        stateSyncJob?.cancel()
-        stateSyncJob = scope.launch {
-            refreshAgent()
-            repository.observeAgentState(agentId).collect { state ->
-                if (state != null) updateSnapshot(state)
-            }
-        }
+    /**
+     * Атомарно обновляет [uiStateHub] и подтягивает [agent], [isProcessing], [agentActivity] из нового снимка.
+     */
+    private fun patchUi(transform: (AutonomousAgentUiState) -> AutonomousAgentUiState) {
+        uiStateHub.update(transform)
+        syncMirrorsFromHub()
     }
 
+    /**
+     * Вызывать после ручного [uiStateHub.update] в тестах/фейках, чтобы зеркальные [StateFlow] не отставали от хаба.
+     */
+    protected fun syncMirrorsFromHub() {
+        val s = uiStateHub.value
+        _agentMirror.value = s.agent
+        _isProcessingMirror.value = s.isProcessing
+        _agentActivityMirror.value = s.agentActivity
+    }
+
+    /** Отменяет предыдущую подписку и заново: [refreshAgent], затем поток обновлений из БД. */
+    private fun loadAndSubscribe() {
+        stateSyncJob?.cancel()
+        stateSyncJob = repositorySynchronizer.start(initialRefresh = { refreshAgent() })
+    }
+
+    /**
+     * Подтягивает состояние агента из БД (или создаёт запись по умолчанию) и обновляет UI и FSM.
+     * Полезно вызвать вручную после внешних изменений данных.
+     */
     open suspend fun refreshAgent() {
         val state = repository.getAgentState(agentId) ?: AgentState(
             agentId = agentId,
-            name = if (agentId == GENERAL_CHAT_ID) "Общий чат" else "Новый агент"
+            name = if (agentId == GENERAL_CHAT_ID) "Общий чат" else "Новый агент",
         ).also { repository.saveAgentState(it) }
-        
+
         updateSnapshot(state)
     }
 
+    /**
+     * Пересобирает локального [Agent] из [state]: профиль, FSM, список сообщений с учётом merge при активной обработке.
+     */
     private suspend fun updateSnapshot(state: AgentState) {
         val profile = repository.getProfile(agentId)
         _stateMachine.value = AgentStateMachine(state)
 
         val messages = resolveMessagesSnapshot(state)
 
-        _agent.update {
-            Agent(
-                id = state.agentId,
-                name = state.name,
-                systemPrompt = state.systemPrompt,
-                temperature = state.temperature,
-                provider = state.provider,
-                stopWord = state.stopWord,
-                maxTokens = state.maxTokens,
-                userProfile = profile,
-                memoryStrategy = state.memoryStrategy,
-                workingMemory = state.workingMemory,
-                messages = messages,
-                ragEnabled = state.ragEnabled,
-                mcpAllowedBindingIds = state.mcpAllowedBindingIds,
-            )
-        }
+        val newAgent = Agent(
+            id = state.agentId,
+            name = state.name,
+            systemPrompt = state.systemPrompt,
+            temperature = state.temperature,
+            provider = state.provider,
+            stopWord = state.stopWord,
+            maxTokens = state.maxTokens,
+            userProfile = profile,
+            memoryStrategy = state.memoryStrategy,
+            workingMemory = state.workingMemory,
+            messages = messages,
+            ragEnabled = state.ragEnabled,
+            mcpAllowedBindingIds = state.mcpAllowedBindingIds,
+        )
+        patchUi { it.copy(agent = newAgent) }
     }
 
     /**
-     * [repository.observeAgentState] иногда отдаёт пустой [AgentState.messages] при гонке с сохранением
-     * (или кратковременно несогласованный снимок), хотя в БД история уже есть — после перезапуска она видна.
-     * Прямой [getAgentState] в этом случае обычно возвращает актуальный список.
-     *
-     * Пока идёт обработка ответа, снимок из БД может отставать (ещё не сохранили промежуточные шаги) —
-     * не откатываем более длинную локальную историю.
+     * Согласует сообщения «в памяти» и из БД, чтобы при стриминге не потерять черновик и не показать устаревшее.
      */
     private suspend fun resolveMessagesSnapshot(state: AgentState): List<ChatMessage> {
-        val local = _agent.value?.messages.orEmpty()
+        val local = uiStateHub.value.agent?.messages.orEmpty()
         val fromDb = repository.getAgentState(agentId)?.messages.orEmpty()
-        return mergeObserveMessages(_isProcessing.value, local, state, fromDb)
+        return mergeObserveMessages(uiStateHub.value.isProcessing, local, state, fromDb)
     }
 
+    /**
+     * Единый снимок перед вызовом LLM/RAG: актуальный агент, стадия FSM и [Agent.ragEnabled] из БД (чтобы не расходилось с UI).
+     */
+    private suspend fun resolveRuntimeSnapshot(): AgentRuntimeSnapshot? {
+        val ag = uiStateHub.value.agent ?: return null
+        val fsm = _stateMachine.value ?: return null
+        val stage = fsm.getCurrentState().currentStage
+        val persistedRag = repository.getAgentState(agentId)?.ragEnabled
+        return AgentRuntimeSnapshot(
+            ag.copy(ragEnabled = persistedRag ?: ag.ragEnabled),
+            stage,
+        )
+    }
+
+    /**
+     * Переводит агента на следующую стадию FSM и сохраняет изменения в репозитории при успехе.
+     */
     suspend fun transitionTo(nextStage: AgentStage): Result<AgentState> {
         val fsm = _stateMachine.value ?: return Result.failure(IllegalStateException("Agent not initialized"))
         val result = fsm.transitionTo(nextStage)
         if (result.isSuccess) {
-            val currentAgent = _agent.value ?: return result
+            val currentAgent = uiStateHub.value.agent ?: return result
             syncWithRepository(currentAgent)
         }
         return result
     }
 
+    /**
+     * Полный сценарий ответа на сообщение пользователя: запись user-сообщения, стриминг LLM (direct или RAG),
+     * при необходимости инструменты и повторные раунды, тайминги на последнем ответе ассистента, обслуживание памяти.
+     *
+     * Эмитит те же текстовые чанки, что уходят в [partialResponse] (для подписчиков [Flow]).
+     */
     fun sendMessage(text: String): Flow<String> = flow {
         val fsm = _stateMachine.filterNotNull().first()
-        
+        val timing = PhaseTimingCollector()
+
         try {
-            // 1. Добавляем пользовательское сообщение под локом, чтобы гарантировать порядок
             processingMutex.withLock {
-                val currentAgent = _agent.value ?: return@flow
+                val currentAgent = uiStateHub.value.agent ?: return@flow
                 val msg = createMessage(
                     "user",
                     text,
                     currentAgent.messages.lastOrNull()?.id,
-                    fsm.getCurrentState().currentStage
+                    fsm.getCurrentState().currentStage,
                 )
-                _agent.update { it?.copy(messages = it.messages + msg) }
-                _isProcessing.value = true
-                _agentActivity.value = AgentActivity.Working
+                patchUi {
+                    it.copy(
+                        agent = it.agent?.copy(messages = it.agent.messages + msg),
+                        isProcessing = true,
+                        agentActivity = AgentActivity.Working,
+                        streamingPreview = "",
+                        phaseHint = null,
+                        delivery = AgentTextDelivery.Idle,
+                        lastStreamError = null,
+                        currentRunTimings = null,
+                    )
+                }
             }
 
-            _agent.value?.let { syncWithRepository(it) }
+            uiStateHub.value.agent?.let { syncWithRepository(it) }
 
-            // 2. Берем snapshot для текущей итерации LLM
-            var agentSnapshot = _agent.value ?: return@flow
-            
-            // 3. Первая итерация LLM
-            var responseText = executeStreamingStep(this, agentSnapshot, fsm.getCurrentState().currentStage)
-            _agent.value?.let { syncWithRepository(it) }
+            var agentSnapshot = uiStateHub.value.agent ?: return@flow
+
+            val snapForLlm = resolveRuntimeSnapshot() ?: return@flow
+            if (snapForLlm.agent.ragEnabled) {
+                patchUi { it.copy(phaseHint = PhaseStatusHint.Rag()) }
+            }
+            patchUi { it.copy(phaseHint = PhaseStatusHint.AwaitingLlm) }
+
+            var responseText = executeStreamingStep(
+                this,
+                agentSnapshot,
+                fsm.getCurrentState().currentStage,
+                timing,
+            )
+            patchUi { it.copy(phaseHint = null) }
+            uiStateHub.value.agent?.let { syncWithRepository(it) }
 
             val batchCalls = engine.parseAllToolCalls(responseText)
-            val agentForTools = _agent.value ?: return@flow
+            val agentForTools = uiStateHub.value.agent ?: return@flow
             val suppressOnlyBatch =
                 batchCalls.isNotEmpty() && batchCalls.all { engine.toolSuppressesLlmFollowUp(agentForTools, it.toolName) }
 
+            val toolCtx = toolInvocationContext(this, fsm, timing)
+
             if (suppressOnlyBatch) {
-                runSuppressOnlyToolSequence(
+                toolOrchestrator.runSuppressOnlyToolSequence(
                     calls = batchCalls.take(MAX_TOOL_CHAIN_ITERATIONS),
                     fsm = fsm,
-                    rawModelResponse = responseText
+                    rawModelResponse = responseText,
+                    ctx = toolCtx,
                 )
-                // После любого полностью MCP-батча — ещё один раунд LLM с историей с результатами инструментов.
-                // Иначе при 2+ [TOOL:] в первом ответе (например два запроса котировок) второй раунд не вызывался,
-                // и графики/файл не появлялись без отдельного «продолжай».
-                val snap = _agent.value ?: return@flow
+                val snap = uiStateHub.value.agent ?: return@flow
                 val continuationText = executeStreamingStep(
                     this,
                     snap,
                     fsm.getCurrentState().currentStage,
-                    replaceLastAssistant = false
+                    timing,
                 )
-                _agent.value?.let { syncWithRepository(it) }
-                runToolChainLoop(this, fsm, continuationText)
+                uiStateHub.value.agent?.let { syncWithRepository(it) }
+                toolOrchestrator.runToolChainLoop(this, fsm, continuationText, toolCtx)
             } else {
-                runToolChainLoop(this, fsm, responseText)
+                toolOrchestrator.runToolChainLoop(this, fsm, responseText, toolCtx)
             }
 
-            // 5. Финализация стейта
-            val finalAgent = _agent.value ?: return@flow
+            val finalAgent = uiStateHub.value.agent ?: return@flow
             syncWithRepository(finalAgent)
-            
-            // 6. Фоновое обслуживание
+
+            attachTimingsToLastAssistant(timing.build())
+
             val updatedMemory = engine.performMaintenance(finalAgent)
             if (updatedMemory != finalAgent.workingMemory) {
                 processingMutex.withLock {
-                    _agent.update { it?.copy(workingMemory = updatedMemory) }
+                    patchUi { st ->
+                        st.copy(agent = st.agent?.copy(workingMemory = updatedMemory))
+                    }
                 }
-                syncWithRepository(_agent.value!!)
+                syncWithRepository(uiStateHub.value.agent!!)
             }
-
         } catch (e: Exception) {
             val err = "Error: ${e.message}"
             _partialResponse.emit(err)
+            patchUi { it.copy(lastStreamError = err, delivery = AgentTextDelivery.Error) }
             emit(err)
         } finally {
-            _isProcessing.value = false
-            _agentActivity.value = AgentActivity.Idle
+            patchUi {
+                it.copy(
+                    isProcessing = false,
+                    agentActivity = AgentActivity.Idle,
+                    delivery = AgentTextDelivery.Idle,
+                    phaseHint = null,
+                    streamingPreview = "",
+                )
+            }
         }
     }
 
     /**
-     * Цепочка «инструмент(ы) из ответа → при необходимости LLM → снова инструменты».
-     * [suppressLlmFollowUp] не обрывает цикл: после MCP без следующего [TOOL:] в том же ответе всё равно вызывается LLM,
-     * чтобы довести многошаговый запрос (графики, файл) без отдельного «продолжай».
+     * Прикрепляет [timings] к последнему сообщению с ролью assistant и сохраняет копию в [AutonomousAgentUiState.lastCompletedTimings].
      */
-    private suspend fun runToolChainLoop(
+    private suspend fun attachTimingsToLastAssistant(timings: AgentPhaseTimings) {
+        processingMutex.withLock {
+            patchUi { st ->
+                val ag = st.agent ?: return@patchUi st
+                val msgs = ag.messages
+                val last = msgs.lastOrNull { it.role == "assistant" } ?: return@patchUi st
+                val newMsgs = msgs.map { m ->
+                    if (m.id == last.id) m.copy(phaseTimings = timings) else m
+                }
+                st.copy(
+                    agent = ag.copy(messages = newMsgs),
+                    lastCompletedTimings = timings,
+                    currentRunTimings = null,
+                )
+            }
+        }
+    }
+
+    /**
+     * Набор колбэков для [ToolInvocationOrchestrator]: чтение/обновление агента, синк с БД, активность, следующий LLM-шаг.
+     */
+    private fun toolInvocationContext(
         collector: FlowCollector<String>,
         fsm: AgentStateMachine,
-        initialResponseText: String,
-    ) {
-        var rawToolSourceText = initialResponseText
-        var toolCall = engine.parseToolCall(rawToolSourceText)
-        var iterations = 0
-        val visitedToolCalls = mutableSetOf<String>()
-        var lastMergedAssistantBody: String? = null
-        var mergedBodyBeforeLlmFollowUp: String? = null
-
-        while (toolCall != null && iterations < MAX_TOOL_CHAIN_ITERATIONS) {
-            val callKey = "${toolCall.toolName}\u0000${toolCall.input.trim()}"
-            if (!visitedToolCalls.add(callKey)) {
-                processingMutex.withLock {
-                    _agent.update { agent ->
-                        val msgs = agent?.messages ?: return@update agent
-                        val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
-                            ?: return@update agent
-                        val cleaned = engine.stripToolSyntaxFromAssistantText(lastAssistant.message)
-                        val trimmed = cleaned.trim()
-                        if (trimmed.isEmpty()) {
-                            val fallback = mergedBodyBeforeLlmFollowUp?.trim().orEmpty()
-                                .ifEmpty { lastMergedAssistantBody?.trim().orEmpty() }
-                            if (fallback.isNotEmpty()) {
-                                val newTokens = estimateTokens(fallback)
-                                agent.copy(
-                                    messages = msgs.map { msg ->
-                                        if (msg.id == lastAssistant.id) {
-                                            msg.copy(message = fallback, tokensUsed = newTokens)
-                                        } else msg
-                                    }
-                                )
-                            } else {
-                                agent.copy(messages = msgs.filter { it.id != lastAssistant.id })
-                            }
-                        } else {
-                            val newTokens = estimateTokens(trimmed)
-                            agent.copy(
-                                messages = msgs.map { msg ->
-                                    if (msg.id == lastAssistant.id) {
-                                        msg.copy(message = trimmed, tokensUsed = newTokens)
-                                    } else msg
-                                }
-                            )
-                        }
-                    }
-                }
-                _agent.value?.let { syncWithRepository(it) }
-                break
+        timing: PhaseTimingCollector,
+    ) = ToolInvocationContext(
+        processingMutex = processingMutex,
+        timing = timing,
+        getAgent = { uiStateHub.value.agent },
+        updateAgent = { transform ->
+            patchUi { st ->
+                st.copy(agent = transform(st.agent))
             }
-
-            _agentActivity.value = AgentActivity.RunningTool(toolCall.toolName)
-            var toolExecutionFailed = false
-            val agentForExec = _agent.value
-            val toolResultText: String = try {
-                if (agentForExec == null) {
-                    toolExecutionFailed = true
-                    "Tool error: agent state missing."
-                } else {
-                    engine.executeToolCall(agentForExec, toolCall) ?: run {
-                        toolExecutionFailed = true
-                        val names = engine.registeredToolNames(agentForExec)
-                        val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
-                        "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
-                    }
-                }
-            } catch (e: Exception) {
-                toolExecutionFailed = true
-                "Tool error: ${e.message ?: e::class.simpleName}"
-            }
-            _agentActivity.value = AgentActivity.Working
-
-            processingMutex.withLock {
-                _agent.update { agent ->
-                    val msgs = agent?.messages ?: return@update agent
-                    val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
-                    if (lastAssistant == null) {
-                        val fallback = createMessage(
-                            "system",
-                            "Tool Result: ${stripLeadingJsonColonLabel(toolResultText)}",
-                            msgs.lastOrNull()?.id,
-                            fsm.getCurrentState().currentStage
-                        )
-                        return@update agent.copy(messages = msgs + fallback)
-                    }
-                    val block = engine.formatMergedAssistantWithToolResult(
-                        strippedPreamble = "",
-                        toolName = toolCall.toolName,
-                        toolResult = toolResultText
-                    )
-                    val merged = lastMergedAssistantBody?.let { prev ->
-                        "${prev.trimEnd()}\n\n$block"
-                    } ?: block
-                    lastMergedAssistantBody = merged
-                    val newTokens = estimateTokens(merged)
-                    val updated = msgs.map { msg ->
-                        if (msg.id == lastAssistant.id) {
-                            msg.copy(message = merged, tokensUsed = newTokens)
-                        } else msg
-                    }
-                    agent.copy(messages = updated)
-                }
-            }
-            _agent.value?.let { syncWithRepository(it) }
-
-            rawToolSourceText = engine.stripFirstToolInvocation(rawToolSourceText)
-            val nextToolInSameLlmResponse = engine.parseToolCall(rawToolSourceText.trim())
-            if (nextToolInSameLlmResponse != null) {
-                toolCall = nextToolInSameLlmResponse
-                iterations++
-                continue
-            }
-
-            if (toolExecutionFailed) {
-                break
-            }
-
-            val agentSnapshot = _agent.value ?: break
-            mergedBodyBeforeLlmFollowUp = lastMergedAssistantBody
-            lastMergedAssistantBody = null
-            val responseFromLlm = executeStreamingStep(
-                collector,
-                agentSnapshot,
-                fsm.getCurrentState().currentStage,
-                replaceLastAssistant = true
-            )
-            _agent.value?.let { syncWithRepository(it) }
-            rawToolSourceText = responseFromLlm
-            toolCall = engine.parseToolCall(rawToolSourceText)
-            iterations++
-        }
-    }
+        },
+        syncWithRepository = { syncWithRepository(it) },
+        setActivity = { patchUi { st -> st.copy(agentActivity = it) } },
+        setPhaseHint = { hint -> patchUi { st -> st.copy(phaseHint = hint) } },
+        createMessage = { role, content, parentId, stage, snap ->
+            createMessage(role, content, parentId, stage, snap)
+        },
+        executeStreamingStep = { col, agent, stage, replaceLastAssistant ->
+            executeStreamingStep(col, agent, stage, timing, replaceLastAssistant)
+        },
+    )
 
     /**
-     * Несколько инструментов с [AgentTool.suppressLlmFollowUp] (MCP) из одного ответа модели: выполняются по очереди,
-     * результаты накапливаются в одном сообщении, без дополнительного вызова LLM.
-     * Текст модели вне синтаксиса [TOOL:…] (краткое пояснение, подтверждение сохранения и т.д.) сохраняется.
-     */
-    private suspend fun runSuppressOnlyToolSequence(
-        calls: List<ParsedToolCall>,
-        fsm: AgentStateMachine,
-        rawModelResponse: String,
-    ) {
-        val visitedToolCalls = mutableSetOf<String>()
-        var cumulative = ""
-        val stage = fsm.getCurrentState().currentStage
-        val proseFromModel = engine.stripToolSyntaxFromAssistantText(rawModelResponse).trim()
-
-        fun blocksWithProse(toolBlocks: String): String {
-            return when {
-                proseFromModel.isEmpty() -> toolBlocks
-                toolBlocks.isEmpty() -> proseFromModel
-                else -> "$proseFromModel\n\n$toolBlocks"
-            }
-        }
-
-        for (toolCall in calls) {
-            val callKey = "${toolCall.toolName}\u0000${toolCall.input.trim()}"
-            if (!visitedToolCalls.add(callKey)) continue
-
-            _agentActivity.value = AgentActivity.RunningTool(toolCall.toolName)
-            var toolExecutionFailed = false
-            val execAgent = _agent.value
-            val toolResultText: String = try {
-                if (execAgent == null) {
-                    toolExecutionFailed = true
-                    "Tool error: agent state missing."
-                } else {
-                    engine.executeToolCall(execAgent, toolCall) ?: run {
-                        toolExecutionFailed = true
-                        val names = engine.registeredToolNames(execAgent)
-                        val hint = if (names.isNotEmpty()) names.joinToString(", ") else "none"
-                        "Tool error: unknown tool «${toolCall.toolName}». Registered: $hint"
-                    }
-                }
-            } catch (e: Exception) {
-                toolExecutionFailed = true
-                "Tool error: ${e.message ?: e::class.simpleName}"
-            }
-            _agentActivity.value = AgentActivity.Working
-
-            val block = engine.formatMergedAssistantWithToolResult(
-                strippedPreamble = "",
-                toolName = toolCall.toolName,
-                toolResult = toolResultText
-            )
-            cumulative = if (cumulative.isEmpty()) block else "$cumulative\n\n$block"
-
-            processingMutex.withLock {
-                _agent.update { agent ->
-                    val msgs = agent?.messages ?: return@update agent
-                    val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
-                    if (lastAssistant == null) {
-                        val fallback = createMessage(
-                            "system",
-                            blocksWithProse(cumulative),
-                            msgs.lastOrNull()?.id,
-                            stage
-                        )
-                        return@update agent.copy(messages = msgs + fallback)
-                    }
-                    val display = blocksWithProse(cumulative)
-                    val newTokens = estimateTokens(display)
-                    val updated = msgs.map { msg ->
-                        if (msg.id == lastAssistant.id) {
-                            msg.copy(message = display, tokensUsed = newTokens)
-                        } else msg
-                    }
-                    agent.copy(messages = updated)
-                }
-            }
-            _agent.value?.let { syncWithRepository(it) }
-
-            if (toolExecutionFailed) break
-        }
-    }
-
-    /**
-     * Первое сообщение ассистента без пользовательского ввода: краткое приветствие (пустой чат).
+     * Однократное приветствие при пустой истории: короткий ответ модели по расширенному системному промпту.
+     * Если сообщения уже есть, ничего не делает.
      */
     fun sendWelcomeMessage(): Flow<String> = flow {
         val fsm = _stateMachine.filterNotNull().first()
         try {
             processingMutex.withLock {
-                val currentAgent = _agent.value ?: return@flow
+                val currentAgent = uiStateHub.value.agent ?: return@flow
                 if (currentAgent.messages.isNotEmpty()) return@flow
-                _isProcessing.value = true
-                _agentActivity.value = AgentActivity.Working
+                patchUi {
+                    it.copy(isProcessing = true, agentActivity = AgentActivity.Working)
+                }
             }
 
             val stage = fsm.getCurrentState().currentStage
-            val agentSnapshot = _agent.value ?: return@flow
+            val agentSnapshot = uiStateHub.value.agent ?: return@flow
             val prepared = engine.prepareChatRequest(agentSnapshot, stage, isJsonMode = false)
             val welcomePrompt = prepared.systemPrompt + WELCOME_SYSTEM_SUFFIX
             val preparedWelcome = prepared.copy(
                 systemPrompt = welcomePrompt,
-                snapshot = prepared.snapshot.copy(effectiveSystemPrompt = welcomePrompt)
+                snapshot = prepared.snapshot.copy(effectiveSystemPrompt = welcomePrompt),
             )
-            executeStreamingStepWithPrepared(this, agentSnapshot, stage, preparedWelcome)
-            _agent.value?.let { syncWithRepository(it) }
+            executeStreamingStepWithPrepared(
+                this,
+                agentSnapshot,
+                stage,
+                preparedWelcome,
+                timing = null,
+            )
+            uiStateHub.value.agent?.let { syncWithRepository(it) }
         } catch (e: Exception) {
             val err = "Error: ${e.message}"
             _partialResponse.emit(err)
             emit(err)
         } finally {
-            _isProcessing.value = false
-            _agentActivity.value = AgentActivity.Idle
+            patchUi {
+                it.copy(
+                    isProcessing = false,
+                    agentActivity = AgentActivity.Idle,
+                    delivery = AgentTextDelivery.Idle,
+                )
+            }
         }
     }
 
+    /**
+     * Один раунд вызова модели: выбор стратегии по [Agent.ragEnabled], подготовка запроса и стриминг через [streamHandler].
+     *
+     * @return Сырой текст ответа модели (для парсинга инструментов и постобработки).
+     */
     private suspend fun executeStreamingStep(
         collector: FlowCollector<String>,
         agent: Agent,
         stage: AgentStage,
-        replaceLastAssistant: Boolean = false
-    ): String = executeStreamingStepWithPrepared(
-        collector,
-        agent,
-        stage,
-        prepareLlmRequestWithOptionalRag(agent, stage),
-        replaceLastAssistant
-    )
-
-    private suspend fun prepareLlmRequestWithOptionalRag(agent: Agent, stage: AgentStage): PreparedLlmRequest {
-        // Актуальный флаг из БД: локальный снимок [_agent] может отставать сразу после смены настроек в UI.
-        val persistedRag = repository.getAgentState(agentId)?.ragEnabled
-        val a = agent.copy(ragEnabled = persistedRag ?: agent.ragEnabled)
-        if (!a.ragEnabled) {
-            return engine.prepareChatRequest(a, stage, isJsonMode = false)
-        }
-        val last = a.messages.lastOrNull()
-        if (last == null || last.role.lowercase() != "user") {
-            return engine.prepareChatRequest(a, stage, isJsonMode = false)
-        }
-        val query = last.message.trim()
-        if (query.isEmpty()) {
-            return engine.prepareChatRequest(
-                a,
-                stage,
-                isJsonMode = false,
-                ragContext = null,
-                ragAttribution = RagAttribution(used = false),
-                ragStructuredOutput = false,
-            )
-        }
-        val config = runCatching { ragPipelineSettingsRepository?.getConfig() }.getOrNull()
-            ?: RagRetrievalConfig.Default
-        if (!config.globalRagEnabled) {
-            return engine.prepareChatRequest(a, stage, isJsonMode = false)
-        }
-        var retrievalQuery = query
-        var rewriteApplied = false
-        if (config.queryRewriteEnabled) {
-            val rewriteProvider = resolveRewriteProvider(a, config)
-            repository.rewriteQueryForRag(query, rewriteProvider).onSuccess { rw ->
-                if (rw.isNotBlank()) {
-                    retrievalQuery = rw.trim()
-                    rewriteApplied = true
-                }
-            }
-        }
-        if (retrievalQuery.isBlank()) retrievalQuery = query
-
-        val retrieved = ragContextRetriever?.retrieve(
-            originalQuery = query,
-            retrievalQuery = retrievalQuery,
-            config = config,
-            rewriteApplied = rewriteApplied,
-        )
-        val ragGrounded = retrieved != null &&
-            retrieved.attribution.used &&
-            retrieved.contextText.isNotBlank()
-        return if (retrieved != null) {
-            if (ragGrounded) {
-                engine.prepareChatRequest(
-                    a,
-                    stage,
-                    isJsonMode = true,
-                    ragContext = retrieved.contextText,
-                    ragAttribution = retrieved.attribution,
-                    ragStructuredOutput = true,
-                )
-            } else {
-                engine.prepareChatRequest(
-                    a,
-                    stage,
-                    isJsonMode = false,
-                    ragContext = null,
-                    ragAttribution = retrieved.attribution,
-                    ragStructuredOutput = false,
-                )
-            }
-        } else {
-            engine.prepareChatRequest(
-                a,
-                stage,
-                isJsonMode = false,
-                ragContext = null,
-                ragAttribution = RagAttribution(used = false),
-                ragStructuredOutput = false,
-            )
-        }
+        timing: PhaseTimingCollector?,
+        replaceLastAssistant: Boolean = false,
+    ): String {
+        val snap = resolveRuntimeSnapshot() ?: return ""
+        val strategy = inferenceStrategyFor(snap.agent, directInferenceStrategy, ragInferenceStrategy)
+        val prepared = strategy.prepareLlmRequest(snap, timing)
+        return executeStreamingStepWithPrepared(collector, agent, stage, prepared, timing, replaceLastAssistant)
     }
 
-    private fun snapshotWithRagStructured(
-        base: LlmRequestSnapshot,
-        processedRag: RagStructuredParseResult?,
-    ): LlmRequestSnapshot {
-        val p = processedRag?.structuredPayload ?: return base
-        return base.copy(ragStructuredContent = p)
-    }
-
-    private fun resolveRewriteProvider(agent: Agent, config: RagRetrievalConfig): LLMProvider {
-        val m = config.rewriteOllamaModel.trim()
-        val p = agent.provider
-        return if (p is LLMProvider.Ollama && m.isNotEmpty()) p.copy(model = m) else p
-    }
-
+    /**
+     * Стриминг уже подготовленного запроса; учитывает режим RAG-JSON (буфер без превью в UI до разбора).
+     */
     private suspend fun executeStreamingStepWithPrepared(
         collector: FlowCollector<String>,
         agent: Agent,
         stage: AgentStage,
         prepared: PreparedLlmRequest,
-        replaceLastAssistant: Boolean = false
+        timing: PhaseTimingCollector?,
+        replaceLastAssistant: Boolean = false,
     ): String {
-        val sb = StringBuilder()
         val ragJsonMode = prepared.snapshot.isJsonMode && prepared.snapshot.ragAttribution != null
-        _agentActivity.value = AgentActivity.Streaming
-        try {
-            engine.streamFromPrepared(agent, prepared).collect { chunk ->
-                currentCoroutineContext().ensureActive()
-                sb.append(chunk)
+        return streamHandler.executeStreamingStepWithPrepared(
+            collector = collector,
+            agent = agent,
+            stage = stage,
+            prepared = prepared,
+            replaceLastAssistant = replaceLastAssistant,
+            processingMutex = processingMutex,
+            timing = timing,
+            getAgent = { uiStateHub.value.agent },
+            updateAgent = { transform ->
+                patchUi { st -> st.copy(agent = transform(st.agent)) }
+            },
+            emitPartial = { chunk ->
+                _partialResponse.emit(chunk)
+            },
+            setActivity = { patchUi { st -> st.copy(agentActivity = it) } },
+            onDeliveryChange = { d -> patchUi { st -> st.copy(delivery = d) } },
+            onStreamingChunk = { chunk ->
                 if (!ragJsonMode) {
-                    _partialResponse.emit(chunk)
-                    collector.emit(chunk)
+                    patchUi { st -> st.copy(streamingPreview = st.streamingPreview + chunk) }
                 }
-            }
-        } catch (e: Exception) {
-            _partialResponse.emit("Error during streaming: ${e.message}")
-            throw e
-        } finally {
-            _agentActivity.value = AgentActivity.Working
-        }
-
-        val rawOut = sb.toString()
-        val processedRag = if (ragJsonMode) {
-            processRagAssistantRawJson(rawOut, prepared.snapshot.ragAttribution)
-        } else {
-            null
-        }
-        var content = processedRag?.formattedChatText
-            ?: stripLeadingJsonColonLabel(rawOut)
-        if (content.isBlank()) {
-            val warn = processedRag?.parseWarning?.takeIf { it.isNotBlank() }
-            content = when {
-                warn != null -> warn
-                rawOut.isBlank() -> "Пустой ответ модели."
-                else -> "Ответ не содержит распознаваемого текста."
-            }
-        }
-        if (ragJsonMode) {
-            _partialResponse.emit(content)
-            collector.emit(content)
-        }
-
-        processingMutex.withLock {
-            val msgs = _agent.value?.messages ?: return@withLock
-            val lastAssistant = msgs.lastOrNull { it.role == "assistant" }
-            val snapshotForMessage = snapshotWithRagStructured(prepared.snapshot, processedRag)
-            if (replaceLastAssistant && lastAssistant != null) {
-                val newTokens = estimateTokens(content)
-                val updated = msgs.map { msg ->
-                    if (msg.id == lastAssistant.id) {
-                        msg.copy(
-                            message = content,
-                            tokensUsed = newTokens,
-                            llmRequestSnapshot = snapshotForMessage
-                        )
-                    } else msg
-                }
-                _agent.update { it?.copy(messages = updated) }
-            } else {
-                val parentId = msgs.lastOrNull()?.id
-                val aiMsg = createMessage(
-                    "assistant",
-                    content,
-                    parentId,
-                    stage,
-                    snapshotForMessage
-                )
-                _agent.update { it?.copy(messages = it.messages + aiMsg) }
-            }
-        }
-
-        return rawOut
+            },
+            onRagJsonParsed = {
+                patchUi { st -> st.copy(streamingPreview = "") }
+            },
+            createMessage = { role, content, parentId, st, snap ->
+                createMessage(role, content, parentId, st, snap)
+            },
+        )
     }
 
     private companion object {
-        /** Максимум раундов «инструмент → ответ LLM» за одно пользовательское сообщение (защита от бесконечного цикла). */
+        /** Максимум итераций «инструмент → ответ модели» подряд, защита от бесконечного цикла. */
         private const val MAX_TOOL_CHAIN_ITERATIONS = 32
 
+        /** Дополнение к системному промпту для первого сообщения в пустом чате. */
         private const val WELCOME_SYSTEM_SUFFIX =
             "\n\n[ИНСТРУКЦИЯ] Пользователь ещё не начал диалог. Кратко поприветствуй его и предложи начать обсуждение задачи. Ответь одним коротким сообщением."
     }
 
+    /** Создаёт [ChatMessage] с новым id, меткой времени и при необходимости привязкой к задаче. */
     private fun createMessage(
         role: String,
         content: String,
         parentId: String?,
         agentStage: AgentStage,
-        llmSnapshot: LlmRequestSnapshot? = null
+        llmSnapshot: LlmRequestSnapshot? = null,
     ) = ChatMessage(
         id = Uuid.random().toString(),
         role = role,
@@ -667,9 +514,10 @@ open class AutonomousAgent(
         parentId = parentId,
         taskId = taskIdForMessagePersistence,
         taskState = taskIdForMessagePersistence?.let { agentStageToTaskState(agentStage) },
-        llmRequestSnapshot = llmSnapshot
+        llmRequestSnapshot = llmSnapshot,
     )
 
+    /** Соответствие стадии FSM задаче в UI (для поля [ChatMessage.taskState]). */
     private fun agentStageToTaskState(stage: AgentStage): TaskState = when (stage) {
         AgentStage.PLANNING -> TaskState.PLANNING
         AgentStage.EXECUTION -> TaskState.EXECUTION
@@ -677,6 +525,9 @@ open class AutonomousAgent(
         AgentStage.DONE -> TaskState.DONE
     }
 
+    /**
+     * Записывает в БД поля агента и сообщения из текущего FSM-состояния (имя, промпт, история, RAG-флаг и т.д.).
+     */
     private suspend fun syncWithRepository(agent: Agent) {
         val fsm = _stateMachine.value ?: return
         repository.saveAgentState(
@@ -691,10 +542,11 @@ open class AutonomousAgent(
                 workingMemory = agent.workingMemory,
                 memoryStrategy = agent.memoryStrategy,
                 ragEnabled = agent.ragEnabled,
-            )
+            ),
         )
     }
 
+    /** Останавливает подписку на БД и отменяет корутины агента; после вызова объектом пользоваться нельзя. */
     fun dispose() {
         stateSyncJob?.cancel()
         job.cancel()

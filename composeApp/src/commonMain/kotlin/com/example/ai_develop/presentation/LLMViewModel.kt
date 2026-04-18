@@ -68,26 +68,27 @@ class LLMViewModel(
                     .flatMapLatest { id ->
                         chatStreamingUseCase.ensureToolsLoaded()
                         val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(id)
-                        combine(
-                            autonomousAgent.agent,
-                            autonomousAgent.isProcessing,
-                            autonomousAgent.agentActivity
-                        ) { snapshot, loading, activity ->
-                            Triple(id, snapshot, loading to activity)
+                        autonomousAgent.uiState.map { ui ->
+                            SelectedAgentUiSlice(
+                                targetId = id,
+                                snapshot = ui.agent,
+                                isLoading = ui.isProcessing,
+                                activity = ui.agentActivity,
+                                phaseHint = ui.phaseHint,
+                                streamingPreview = ui.streamingPreview,
+                            )
                         }
                     },
                 chatStreamingUseCase.observeMcpRegistryRefresh(),
-            ) { agentsFromDb, pending, tripleWithActivity, _ ->
-                val (targetId, snapshot, loadingAndActivity) = tripleWithActivity
-                val (loading, activity) = loadingAndActivity
+            ) { agentsFromDb, pending, slice, _ ->
                 val visibleFromDb = agentsFromDb.filter { it.id !in pending }
-                val updatedAgent = snapshot
-                    ?: visibleFromDb.find { it.id == targetId }
-                    ?: createDefaultAgent(targetId)
-                val merged = mergeAgentsFromDbWithSelection(visibleFromDb, targetId, updatedAgent)
-                Triple(merged, loading, activity to targetId)
-            }.collect { (finalAgents, loading, activityAndTarget) ->
-                val (activity, targetId) = activityAndTarget
+                val updatedAgent = slice.snapshot
+                    ?: visibleFromDb.find { it.id == slice.targetId }
+                    ?: createDefaultAgent(slice.targetId)
+                val merged = mergeAgentsFromDbWithSelection(visibleFromDb, slice.targetId, updatedAgent)
+                merged to slice
+            }.collect { (finalAgents, slice) ->
+                val targetId = slice.targetId
                 chatStreamingUseCase.ensureToolsLoaded()
                 val agentForTools = finalAgents.find { it.id == targetId }
                     ?: createDefaultAgent(targetId)
@@ -95,8 +96,10 @@ class LLMViewModel(
                 _state.updateIfChanged { currentState ->
                     currentState.copy(
                         agents = finalAgents,
-                        isLoading = loading,
-                        agentActivity = activity,
+                        isLoading = slice.isLoading,
+                        agentActivity = slice.activity,
+                        phaseHint = slice.phaseHint,
+                        streamingPreview = slice.streamingPreview,
                         availableToolNames = toolNames,
                     )
                 }
@@ -312,6 +315,15 @@ class LLMViewModel(
         }
     }
 }
+
+private data class SelectedAgentUiSlice(
+    val targetId: String,
+    val snapshot: Agent?,
+    val isLoading: Boolean,
+    val activity: AgentActivity,
+    val phaseHint: PhaseStatusHint?,
+    val streamingPreview: String,
+)
 
 /**
  * Extension для MutableStateFlow, чтобы обновлять значение только при его изменении.

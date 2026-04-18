@@ -1,7 +1,11 @@
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
+
 package com.example.ai_develop.presentation.compose
 
 import androidx.compose.animation.*
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -27,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -68,6 +73,7 @@ internal fun ChatContent(
 
     val strategy = activeAgent?.memoryStrategy
     var ragDetailMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var phaseTimingsMessage by remember { mutableStateOf<ChatMessage?>(null) }
     val isBranchingMode = strategy is ChatMemoryStrategy.Branching
     val isSummarizationMode = strategy is ChatMemoryStrategy.Summarization
     val isStickyFactsMode = strategy is ChatMemoryStrategy.StickyFacts
@@ -154,9 +160,15 @@ internal fun ChatContent(
                 messages.size,
                 messages.lastOrNull()?.content?.length,
                 state.isLoading,
-                state.agentActivity
+                state.agentActivity,
+                state.streamingPreview.length,
             ) {
-                val lastIndex = messages.lastIndex + if (state.isLoading) 1 else 0
+                val extraRows = when {
+                    !state.isLoading -> 0
+                    state.streamingPreview.isNotBlank() -> 2
+                    else -> 1
+                }
+                val lastIndex = messages.lastIndex + extraRows
                 if (lastIndex >= 0) {
                     listState.scrollToItem(lastIndex)
                 }
@@ -174,13 +186,27 @@ internal fun ChatContent(
                         isBranchingMode = isBranchingMode,
                         onCreateBranch = { branchName -> onCreateBranch(message.id, branchName) },
                         onOpenRagDialog = { ragDetailMessage = it },
+                        onOpenPhaseTimings = { phaseTimingsMessage = it },
                     )
+                }
+                items(
+                    items = if (state.isLoading && state.streamingPreview.isNotBlank()) {
+                        listOf("stream_preview")
+                    } else {
+                        emptyList()
+                    },
+                    key = { it },
+                ) {
+                    StreamingPreviewBubble(text = state.streamingPreview)
                 }
                 items(
                     items = if (state.isLoading) listOf("agent_activity_bubble") else emptyList(),
                     key = { it }
                 ) {
-                    AgentActivityBubble(activity = state.agentActivity)
+                    AgentActivityBubble(
+                        activity = state.agentActivity,
+                        phaseHint = state.phaseHint,
+                    )
                 }
             }
 
@@ -195,6 +221,13 @@ internal fun ChatContent(
                 RagChunksDetailDialog(
                     message = msg,
                     onDismiss = { ragDetailMessage = null },
+                )
+            }
+
+            phaseTimingsMessage?.phaseTimings?.let { timings ->
+                PhaseTimingsBottomSheet(
+                    timings = timings,
+                    onDismiss = { phaseTimingsMessage = null },
                 )
             }
         }
@@ -218,13 +251,17 @@ internal fun ChatContent(
 }
 
 @Composable
-private fun AgentActivityBubble(activity: AgentActivity) {
-    val label = when (activity) {
-        AgentActivity.Idle -> "Обработка…"
-        AgentActivity.Streaming -> "Модель отвечает…"
-        is AgentActivity.RunningTool -> "Вызов инструмента: ${activity.toolName}"
-        AgentActivity.Working -> "Обработка…"
-    }
+private fun AgentActivityBubble(
+    activity: AgentActivity,
+    phaseHint: PhaseStatusHint?,
+) {
+    val label = phaseHint?.let { phaseStatusHintLabel(it) }
+        ?: when (activity) {
+            AgentActivity.Idle -> "Обработка…"
+            AgentActivity.Streaming -> "Модель отвечает…"
+            is AgentActivity.RunningTool -> "Вызов инструмента: ${activity.toolName}"
+            AgentActivity.Working -> "Обработка…"
+        }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start
@@ -263,6 +300,104 @@ private fun AgentActivityBubble(activity: AgentActivity) {
             style = MaterialTheme.typography.labelSmall,
             color = Color.Gray,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun StreamingPreviewBubble(text: String) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start,
+    ) {
+        Surface(
+            color = Color(0xFFF5F5F5),
+            contentColor = Color(0xFF424242),
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = 0.dp,
+                bottomEnd = 16.dp,
+            ),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+        }
+        Text(
+            text = "Черновик",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun PhaseTimingsBottomSheet(
+    timings: AgentPhaseTimings,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "Этапы ответа",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            PhaseTimingRow("Подготовка запроса", timings.prepareRequestMs)
+            PhaseTimingRow("RAG: уточнение запроса", timings.ragRewriteMs)
+            PhaseTimingRow("RAG: поиск", timings.ragRetrieveMs)
+            if (timings.llmRoundMs.isNotEmpty()) {
+                Text("Раунды LLM", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                timings.llmRoundMs.forEachIndexed { i, ms ->
+                    PhaseTimingRow("  Раунд ${i + 1}", ms)
+                }
+            }
+            if (timings.toolDurations.isNotEmpty()) {
+                Text("Инструменты", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                timings.toolDurations.forEach { t ->
+                    PhaseTimingRow("  ${t.toolName}", t.ms)
+                }
+            }
+            PhaseTimingRow("Разбор JSON (RAG)", timings.ragJsonParseMs)
+            timings.firstTokenMs?.let { PhaseTimingRow("Первый токен (от начала)", it) }
+            HorizontalDivider()
+            PhaseTimingRow("Всего", timings.totalMs, emphasize = true)
+        }
+    }
+}
+
+@Composable
+private fun PhaseTimingRow(label: String, ms: Long, emphasize: Boolean = false) {
+    if (ms <= 0L && !emphasize) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            label,
+            style = if (emphasize) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (emphasize) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "$ms мс",
+            style = if (emphasize) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (emphasize) FontWeight.Bold else FontWeight.Normal,
         )
     }
 }
@@ -697,13 +832,13 @@ private fun RagChunksDetailDialog(
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageItem(
     message: ChatMessage,
     isBranchingMode: Boolean,
     onCreateBranch: (String) -> Unit,
     onOpenRagDialog: (ChatMessage) -> Unit,
+    onOpenPhaseTimings: (ChatMessage) -> Unit,
 ) {
     var showBranchDialog by remember { mutableStateOf(false) }
     var branchName by remember { mutableStateOf("") }
@@ -711,17 +846,26 @@ private fun MessageItem(
 
     val hasStructuredRag = message.llmRequestSnapshot?.ragStructuredContent.shouldRenderStructuredBubble()
     val openRagOnClick = message.supportsRagDetailDialog() && !hasStructuredRag
+    val openPhaseTimings = message.phaseTimings != null && message.role.equals("assistant", ignoreCase = true)
+
+    fun onPrimaryClick() {
+        when {
+            openPhaseTimings -> onOpenPhaseTimings(message)
+            openRagOnClick -> onOpenRagDialog(message)
+            else -> Unit
+        }
+    }
 
     val outerModifier = when {
-        isBranchingMode && openRagOnClick -> Modifier.combinedClickable(
-            onClick = { onOpenRagDialog(message) },
+        isBranchingMode && (openPhaseTimings || openRagOnClick) -> Modifier.combinedClickable(
+            onClick = { onPrimaryClick() },
             onLongClick = { showBranchDialog = true },
         )
         isBranchingMode -> Modifier.combinedClickable(
             onClick = {},
             onLongClick = { showBranchDialog = true },
         )
-        openRagOnClick -> Modifier.clickable { onOpenRagDialog(message) }
+        openPhaseTimings || openRagOnClick -> Modifier.clickable { onPrimaryClick() }
         else -> Modifier
     }
 

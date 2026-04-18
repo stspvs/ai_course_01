@@ -131,6 +131,27 @@ class AutonomousAgentTest {
         autonomousAgent.dispose()
     }
 
+    @Test
+    fun testSendMessage_attachesPhaseTimingsToLastAssistant() = runTest {
+        repository.agentStateMap[agentId] = AgentState(agentId)
+        val autonomousAgent = AutonomousAgent(agentId, repository, engine, backgroundScope)
+        autonomousAgent.refreshAgent()
+        advanceUntilIdle()
+
+        autonomousAgent.sendMessage("Hello").collect()
+        advanceUntilIdle()
+
+        val lastAssistant = autonomousAgent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        assertNotNull(lastAssistant?.phaseTimings)
+        assertTrue(lastAssistant!!.phaseTimings!!.totalMs >= 0L)
+        assertEquals(
+            lastAssistant.phaseTimings,
+            autonomousAgent.uiState.value.lastCompletedTimings,
+        )
+
+        autonomousAgent.dispose()
+    }
+
     class MockChatRepository : ChatRepository {
         val agentStateMap = mutableMapOf<String, AgentState>()
 

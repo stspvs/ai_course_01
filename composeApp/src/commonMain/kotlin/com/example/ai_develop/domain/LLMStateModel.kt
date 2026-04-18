@@ -23,6 +23,8 @@ data class LLMStateModel(
     val selectedAgentId: String? = GENERAL_CHAT_ID,
     val isLoading: Boolean = false,
     val agentActivity: AgentActivity = AgentActivity.Idle,
+    val phaseHint: PhaseStatusHint? = null,
+    val streamingPreview: String = "",
     val isStreamingEnabled: Boolean = true,
     val sendFullHistory: Boolean = true,
     val isJsonMode: Boolean = false,
