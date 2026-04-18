@@ -42,7 +42,7 @@ class LLMViewModelTest {
         
         viewModel = LLMViewModel(
             fakeManagementUseCase,
-            fakeStreamingUseCase,
+            fakeStreamingUseCase as AgentChatSessionPort,
             agentManager,
             GetAgentsUseCase(fakeRepository)
         )
@@ -325,7 +325,7 @@ class LLMViewModelTest {
         // Recreate ViewModel
         val newVm = LLMViewModel(
             fakeManagementUseCase,
-            fakeStreamingUseCase,
+            fakeStreamingUseCase as AgentChatSessionPort,
             agentManager,
             GetAgentsUseCase(fakeRepository)
         )

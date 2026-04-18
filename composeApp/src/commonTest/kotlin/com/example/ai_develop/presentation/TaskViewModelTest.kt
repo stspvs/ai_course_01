@@ -201,7 +201,7 @@ class TaskViewModelTest {
             deleteTaskUseCase = DeleteTaskUseCase(taskRepo),
             resetTaskUseCase = ResetTaskUseCase(chatRepo, chatStreamingUseCase),
             getMessagesUseCase = GetMessagesUseCase(messageRepo),
-            chatStreamingUseCase = chatStreamingUseCase,
+            agentChatSessionPort = chatStreamingUseCase,
             getAgentsUseCase = GetAgentsUseCase(localChatRepo),
             agentFactory = agentFactory,
             taskSagaCoordinator = taskSagaCoordinator

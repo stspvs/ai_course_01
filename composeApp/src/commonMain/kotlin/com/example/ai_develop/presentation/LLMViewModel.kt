@@ -12,6 +12,8 @@ import com.example.ai_develop.domain.rag.*
 import com.example.ai_develop.domain.llm.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * События пользовательского интерфейса для LLMViewModel.
@@ -35,13 +37,17 @@ sealed interface LLMEvent {
 
 class LLMViewModel(
     private val agentManagementUseCase: AgentManagementUseCase,
-    private val chatStreamingUseCase: ChatStreamingUseCase,
+    private val agentChatSessionPort: AgentChatSessionPort,
     private val agentManager: AgentManager,
-    private val getAgentsUseCase: GetAgentsUseCase
+    private val getAgentsUseCase: GetAgentsUseCase,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LLMStateModel())
     val state: StateFlow<LLMStateModel> = _state.asStateFlow()
+
+    private val uiMutex = Mutex()
+
+    private val chatAgentsSessionFlow = ChatAgentsSessionFlow(getAgentsUseCase, agentChatSessionPort)
 
     /** Скрывает агента в списке до завершения удаления в БД (мгновенный отклик UI). */
     private val pendingDeletedAgentIds = MutableStateFlow<Set<String>>(emptySet())
@@ -49,64 +55,29 @@ class LLMViewModel(
     val agentTemplates: List<AgentTemplate> = agentManager.templates
 
     init {
-        // Инициализируем выбор агента по умолчанию
         onEvent(LLMEvent.SelectAgent(GENERAL_CHAT_ID))
-        observeAgents()
+        observeSessionSlice()
     }
 
-    /**
-     * Логика наблюдения за агентами:
-     * - Список агентов берётся из БД ([GetAgentsUseCase]), чтобы после перезапуска в чате были все сохранённые агенты.
-     * - Для выбранного агента подставляется полный снимок из [AutonomousAgent] (сообщения, ветки и т.д.).
-     * - flatMapLatest предотвращает утечки при смене агента.
-     */
-    private fun observeAgents() {
+    private suspend fun applyUiResult(result: LlmUiResult) {
+        uiMutex.withLock {
+            _state.updateIfChanged { reduceLlmState(it, result) }
+        }
+    }
+
+    private fun postUiResult(result: LlmUiResult) {
         viewModelScope.launch {
-            combine(
-                getAgentsUseCase(),
+            applyUiResult(result)
+        }
+    }
+
+    private fun observeSessionSlice() {
+        viewModelScope.launch {
+            chatAgentsSessionFlow.observe(
                 pendingDeletedAgentIds,
-                combine(
-                    _state.map { it.selectedAgentId ?: GENERAL_CHAT_ID }.distinctUntilChanged(),
-                    chatStreamingUseCase.agentCacheGeneration,
-                ) { id, _ -> id }
-                    .flatMapLatest { id ->
-                        chatStreamingUseCase.ensureToolsLoaded()
-                        val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(id)
-                        autonomousAgent.uiState.map { ui ->
-                            SelectedAgentUiSlice(
-                                targetId = id,
-                                snapshot = ui.agent,
-                                isLoading = ui.isProcessing,
-                                activity = ui.agentActivity,
-                                phaseHint = ui.phaseHint,
-                                streamingPreview = ui.streamingPreview,
-                            )
-                        }
-                    },
-                chatStreamingUseCase.observeMcpRegistryRefresh(),
-            ) { agentsFromDb, pending, slice, _ ->
-                val visibleFromDb = agentsFromDb.filter { it.id !in pending }
-                val updatedAgent = slice.snapshot
-                    ?: visibleFromDb.find { it.id == slice.targetId }
-                    ?: createDefaultAgent(slice.targetId)
-                val merged = mergeAgentsFromDbWithSelection(visibleFromDb, slice.targetId, updatedAgent)
-                merged to slice
-            }.collect { (finalAgents, slice) ->
-                val targetId = slice.targetId
-                chatStreamingUseCase.ensureToolsLoaded()
-                val agentForTools = finalAgents.find { it.id == targetId }
-                    ?: createDefaultAgent(targetId)
-                val toolNames = chatStreamingUseCase.toolNamesForAgent(agentForTools)
-                _state.updateIfChanged { currentState ->
-                    currentState.copy(
-                        agents = finalAgents,
-                        isLoading = slice.isLoading,
-                        agentActivity = slice.activity,
-                        phaseHint = slice.phaseHint,
-                        streamingPreview = slice.streamingPreview,
-                        availableToolNames = toolNames,
-                    )
-                }
+                state.map { it.selectedAgentId ?: GENERAL_CHAT_ID }.distinctUntilChanged(),
+            ).collect { slice ->
+                applyUiResult(slice)
             }
         }
     }
@@ -115,30 +86,9 @@ class LLMViewModel(
     fun refreshAvailableTools() {
         viewModelScope.launch {
             val sel = _state.value.selectedAgentId ?: GENERAL_CHAT_ID
-            val agent = _state.value.agents.find { it.id == sel } ?: createDefaultAgent(sel)
-            val names = chatStreamingUseCase.toolNamesForAgent(agent)
-            _state.updateIfChanged { it.copy(availableToolNames = names) }
-        }
-    }
-
-    /**
-     * Объединяет полный список агентов из БД с детальным состоянием текущего выбранного агента.
-     */
-    private fun mergeAgentsFromDbWithSelection(
-        agentsFromDb: List<Agent>,
-        targetId: String,
-        selectedDetail: Agent
-    ): List<Agent> {
-        if (agentsFromDb.isEmpty()) {
-            return listOf(selectedDetail)
-        }
-        val merged = agentsFromDb.map { agent ->
-            if (agent.id == targetId) selectedDetail else agent
-        }
-        return if (merged.none { it.id == targetId }) {
-            merged + selectedDetail
-        } else {
-            merged
+            val agent = _state.value.agents.find { it.id == sel } ?: defaultAgentForToolbar(sel)
+            val names = agentChatSessionPort.toolNamesForAgent(agent)
+            applyUiResult(LlmUiResult.ToolsOnlyUpdated(names))
         }
     }
 
@@ -151,8 +101,8 @@ class LLMViewModel(
             is LLMEvent.SelectAgent -> selectAgent(event.agentId)
             LLMEvent.CreateAgent -> createAgent()
             is LLMEvent.DeleteAgent -> deleteAgent(event.agentId)
-            is LLMEvent.UpdateStreamingEnabled -> updateStreamingEnabled(event.enabled)
-            is LLMEvent.UpdateSendFullHistory -> updateSendFullHistory(event.enabled)
+            is LLMEvent.UpdateStreamingEnabled -> postUiResult(LlmUiResult.StreamingEnabledChanged(event.enabled))
+            is LLMEvent.UpdateSendFullHistory -> postUiResult(LlmUiResult.SendFullHistoryChanged(event.enabled))
             is LLMEvent.UpdateMemoryStrategy -> updateMemoryStrategy(event.strategy)
             LLMEvent.ClearChat -> clearChat()
             is LLMEvent.UpdateAgent -> updateAgent(event.params)
@@ -168,21 +118,21 @@ class LLMViewModel(
         if (message.isBlank()) return
         val agentId = _state.value.selectedAgentId ?: GENERAL_CHAT_ID
         viewModelScope.launch {
-            chatStreamingUseCase.ensureToolsLoaded()
-            chatStreamingUseCase.getOrCreateAgent(agentId).sendMessage(message).collect()
+            agentChatSessionPort.ensureToolsLoaded()
+            agentChatSessionPort.getOrCreateAgent(agentId, null).sendMessage(message).collect()
         }
     }
 
     fun selectAgent(agentId: String?) {
         val id = agentId ?: GENERAL_CHAT_ID
         if (_state.value.selectedAgentId == id) return
-        _state.updateIfChanged { it.copy(selectedAgentId = id) }
+        postUiResult(LlmUiResult.SelectionChanged(id))
     }
 
     fun createAgent() {
         viewModelScope.launch {
             val newId = agentManagementUseCase.createAgent()
-            onEvent(LLMEvent.SelectAgent(newId))
+            applyUiResult(LlmUiResult.SelectionChanged(newId))
         }
     }
 
@@ -200,7 +150,7 @@ class LLMViewModel(
         selectAgent(newSelectionId)
         viewModelScope.launch {
             try {
-                chatStreamingUseCase.evictAgent(agentId)
+                agentChatSessionPort.evictAgent(agentId)
                 agentManagementUseCase.deleteAgent(agentId)
             } finally {
                 pendingDeletedAgentIds.update { it - agentId }
@@ -209,11 +159,11 @@ class LLMViewModel(
     }
 
     fun updateStreamingEnabled(enabled: Boolean) {
-        _state.updateIfChanged { it.copy(isStreamingEnabled = enabled) }
+        postUiResult(LlmUiResult.StreamingEnabledChanged(enabled))
     }
 
     fun updateSendFullHistory(enabled: Boolean) {
-        _state.updateIfChanged { it.copy(sendFullHistory = enabled) }
+        postUiResult(LlmUiResult.SendFullHistoryChanged(enabled))
     }
 
     fun updateMemoryStrategy(strategy: ChatMemoryStrategy) {
@@ -256,22 +206,9 @@ class LLMViewModel(
         viewModelScope.launch {
             val newId = agentManagementUseCase.duplicateAgent(agentId)
             if (newId != null) {
-                onEvent(LLMEvent.SelectAgent(newId))
+                applyUiResult(LlmUiResult.SelectionChanged(newId))
             }
         }
-    }
-
-    private fun createDefaultAgent(targetId: String): Agent {
-        return Agent(
-            id = targetId,
-            name = if (targetId == GENERAL_CHAT_ID) "Общий чат" else "Новый агент",
-            systemPrompt = "You are a helpful assistant.",
-            temperature = 0.7,
-            provider = LLMProvider.Yandex(),
-            stopWord = "",
-            maxTokens = 2000,
-            mcpAllowedBindingIds = emptyList(),
-        )
     }
 
     suspend fun loadMcpAssignmentCatalog(): List<Pair<String, McpToolBindingRecord>> =
@@ -297,37 +234,33 @@ class LLMViewModel(
         }
     }
 
-    /**
-     * Принудительное обновление памяти.
-     * Использует Flow подход (Проблема №1) и защищено от race condition (Проблема №2).
-     */
     fun forceUpdateMemory() {
         val agentId = _state.value.selectedAgentId ?: return
-        
+
         viewModelScope.launch {
             agentManagementUseCase.forceUpdateMemory(agentId)
                 .collect { update ->
                     update.agentUpdate?.let { (id, transform) ->
-                        _state.updateIfChanged { state ->
-                            state.copy(
-                                agents = state.agents.updateAgent(id, transform)
-                            )
-                        }
+                        applyUiResult(LlmUiResult.MemoryAgentPatched(id, transform))
                     }
-                    _state.updateIfChanged { it.copy(isLoading = update.isLoading) }
+                    applyUiResult(LlmUiResult.MemoryLoading(update.isLoading))
                 }
         }
     }
 }
 
-private data class SelectedAgentUiSlice(
-    val targetId: String,
-    val snapshot: Agent?,
-    val isLoading: Boolean,
-    val activity: AgentActivity,
-    val phaseHint: PhaseStatusHint?,
-    val streamingPreview: String,
-)
+private fun defaultAgentForToolbar(targetId: String): Agent {
+    return Agent(
+        id = targetId,
+        name = if (targetId == GENERAL_CHAT_ID) "Общий чат" else "Новый агент",
+        systemPrompt = "You are a helpful assistant.",
+        temperature = 0.7,
+        provider = LLMProvider.Yandex(),
+        stopWord = "",
+        maxTokens = 2000,
+        mcpAllowedBindingIds = emptyList(),
+    )
+}
 
 /**
  * Extension для MutableStateFlow, чтобы обновлять значение только при его изменении.

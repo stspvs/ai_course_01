@@ -7,17 +7,16 @@ import com.example.ai_develop.domain.chat.*
 import com.example.ai_develop.domain.task.*
 import com.example.ai_develop.domain.rag.*
 import com.example.ai_develop.domain.llm.*
+import com.example.ai_develop.presentation.mvi.TaskUiResult
+import com.example.ai_develop.presentation.mvi.TaskUiState
+import com.example.ai_develop.presentation.mvi.reduceTaskUiState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
-
-data class TaskUiState(
-    val isLoading: Boolean = false,
-    val error: Throwable? = null,
-    val isSending: Boolean = false
-)
 
 sealed interface TaskEffect {
     data class ShowError(val message: String) : TaskEffect
@@ -42,7 +41,7 @@ class TaskViewModel(
     private val deleteTaskUseCase: DeleteTaskUseCase,
     private val resetTaskUseCase: ResetTaskUseCase,
     private val getMessagesUseCase: GetMessagesUseCase,
-    private val chatStreamingUseCase: ChatStreamingUseCase,
+    private val agentChatSessionPort: AgentChatSessionPort,
     private val getAgentsUseCase: GetAgentsUseCase,
     private val agentFactory: DefaultAgentFactory,
     private val taskSagaCoordinator: TaskSagaCoordinator
@@ -51,16 +50,19 @@ class TaskViewModel(
     private val _uiState = MutableStateFlow(TaskUiState())
     val uiState: StateFlow<TaskUiState> = _uiState.asStateFlow()
 
+    private val uiMutex = Mutex()
+
     private val _effects = MutableSharedFlow<TaskEffect>()
     val effects = _effects.asSharedFlow()
 
     private val _selectedTaskId = MutableStateFlow<String?>(null)
     val selectedTaskId: StateFlow<String?> = _selectedTaskId.asStateFlow()
 
-    private val _streamingDraft = MutableStateFlow("")
-    val streamingDraft: StateFlow<String> = _streamingDraft.asStateFlow()
-
     private val sharing = SharingStarted.WhileSubscribed(5000)
+
+    val streamingDraft: StateFlow<String> = uiState
+        .map { it.streamingPreview }
+        .stateIn(viewModelScope, sharing, "")
 
     val tasks: StateFlow<List<TaskContext>> = getTasksUseCase()
         .stateIn(viewModelScope, sharing, emptyList())
@@ -70,19 +72,16 @@ class TaskViewModel(
 
     val activeAgent: StateFlow<AutonomousAgent?> = combine(
         _selectedTaskId,
-        chatStreamingUseCase.agentCacheGeneration,
+        agentChatSessionPort.agentCacheGeneration,
     ) { id, _ -> id }
         .mapLatest { id ->
             id?.let {
-                chatStreamingUseCase.ensureToolsLoaded()
-                chatStreamingUseCase.getOrCreateAgent(it, it)
+                agentChatSessionPort.ensureToolsLoaded()
+                agentChatSessionPort.getOrCreateAgent(it, it)
             }
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
-    /**
-     * Снимок выбранной задачи из потока БД, а не из [tasks] (stateIn может отставать на тик после save / смены выбора).
-     */
     val activeSagaContext: StateFlow<TaskContext?> = _selectedTaskId
         .flatMapLatest { id ->
             if (id == null) flowOf(null)
@@ -94,6 +93,44 @@ class TaskViewModel(
         .filterNotNull()
         .flatMapLatest { id -> getMessagesUseCase(id) }
         .stateIn(viewModelScope, sharing, emptyList())
+
+    init {
+        viewModelScope.launch {
+            combine(_selectedTaskId, agentChatSessionPort.agentCacheGeneration) { id, _ -> id }
+                .flatMapLatest { id ->
+                    if (id == null) {
+                        flowOf("")
+                    } else {
+                        flow {
+                            agentChatSessionPort.ensureToolsLoaded()
+                            emitAll(
+                                agentChatSessionPort.getOrCreateAgent(id, id).uiState.map { it.streamingPreview },
+                            )
+                        }
+                    }
+                }
+                .collect { preview ->
+                    applyTaskUiResult(TaskUiResult.StreamingPreview(preview))
+                }
+        }
+    }
+
+    private suspend fun applyTaskUiResult(result: TaskUiResult) {
+        uiMutex.withLock {
+            _uiState.value = reduceTaskUiState(_uiState.value, result)
+        }
+    }
+
+    private fun postTaskUiResult(result: TaskUiResult) {
+        viewModelScope.launch {
+            applyTaskUiResult(result)
+        }
+    }
+
+    private suspend fun applySendingAndClearError(isSending: Boolean) {
+        applyTaskUiResult(TaskUiResult.Error(null))
+        applyTaskUiResult(TaskUiResult.SendingChanged(isSending))
+    }
 
     /** Актуальная задача из БД; [tasks] может отставать из‑за асинхронной эмиссии SqlDelight. */
     private suspend fun latestTask(taskId: String): TaskContext? =
@@ -112,7 +149,6 @@ class TaskViewModel(
     }
 
     fun selectTask(taskId: String?) {
-        _streamingDraft.value = ""
         val previousId = _selectedTaskId.value
         if (previousId != null && previousId != taskId) {
             viewModelScope.launch {
@@ -124,7 +160,7 @@ class TaskViewModel(
                         taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(paused)
                     }
                 } catch (e: Exception) {
-                    _uiState.update { it.copy(error = e) }
+                    applyTaskUiResult(TaskUiResult.Error(e))
                 }
             }
         }
@@ -145,7 +181,7 @@ class TaskViewModel(
                 createTaskUseCase(newTask).getOrThrow()
                 selectTask(taskId)
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
+                applyTaskUiResult(TaskUiResult.Error(e))
                 _effects.emit(TaskEffect.ShowError(e.message ?: "Unknown error"))
             }
         }
@@ -157,7 +193,7 @@ class TaskViewModel(
                 updateTaskUseCase(task).getOrThrow()
                 taskSagaCoordinator.applyRuntimeLimitsAfterTaskSaved(task)
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
+                applyTaskUiResult(TaskUiResult.Error(e))
             }
         }
     }
@@ -171,7 +207,7 @@ class TaskViewModel(
                 }
                 deleteTaskUseCase(task).getOrThrow()
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
+                applyTaskUiResult(TaskUiResult.Error(e))
                 _effects.emit(TaskEffect.ShowError(e.message ?: "Unknown error"))
             }
         }
@@ -187,42 +223,28 @@ class TaskViewModel(
                 !task.isPaused &&
                 task.state.taskState == TaskState.PLANNING
             ) {
-                _uiState.update { it.copy(isSending = true, error = null) }
+                applySendingAndClearError(true)
                 try {
                     taskSagaCoordinator.getOrCreateSaga(task).handleUserMessage(cleanText)
                 } catch (e: Exception) {
-                    _uiState.update { it.copy(error = e) }
+                    applyTaskUiResult(TaskUiResult.Error(e))
                     _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send message"))
                 } finally {
-                    _uiState.update { it.copy(isSending = false) }
+                    applyTaskUiResult(TaskUiResult.SendingChanged(false))
                 }
                 return@launch
             }
 
-            _uiState.update { it.copy(isSending = true, error = null) }
-            _streamingDraft.value = ""
-            val buffer = StringBuilder()
-            var lastUiUpdateMillis = 0L
+            applySendingAndClearError(true)
             try {
-                chatStreamingUseCase.ensureToolsLoaded()
-                val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
-                agent.sendMessage(cleanText).collect { chunk ->
-                    buffer.append(chunk)
-                    val now = System.currentTimeMillis()
-                    if (now - lastUiUpdateMillis >= 48) {
-                        _streamingDraft.value = buffer.toString()
-                        lastUiUpdateMillis = now
-                    }
-                }
-                if (buffer.isNotEmpty()) {
-                    _streamingDraft.value = buffer.toString()
-                }
+                agentChatSessionPort.ensureToolsLoaded()
+                val agent = agentChatSessionPort.getOrCreateAgent(taskId, taskId)
+                agent.sendMessage(cleanText).collect()
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
+                applyTaskUiResult(TaskUiResult.Error(e))
                 _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send message"))
             } finally {
-                _streamingDraft.value = ""
-                _uiState.update { it.copy(isSending = false) }
+                applyTaskUiResult(TaskUiResult.SendingChanged(false))
             }
         }
     }
@@ -233,7 +255,7 @@ class TaskViewModel(
                 val task = latestTask(taskId) ?: return@launch
                 taskSagaCoordinator.getOrCreateSaga(task).confirmPlan()
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
+                applyTaskUiResult(TaskUiResult.Error(e))
                 _effects.emit(TaskEffect.ShowError(e.message ?: "confirmPlan failed"))
             }
         }
@@ -252,51 +274,37 @@ class TaskViewModel(
                     val messages = getMessagesUseCase(taskId).first()
                     if (messages.isEmpty()) {
                         if (refreshed.isReadyToRun) {
-                            _uiState.update { it.copy(isSending = true, error = null) }
+                            applySendingAndClearError(true)
                             try {
                                 saga.start()
                             } catch (e: Exception) {
-                                _uiState.update { it.copy(error = e) }
+                                applyTaskUiResult(TaskUiResult.Error(e))
                                 _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga start failed"))
                             } finally {
-                                _uiState.update { it.copy(isSending = false) }
+                                applyTaskUiResult(TaskUiResult.SendingChanged(false))
                             }
                         } else {
-                            _uiState.update { it.copy(isSending = true, error = null) }
-                            _streamingDraft.value = ""
-                            val buffer = StringBuilder()
-                            var lastUiUpdateMillis = 0L
+                            applySendingAndClearError(true)
                             try {
-                                chatStreamingUseCase.ensureToolsLoaded()
-                                val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
-                                agent.sendWelcomeMessage().collect { chunk ->
-                                    buffer.append(chunk)
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastUiUpdateMillis >= 48) {
-                                        _streamingDraft.value = buffer.toString()
-                                        lastUiUpdateMillis = now
-                                    }
-                                }
-                                if (buffer.isNotEmpty()) {
-                                    _streamingDraft.value = buffer.toString()
-                                }
+                                agentChatSessionPort.ensureToolsLoaded()
+                                val agent = agentChatSessionPort.getOrCreateAgent(taskId, taskId)
+                                agent.sendWelcomeMessage().collect()
                             } catch (e: Exception) {
-                                _uiState.update { it.copy(error = e) }
+                                applyTaskUiResult(TaskUiResult.Error(e))
                                 _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send welcome"))
                             } finally {
-                                _streamingDraft.value = ""
-                                _uiState.update { it.copy(isSending = false) }
+                                applyTaskUiResult(TaskUiResult.SendingChanged(false))
                             }
                         }
                     } else if (refreshed.isReadyToRun) {
-                        _uiState.update { it.copy(isSending = true, error = null) }
+                        applySendingAndClearError(true)
                         try {
                             saga.start()
                         } catch (e: Exception) {
-                            _uiState.update { it.copy(error = e) }
+                            applyTaskUiResult(TaskUiResult.Error(e))
                             _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga resume failed"))
                         } finally {
-                            _uiState.update { it.copy(isSending = false) }
+                            applyTaskUiResult(TaskUiResult.SendingChanged(false))
                         }
                     }
                     return@launch
@@ -315,55 +323,41 @@ class TaskViewModel(
 
                 if (messagesBeforeUnpause.isEmpty()) {
                     if (refreshed.isReadyToRun) {
-                        _uiState.update { it.copy(isSending = true, error = null) }
+                        applySendingAndClearError(true)
                         try {
                             saga.start()
                         } catch (e: Exception) {
-                            _uiState.update { it.copy(error = e) }
+                            applyTaskUiResult(TaskUiResult.Error(e))
                             _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga start failed"))
                         } finally {
-                            _uiState.update { it.copy(isSending = false) }
+                            applyTaskUiResult(TaskUiResult.SendingChanged(false))
                         }
                     } else {
-                        _uiState.update { it.copy(isSending = true, error = null) }
-                        _streamingDraft.value = ""
-                        val buffer = StringBuilder()
-                        var lastUiUpdateMillis = 0L
+                        applySendingAndClearError(true)
                         try {
-                            chatStreamingUseCase.ensureToolsLoaded()
-                            val agent = chatStreamingUseCase.getOrCreateAgent(taskId, taskId)
-                            agent.sendWelcomeMessage().collect { chunk ->
-                                buffer.append(chunk)
-                                val now = System.currentTimeMillis()
-                                if (now - lastUiUpdateMillis >= 48) {
-                                    _streamingDraft.value = buffer.toString()
-                                    lastUiUpdateMillis = now
-                                }
-                            }
-                            if (buffer.isNotEmpty()) {
-                                _streamingDraft.value = buffer.toString()
-                            }
+                            agentChatSessionPort.ensureToolsLoaded()
+                            val agent = agentChatSessionPort.getOrCreateAgent(taskId, taskId)
+                            agent.sendWelcomeMessage().collect()
                         } catch (e: Exception) {
-                            _uiState.update { it.copy(error = e) }
+                            applyTaskUiResult(TaskUiResult.Error(e))
                             _effects.emit(TaskEffect.ShowError(e.message ?: "Failed to send welcome"))
                         } finally {
-                            _streamingDraft.value = ""
-                            _uiState.update { it.copy(isSending = false) }
+                            applyTaskUiResult(TaskUiResult.SendingChanged(false))
                         }
                     }
                 } else if (refreshed.isReadyToRun) {
-                    _uiState.update { it.copy(isSending = true, error = null) }
+                    applySendingAndClearError(true)
                     try {
                         saga.start()
                     } catch (e: Exception) {
-                        _uiState.update { it.copy(error = e) }
+                        applyTaskUiResult(TaskUiResult.Error(e))
                         _effects.emit(TaskEffect.ShowError(e.message ?: "Task saga resume failed"))
                     } finally {
-                        _uiState.update { it.copy(isSending = false) }
+                        applyTaskUiResult(TaskUiResult.SendingChanged(false))
                     }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
+                applyTaskUiResult(TaskUiResult.Error(e))
             }
         }
     }
@@ -371,7 +365,6 @@ class TaskViewModel(
     fun resetTask(taskId: String) {
         viewModelScope.launch {
             try {
-                _streamingDraft.value = ""
                 taskSagaCoordinator.evict(taskId)
                 resetTaskUseCase(taskId).getOrThrow()
                 val task = latestTask(taskId) ?: return@launch
@@ -388,7 +381,7 @@ class TaskViewModel(
                     )
                 ).getOrThrow()
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e) }
+                applyTaskUiResult(TaskUiResult.Error(e))
             }
         }
     }

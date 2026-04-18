@@ -22,7 +22,7 @@ open class ChatStreamingUseCase(
     private val mcpRepository: McpRepository,
     private val ragContextRetriever: RagContextRetriever? = null,
     private val ragPipelineSettingsRepository: RagPipelineSettingsRepository? = null,
-) {
+) : AgentChatSessionPort {
     private val activeAgents = mutableMapOf<String, AutonomousAgent>()
 
     /**
@@ -30,7 +30,7 @@ open class ChatStreamingUseCase(
      * иначе остаётся отменённый [AutonomousAgent] и чат перестаёт получать сообщения.
      */
     private val _agentCacheGeneration = MutableStateFlow(0L)
-    val agentCacheGeneration: StateFlow<Long> = _agentCacheGeneration.asStateFlow()
+    override val agentCacheGeneration: StateFlow<Long> = _agentCacheGeneration.asStateFlow()
 
     private val engine = AgentEngine(repository, memoryManager) { agent -> agentToolRegistry.toolsFor(agent) }
 
@@ -38,7 +38,7 @@ open class ChatStreamingUseCase(
      * Подгружает MCP-привязки из БД перед запросом к LLM.
      * Иначе первый ответ может уйти с пустым списком инструментов (гонка с асинхронным init).
      */
-    open suspend fun ensureToolsLoaded() {
+    override suspend fun ensureToolsLoaded() {
         agentToolRegistry.reloadFromDatabase()
     }
 
@@ -49,13 +49,13 @@ open class ChatStreamingUseCase(
     }
 
     /** Имена инструментов для [agent] (базовые + назначенные MCP). */
-    open suspend fun toolNamesForAgent(agent: Agent): List<String> {
+    override suspend fun toolNamesForAgent(agent: Agent): List<String> {
         ensureToolsLoaded()
         return agentToolRegistry.toolsFor(agent).map { it.name }.sorted()
     }
 
     /** Эмит при старте и при любых изменениях MCP в БД — для пересчёта списка инструментов в UI. */
-    open fun observeMcpRegistryRefresh(): Flow<Unit> = merge(
+    override fun observeMcpRegistryRefresh(): Flow<Unit> = merge(
         flowOf(Unit),
         mcpRepository.observeMcpRegistryChanges(),
     )
@@ -63,7 +63,9 @@ open class ChatStreamingUseCase(
     /**
      * Получает или создает автономного агента.
      */
-    open fun getOrCreateAgent(agentId: String, taskIdForMessagePersistence: String? = null): AutonomousAgent {
+    fun getOrCreateAgent(agentId: String): AutonomousAgent = getOrCreateAgent(agentId, null)
+
+    override fun getOrCreateAgent(agentId: String, taskIdForMessagePersistence: String?): AutonomousAgent {
         return activeAgents.getOrPut(agentId) {
             AutonomousAgent(
                 agentId,
@@ -78,7 +80,7 @@ open class ChatStreamingUseCase(
     }
 
     /** Сбрасывает кэш агента после смены данных в БД (например сброс задачи). */
-    open fun evictAgent(agentId: String) {
+    override fun evictAgent(agentId: String) {
         activeAgents.remove(agentId)?.dispose()
         _agentCacheGeneration.update { it + 1L }
     }

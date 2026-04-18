@@ -176,6 +176,7 @@ val commonModule = module {
             ragPipelineSettingsRepository = get(),
         )
     }
+    single<AgentChatSessionPort> { get<ChatStreamingUseCase>() }
     singleOf(::SummarizeChatUseCase)
     singleOf(::ExtractFactsUseCase)
     singleOf(::UpdateWorkingMemoryUseCase)
@@ -209,7 +210,7 @@ val commonModule = module {
             get(),
             get(),
             get(),
-            get(),
+            get<AgentChatSessionPort>(),
             get(),
             get(),
             get<TaskSagaCoordinator>()
