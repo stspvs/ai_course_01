@@ -44,7 +44,7 @@ class AutonomousAgentStressTest {
         agent.sendMessage("Hi").collect()
         advanceUntilIdle()
 
-        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val assistant = agent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
         assertTrue(assistant.message.contains("Hello world"), assistant.message)
     }
@@ -78,7 +78,7 @@ class AutonomousAgentStressTest {
             engineWithMcp.streamFromPreparedCallCount,
             "Первый ответ с [TOOL:], затем обязательный раунд продолжения после MCP-батча"
         )
-        val assistantTexts = agent.agent.value?.messages
+        val assistantTexts = agent.uiState.value.agent?.messages
             ?.filter { it.role == "assistant" }
             ?.map { it.message }
             .orEmpty()
@@ -114,7 +114,7 @@ class AutonomousAgentStressTest {
         agent.sendMessage("run both").collect()
         advanceUntilIdle()
 
-        val assistantTexts = agent.agent.value?.messages
+        val assistantTexts = agent.uiState.value.agent?.messages
             ?.filter { it.role == "assistant" }
             ?.map { it.message }
             .orEmpty()
@@ -163,7 +163,7 @@ class AutonomousAgentStressTest {
             engineMixed.streamFromPreparedCallCount,
             "LLM: ответ с двумя TOOL, затем финальный ответ после write_file"
         )
-        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val assistant = agent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
         assertTrue(assistant.message.contains("Готово"), assistant.message)
     }
@@ -180,7 +180,7 @@ class AutonomousAgentStressTest {
         val output = agent.sendMessage("Run test").toList()
         advanceUntilIdle()
 
-        val messages = agent.agent.value?.messages ?: emptyList()
+        val messages = agent.uiState.value.agent?.messages ?: emptyList()
         val assistants = messages.filter { it.role == "assistant" }
         assertEquals(1, assistants.size, "After tool + final LLM answer there must be one assistant bubble, got: $messages")
         assertEquals(2, messages.size, "Expected user + assistant, got ${messages.size}")
@@ -198,7 +198,7 @@ class AutonomousAgentStressTest {
         agent.sendMessage("My name is John").collect()
         advanceUntilIdle()
 
-        val facts = agent.agent.value?.workingMemory?.extractedFacts?.facts ?: emptyList()
+        val facts = agent.uiState.value.agent?.workingMemory?.extractedFacts?.facts ?: emptyList()
         assertTrue(facts.contains("Name: John"), "Fact 'John' should be in working memory")
     }
 
@@ -216,7 +216,7 @@ class AutonomousAgentStressTest {
 
         assertTrue(output.any { it.contains("你好") }, "Should handle Chinese characters")
         assertTrue(output.any { it.contains("🚀") }, "Should handle emojis")
-        val messages = agent.agent.value?.messages ?: emptyList()
+        val messages = agent.uiState.value.agent?.messages ?: emptyList()
         assertTrue(
             messages.any { m ->
                 m.role == "assistant" && m.message.contains("ghost_tool") &&
@@ -235,8 +235,8 @@ class AutonomousAgentStressTest {
         agent.sendMessage("").collect()
         advanceUntilIdle()
 
-        assertFalse(agent.isProcessing.value, "Processing should be false after completion")
-        val users = agent.agent.value?.messages?.filter { it.role == "user" } ?: emptyList()
+        assertFalse(agent.uiState.value.isProcessing, "Processing should be false after completion")
+        val users = agent.uiState.value.agent?.messages?.filter { it.role == "user" } ?: emptyList()
         assertEquals(1, users.size)
         assertEquals("", users.single().message)
     }
@@ -251,7 +251,7 @@ class AutonomousAgentStressTest {
         agent.sendMessage(ws).collect()
         advanceUntilIdle()
 
-        val users = agent.agent.value?.messages?.filter { it.role == "user" } ?: emptyList()
+        val users = agent.uiState.value.agent?.messages?.filter { it.role == "user" } ?: emptyList()
         assertEquals(1, users.size)
         assertEquals(ws, users.single().message)
     }
@@ -272,7 +272,7 @@ class AutonomousAgentStressTest {
         advanceUntilIdle()
 
         assertTrue(output.any { it.contains("Error: API connection lost") }, "Should report error")
-        assertFalse(agent.isProcessing.value, "Processing should be false")
+        assertFalse(agent.uiState.value.isProcessing, "Processing should be false")
     }
 
     @Test
@@ -298,7 +298,7 @@ class AutonomousAgentStressTest {
             engineWithStub.streamFromPreparedCallCount,
             "После одного MCP без второго [TOOL:] в том же ответе — второй раунд LLM (продолжение без «продолжай»)"
         )
-        val messages = agent.agent.value?.messages ?: emptyList()
+        val messages = agent.uiState.value.agent?.messages ?: emptyList()
         assertTrue(messages.any { it.message.contains("Headlines: ok") }, "Tool output should be in history")
     }
 
@@ -320,7 +320,7 @@ class AutonomousAgentStressTest {
         agent.sendMessage("please").collect()
         advanceUntilIdle()
 
-        val texts = agent.agent.value?.messages?.map { it.message } ?: emptyList()
+        val texts = agent.uiState.value.agent?.messages?.map { it.message } ?: emptyList()
         assertTrue(
             texts.none { it.contains("[TOOL:") },
             "Raw [TOOL: …] must not remain after duplicate follow-up, got: $texts"
@@ -347,7 +347,7 @@ class AutonomousAgentStressTest {
         agent.sendMessage("trigger").collect()
         advanceUntilIdle()
 
-        val messages = agent.agent.value?.messages ?: emptyList()
+        val messages = agent.uiState.value.agent?.messages ?: emptyList()
         assertTrue(
             messages.any { m ->
                 m.role == "assistant" && m.message.contains("Tool error") && m.message.contains("intentional")
@@ -372,7 +372,7 @@ class AutonomousAgentStressTest {
         joinAll(job1, job2)
         advanceUntilIdle()
 
-        val messages = agent.agent.value?.messages ?: emptyList()
+        val messages = agent.uiState.value.agent?.messages ?: emptyList()
         val userMessages = messages.filter { it.role == "user" }
         assertEquals(2, userMessages.size, "Both user messages should be present")
     }
@@ -390,7 +390,7 @@ class AutonomousAgentStressTest {
             advanceUntilIdle()
         }
 
-        val userMessages = agent.agent.value?.messages?.filter { it.role == "user" } ?: emptyList()
+        val userMessages = agent.uiState.value.agent?.messages?.filter { it.role == "user" } ?: emptyList()
         assertEquals(10, userMessages.size)
         assertEquals("msg-9", userMessages.last().message)
     }

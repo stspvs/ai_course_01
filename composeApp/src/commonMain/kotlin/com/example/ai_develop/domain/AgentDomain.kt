@@ -81,4 +81,9 @@ data class AgentState(
     val ragEnabled: Boolean = true,
     /** Id привязок MCP ([McpToolBindingEntity.id]), разрешённых этому агенту; пустой список — без MCP. */
     val mcpAllowedBindingIds: List<String> = emptyList(),
+    /**
+     * Если true — в промпт к LLM добавляется блок стадии workflow и доступны переходы [AgentStateMachine];
+     * если false — обычный чат без этой семантики (стадия в БД может оставаться технической).
+     */
+    val workflowStagesEnabled: Boolean = true,
 )

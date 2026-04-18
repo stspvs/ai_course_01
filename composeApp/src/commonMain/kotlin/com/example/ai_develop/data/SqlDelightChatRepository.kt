@@ -83,6 +83,7 @@ class SqlDelightChatRepository(
                 ListSerializer(String.serializer()),
                 state.mcpAllowedBindingIds,
             ),
+            workflowStagesEnabled = state.workflowStagesEnabled,
         )
     }
 
@@ -164,6 +165,7 @@ class SqlDelightChatRepository(
     }
 
     override suspend fun saveAgent(agent: Agent): Result<Unit> = runCatching {
+        val existing = getAgentState(agent.id)
         val state = AgentState(
             agentId = agent.id,
             name = agent.name,
@@ -177,11 +179,13 @@ class SqlDelightChatRepository(
             messages = agent.messages,
             ragEnabled = agent.ragEnabled,
             mcpAllowedBindingIds = agent.mcpAllowedBindingIds,
+            workflowStagesEnabled = existing?.workflowStagesEnabled ?: true,
         )
         saveAgentState(state)
     }
 
     override suspend fun saveAgentMetadata(agent: Agent): Result<Unit> = runCatching {
+        val existing = getAgentState(agent.id)
         val state = AgentState(
             agentId = agent.id,
             name = agent.name,
@@ -194,6 +198,7 @@ class SqlDelightChatRepository(
             workingMemory = agent.workingMemory,
             ragEnabled = agent.ragEnabled,
             mcpAllowedBindingIds = agent.mcpAllowedBindingIds,
+            workflowStagesEnabled = existing?.workflowStagesEnabled ?: true,
         )
         persistAgentStateRow(state)
     }
@@ -412,6 +417,7 @@ class SqlDelightChatRepository(
             },
             ragEnabled = it.ragEnabled,
             mcpAllowedBindingIds = decodeMcpAllowedBindingIds(it.mcpAllowedBindingIdsJson),
+            workflowStagesEnabled = it.workflowStagesEnabled,
         )
     }
 

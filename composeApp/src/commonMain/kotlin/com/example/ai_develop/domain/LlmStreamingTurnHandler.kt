@@ -23,7 +23,6 @@ class LlmStreamingTurnHandler(
         timing: PhaseTimingCollector?,
         getAgent: () -> Agent?,
         updateAgent: suspend ((Agent?) -> Agent?) -> Unit,
-        emitPartial: suspend (String) -> Unit,
         setActivity: (AgentActivity) -> Unit,
         onDeliveryChange: (AgentTextDelivery) -> Unit,
         onStreamingChunk: (String) -> Unit,
@@ -49,7 +48,6 @@ class LlmStreamingTurnHandler(
                     sb.append(chunk)
                     if (!ragJsonMode) {
                         timing?.onFirstTokenIfNeeded()
-                        emitPartial(chunk)
                         collector.emit(chunk)
                         onStreamingChunk(chunk)
                     } else {
@@ -63,7 +61,6 @@ class LlmStreamingTurnHandler(
                 consumeStream()
             }
         } catch (e: Exception) {
-            emitPartial("Error during streaming: ${e.message}")
             onDeliveryChange(AgentTextDelivery.Error)
             throw e
         } finally {
@@ -94,7 +91,6 @@ class LlmStreamingTurnHandler(
             }
         }
         if (ragJsonMode) {
-            emitPartial(content)
             collector.emit(content)
             onRagJsonParsed()
         }

@@ -240,7 +240,7 @@ class AutonomousAgentRagTest {
         advanceUntilIdle()
         agent.sendMessage("hello").collect { }
         advanceUntilIdle()
-        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val assistant = agent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
         assertEquals("plain reply", assistant.message.trim())
         assertFalse(assistant.llmRequestSnapshot?.isJsonMode == true)
@@ -265,7 +265,7 @@ class AutonomousAgentRagTest {
         advanceUntilIdle()
         agent.sendMessage("query").collect { }
         advanceUntilIdle()
-        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val assistant = agent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
         assertFalse(assistant.llmRequestSnapshot?.isJsonMode == true)
         val attr = assistant.llmRequestSnapshot?.ragAttribution
@@ -301,7 +301,7 @@ class AutonomousAgentRagTest {
         advanceUntilIdle()
         agent.sendMessage("match").collect { }
         advanceUntilIdle()
-        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val assistant = agent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
         assertTrue(assistant.llmRequestSnapshot?.isJsonMode == true)
         val attr = assistant.llmRequestSnapshot?.ragAttribution
@@ -343,7 +343,7 @@ class AutonomousAgentRagTest {
         advanceUntilIdle()
         assertEquals(1, repo.rewriteQueryForRagCalls)
         assertEquals("short", repo.lastRewriteInput)
-        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val assistant = agent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
         assertTrue(assistant.llmRequestSnapshot?.ragAttribution?.debug?.rewriteApplied == true)
         agent.dispose()
@@ -377,7 +377,7 @@ class AutonomousAgentRagTest {
         agent.sendMessage("hello").collect { }
         advanceUntilIdle()
         assertEquals(0, repo.rewriteQueryForRagCalls)
-        val assistant = agent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val assistant = agent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(assistant)
         assertEquals("plain reply", assistant.message.trim())
         assertFalse(assistant.llmRequestSnapshot?.isJsonMode == true)

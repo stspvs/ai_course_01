@@ -80,7 +80,7 @@ class AutonomousAgentTest {
         autonomousAgent.refreshAgent()
         advanceUntilIdle()
 
-        val agentValue = autonomousAgent.agent.value
+        val agentValue = autonomousAgent.uiState.value.agent
         assertNotNull(agentValue)
         assertEquals("Test Agent", agentValue.name)
         
@@ -109,21 +109,26 @@ class AutonomousAgentTest {
         autonomousAgent.refreshAgent()
         advanceUntilIdle()
 
-        val tokens = mutableListOf<String>()
+        val streamDeltas = mutableListOf<String>()
+        var prevPreview = ""
         val collectJob = launch(UnconfinedTestDispatcher(testScheduler)) {
-            autonomousAgent.partialResponse.collect { 
-                tokens.add(it) 
+            autonomousAgent.uiState.collect { s ->
+                val p = s.streamingPreview
+                if (p.startsWith(prevPreview) && p.length > prevPreview.length) {
+                    streamDeltas.add(p.substring(prevPreview.length))
+                }
+                prevPreview = p
             }
         }
 
         autonomousAgent.sendMessage("Hello").collect()
         advanceUntilIdle()
 
-        assertTrue(tokens.isNotEmpty(), "Tokens should not be empty")
-        assertEquals("Mock ", tokens[0])
-        assertEquals("Response", tokens[1])
+        assertTrue(streamDeltas.isNotEmpty(), "Streaming preview deltas should not be empty")
+        assertEquals("Mock ", streamDeltas[0])
+        assertEquals("Response", streamDeltas[1])
         
-        val messages = autonomousAgent.agent.value?.messages ?: emptyList()
+        val messages = autonomousAgent.uiState.value.agent?.messages ?: emptyList()
         assertTrue(messages.size >= 2, "Should have at least user and assistant messages")
         assertEquals("Mock Response", messages.last().message)
         
@@ -141,7 +146,7 @@ class AutonomousAgentTest {
         autonomousAgent.sendMessage("Hello").collect()
         advanceUntilIdle()
 
-        val lastAssistant = autonomousAgent.agent.value?.messages?.lastOrNull { it.role == "assistant" }
+        val lastAssistant = autonomousAgent.uiState.value.agent?.messages?.lastOrNull { it.role == "assistant" }
         assertNotNull(lastAssistant?.phaseTimings)
         assertTrue(lastAssistant!!.phaseTimings!!.totalMs >= 0L)
         assertEquals(

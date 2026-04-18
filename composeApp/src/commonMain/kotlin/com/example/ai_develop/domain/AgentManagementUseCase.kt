@@ -170,7 +170,7 @@ open class AgentManagementUseCase(
         try {
             chatStreamingUseCase.ensureToolsLoaded()
             val autonomousAgent = chatStreamingUseCase.getOrCreateAgent(agentId)
-            val currentAgent = autonomousAgent.agent.value
+            val currentAgent = autonomousAgent.uiState.value.agent
             
             if (currentAgent != null) {
                 val wmResult = updateWorkingMemoryUseCase.update(currentAgent)

@@ -2,8 +2,7 @@ package com.example.ai_develop
 
 import com.example.ai_develop.domain.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.flow.collect
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -26,7 +25,7 @@ class CliAgentManager(
         
         // Подписка на обновления состояния агента для вывода в консоль (опционально)
         scope.launch {
-            agent.agent.collect { state ->
+            agent.uiState.collect {
                 // Можно выводить уведомления о смене стадии здесь
             }
         }
@@ -63,7 +62,7 @@ class CliAgentManager(
     }
 
     private suspend fun printState() {
-        val currentState = agent.agent.value
+        val currentState = agent.uiState.value.agent
         println("📊 Current Stage: ${currentState?.workingMemory?.currentTask ?: "N/A"}")
         // В AutonomousAgent мы можем получить доступ к FSM или через Snapshot
         val dbState = repository.getAgentState(agentId)
@@ -113,24 +112,30 @@ class CliAgentManager(
 
     private suspend fun handleUserMessage(message: String) {
         println("🤖 Agent is processing...")
-        
-        // Запускаем отправку в фоне через агента
-        val job = scope.launch {
-            agent.sendMessage(message)
+        var prevPreviewLen = 0
+        val previewJob = scope.launch {
+            agent.uiState.collect { s ->
+                val p = s.streamingPreview
+                if (p.length > prevPreviewLen) {
+                    print(p.substring(prevPreviewLen))
+                    prevPreviewLen = p.length
+                } else if (p.length < prevPreviewLen) {
+                    prevPreviewLen = p.length
+                }
+            }
         }
-
-        // Слушаем поток токенов для вывода в консоль
-        agent.partialResponse.takeWhile { agent.isProcessing.value }.collect { chunk ->
-            print(chunk)
+        val sendJob = scope.launch {
+            agent.sendMessage(message).collect()
         }
-        
-        job.join()
+        sendJob.join()
+        previewJob.cancel()
+        agent.uiState.value.lastStreamError?.let { println(it) }
         println("\n")
         printRagSourcesFromLastAssistant()
     }
 
     private fun printRagSourcesFromLastAssistant() {
-        val state = agent.agent.value
+        val state = agent.uiState.value.agent
         val lastAssistant = state?.messages?.lastOrNull { it.role.equals("assistant", ignoreCase = true) }
         val attr = lastAssistant?.llmRequestSnapshot?.ragAttribution
         println("--- Источники (RAG) ---")

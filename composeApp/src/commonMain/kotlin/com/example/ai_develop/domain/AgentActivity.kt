@@ -22,7 +22,7 @@ sealed class AgentActivity {
     @SerialName("runningTool")
     data class RunningTool(val toolName: String) : AgentActivity()
 
-    /** Ожидание / синхронизация между шагами при активном [AutonomousAgent.isProcessing]. */
+    /** Ожидание / синхронизация между шагами при активной обработке ([AutonomousAgentUiState.isProcessing] в [AutonomousAgent.uiState]). */
     @Serializable
     @SerialName("working")
     data object Working : AgentActivity()

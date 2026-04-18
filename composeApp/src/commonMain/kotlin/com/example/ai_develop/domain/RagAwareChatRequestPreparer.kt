@@ -20,14 +20,25 @@ class RagAwareChatRequestPreparer(
     ): PreparedLlmRequest {
         val agent = snapshot.agent
         val stage = snapshot.stage
+        val injectStage = snapshot.injectWorkflowStageIntoPrompt
         val persistedRag = repository.getAgentState(agentId)?.ragEnabled
         val a = agent.copy(ragEnabled = persistedRag ?: agent.ragEnabled)
         if (!a.ragEnabled) {
-            return engine.prepareChatRequest(a, stage, isJsonMode = false)
+            return engine.prepareChatRequest(
+                a,
+                stage,
+                isJsonMode = false,
+                injectWorkflowStageIntoPrompt = injectStage,
+            )
         }
         val last = a.messages.lastOrNull()
         if (last == null || last.role.lowercase() != "user") {
-            return engine.prepareChatRequest(a, stage, isJsonMode = false)
+            return engine.prepareChatRequest(
+                a,
+                stage,
+                isJsonMode = false,
+                injectWorkflowStageIntoPrompt = injectStage,
+            )
         }
         val query = last.message.trim()
         if (query.isEmpty()) {
@@ -38,12 +49,18 @@ class RagAwareChatRequestPreparer(
                 ragContext = null,
                 ragAttribution = RagAttribution(used = false),
                 ragStructuredOutput = false,
+                injectWorkflowStageIntoPrompt = injectStage,
             )
         }
         val config = runCatching { ragPipelineSettingsRepository?.getConfig() }.getOrNull()
             ?: RagRetrievalConfig.Default
         if (!config.globalRagEnabled) {
-            return engine.prepareChatRequest(a, stage, isJsonMode = false)
+            return engine.prepareChatRequest(
+                a,
+                stage,
+                isJsonMode = false,
+                injectWorkflowStageIntoPrompt = injectStage,
+            )
         }
         var retrievalQuery = query
         var rewriteApplied = false

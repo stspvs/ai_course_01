@@ -495,12 +495,10 @@ class LLMViewModelTest {
 
         fun emitAgent(agent: Agent) {
             uiStateHub.update { it.copy(agent = agent) }
-            syncMirrorsFromHub()
         }
 
         fun setProcessing(loading: Boolean) {
             uiStateHub.update { it.copy(isProcessing = loading) }
-            syncMirrorsFromHub()
         }
 
         override suspend fun refreshAgent() {
@@ -522,7 +520,6 @@ class LLMViewModelTest {
                 Agent(id = agentId, name = "New Agent", systemPrompt = "", temperature = 0.7, provider = LLMProvider.Yandex(), stopWord = "", maxTokens = 2000)
             }
             uiStateHub.update { it.copy(agent = agent) }
-            syncMirrorsFromHub()
         }
     }
 

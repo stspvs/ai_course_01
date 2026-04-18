@@ -4,8 +4,18 @@ package com.example.ai_develop.domain
 
 import com.example.ai_develop.data.RagContextRetriever
 import com.example.ai_develop.data.RagPipelineSettingsRepository
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.uuid.Uuid
@@ -40,7 +50,9 @@ open class AutonomousAgent(
     private val taskIdForMessagePersistence: String? = null,
     private val ragContextRetriever: RagContextRetriever? = null,
     private val ragPipelineSettingsRepository: RagPipelineSettingsRepository? = null,
-    protected val uiStateHub: MutableStateFlow<AutonomousAgentUiState> = MutableStateFlow(AutonomousAgentUiState()),
+    protected val uiStateHub: MutableStateFlow<AutonomousAgentUiState> = MutableStateFlow(
+        AutonomousAgentUiState()
+    ),
 ) {
     /** Дочерний job: при [dispose] отменяет все корутины агента. */
     private val job = SupervisorJob(externalScope.coroutineContext[Job])
@@ -49,32 +61,9 @@ open class AutonomousAgent(
     private val scope = CoroutineScope(externalScope.coroutineContext.minusKey(Job) + job)
 
     /**
-     * Главный поток состояния для интерфейса: агент, флаги обработки, активность, превью стрима, подсказки фаз, ошибки, тайминги.
-     * Имеет смысл подписываться на него вместо разрозненных [agent] / [isProcessing] / [agentActivity].
+     * Единственный публичный поток наблюдаемых данных: агент, флаги обработки, активность, превью стрима, подсказки фаз, ошибки, тайминги.
      */
     val uiState: StateFlow<AutonomousAgentUiState> = uiStateHub.asStateFlow()
-
-    /** Зеркало [AutonomousAgentUiState.agent] для обратной совместимости и тестов. */
-    private val _agentMirror = MutableStateFlow<Agent?>(uiStateHub.value.agent)
-
-    /** Текущий агент с сообщениями и настройками; значения синхронизированы с [uiState]. */
-    open val agent: StateFlow<Agent?> = _agentMirror.asStateFlow()
-
-    /** Поток фрагментов ответа модели по мере генерации (для CLI и старых подписчиков). Превью в UI — [AutonomousAgentUiState.streamingPreview]. */
-    private val _partialResponse = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 64)
-    val partialResponse: SharedFlow<String> = _partialResponse.asSharedFlow()
-
-    /** Зеркало [AutonomousAgentUiState.isProcessing]. */
-    private val _isProcessingMirror = MutableStateFlow(uiStateHub.value.isProcessing)
-
-    /** Идёт ли сейчас обработка пользовательского сообщения или приветствия. */
-    open val isProcessing: StateFlow<Boolean> = _isProcessingMirror.asStateFlow()
-
-    /** Зеркало [AutonomousAgentUiState.agentActivity]. */
-    private val _agentActivityMirror = MutableStateFlow(uiStateHub.value.agentActivity)
-
-    /** Что делает агент сейчас: простой, стриминг, вызов инструмента и т.д. */
-    open val agentActivity: StateFlow<AgentActivity> = _agentActivityMirror.asStateFlow()
 
     /** Конечный автомат по стадиям агента (планирование, исполнение…); обновляется из [AgentState] в БД. */
     private val _stateMachine = MutableStateFlow<AgentStateMachine?>(null)
@@ -118,22 +107,9 @@ open class AutonomousAgent(
         loadAndSubscribe()
     }
 
-    /**
-     * Атомарно обновляет [uiStateHub] и подтягивает [agent], [isProcessing], [agentActivity] из нового снимка.
-     */
+    /** Атомарно обновляет [uiStateHub]. */
     private fun patchUi(transform: (AutonomousAgentUiState) -> AutonomousAgentUiState) {
         uiStateHub.update(transform)
-        syncMirrorsFromHub()
-    }
-
-    /**
-     * Вызывать после ручного [uiStateHub.update] в тестах/фейках, чтобы зеркальные [StateFlow] не отставали от хаба.
-     */
-    protected fun syncMirrorsFromHub() {
-        val s = uiStateHub.value
-        _agentMirror.value = s.agent
-        _isProcessingMirror.value = s.isProcessing
-        _agentActivityMirror.value = s.agentActivity
     }
 
     /** Отменяет предыдущую подписку и заново: [refreshAgent], затем поток обновлений из БД. */
@@ -209,7 +185,8 @@ open class AutonomousAgent(
      * Переводит агента на следующую стадию FSM и сохраняет изменения в репозитории при успехе.
      */
     suspend fun transitionTo(nextStage: AgentStage): Result<AgentState> {
-        val fsm = _stateMachine.value ?: return Result.failure(IllegalStateException("Agent not initialized"))
+        val fsm = _stateMachine.value
+            ?: return Result.failure(IllegalStateException("Agent not initialized"))
         val result = fsm.transitionTo(nextStage)
         if (result.isSuccess) {
             val currentAgent = uiStateHub.value.agent ?: return result
@@ -222,7 +199,7 @@ open class AutonomousAgent(
      * Полный сценарий ответа на сообщение пользователя: запись user-сообщения, стриминг LLM (direct или RAG),
      * при необходимости инструменты и повторные раунды, тайминги на последнем ответе ассистента, обслуживание памяти.
      *
-     * Эмитит те же текстовые чанки, что уходят в [partialResponse] (для подписчиков [Flow]).
+     * Возвращает [Flow] для запуска сценария и ожидания завершения; превью и итог — в [uiState].
      */
     fun sendMessage(text: String): Flow<String> = flow {
         val fsm = _stateMachine.filterNotNull().first()
@@ -273,9 +250,14 @@ open class AutonomousAgent(
             val batchCalls = engine.parseAllToolCalls(responseText)
             val agentForTools = uiStateHub.value.agent ?: return@flow
             val suppressOnlyBatch =
-                batchCalls.isNotEmpty() && batchCalls.all { engine.toolSuppressesLlmFollowUp(agentForTools, it.toolName) }
+                batchCalls.isNotEmpty() && batchCalls.all {
+                    engine.toolSuppressesLlmFollowUp(
+                        agentForTools,
+                        it.toolName
+                    )
+                }
 
-            val toolCtx = toolInvocationContext(this, fsm, timing)
+            val toolCtx = toolInvocationContext(timing)
 
             if (suppressOnlyBatch) {
                 toolOrchestrator.runSuppressOnlyToolSequence(
@@ -313,7 +295,6 @@ open class AutonomousAgent(
             }
         } catch (e: Exception) {
             val err = "Error: ${e.message}"
-            _partialResponse.emit(err)
             patchUi { it.copy(lastStreamError = err, delivery = AgentTextDelivery.Error) }
             emit(err)
         } finally {
@@ -354,8 +335,6 @@ open class AutonomousAgent(
      * Набор колбэков для [ToolInvocationOrchestrator]: чтение/обновление агента, синк с БД, активность, следующий LLM-шаг.
      */
     private fun toolInvocationContext(
-        collector: FlowCollector<String>,
-        fsm: AgentStateMachine,
         timing: PhaseTimingCollector,
     ) = ToolInvocationContext(
         processingMutex = processingMutex,
@@ -410,7 +389,6 @@ open class AutonomousAgent(
             uiStateHub.value.agent?.let { syncWithRepository(it) }
         } catch (e: Exception) {
             val err = "Error: ${e.message}"
-            _partialResponse.emit(err)
             emit(err)
         } finally {
             patchUi {
@@ -436,9 +414,17 @@ open class AutonomousAgent(
         replaceLastAssistant: Boolean = false,
     ): String {
         val snap = resolveRuntimeSnapshot() ?: return ""
-        val strategy = inferenceStrategyFor(snap.agent, directInferenceStrategy, ragInferenceStrategy)
+        val strategy =
+            inferenceStrategyFor(snap.agent, directInferenceStrategy, ragInferenceStrategy)
         val prepared = strategy.prepareLlmRequest(snap, timing)
-        return executeStreamingStepWithPrepared(collector, agent, stage, prepared, timing, replaceLastAssistant)
+        return executeStreamingStepWithPrepared(
+            collector,
+            agent,
+            stage,
+            prepared,
+            timing,
+            replaceLastAssistant
+        )
     }
 
     /**
@@ -464,9 +450,6 @@ open class AutonomousAgent(
             getAgent = { uiStateHub.value.agent },
             updateAgent = { transform ->
                 patchUi { st -> st.copy(agent = transform(st.agent)) }
-            },
-            emitPartial = { chunk ->
-                _partialResponse.emit(chunk)
             },
             setActivity = { patchUi { st -> st.copy(agentActivity = it) } },
             onDeliveryChange = { d -> patchUi { st -> st.copy(delivery = d) } },

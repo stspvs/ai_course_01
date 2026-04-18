@@ -20,10 +20,20 @@ internal class DirectChatInferenceStrategy(
     ): PreparedLlmRequest {
         val wrapped = if (timing != null) {
             timing.markPrepareRequest {
-                engine.prepareChatRequest(snapshot.agent, snapshot.stage, isJsonMode = false)
+                engine.prepareChatRequest(
+                    snapshot.agent,
+                    snapshot.stage,
+                    isJsonMode = false,
+                    injectWorkflowStageIntoPrompt = snapshot.injectWorkflowStageIntoPrompt,
+                )
             }
         } else {
-            engine.prepareChatRequest(snapshot.agent, snapshot.stage, isJsonMode = false)
+            engine.prepareChatRequest(
+                snapshot.agent,
+                snapshot.stage,
+                isJsonMode = false,
+                injectWorkflowStageIntoPrompt = snapshot.injectWorkflowStageIntoPrompt,
+            )
         }
         return wrapped
     }

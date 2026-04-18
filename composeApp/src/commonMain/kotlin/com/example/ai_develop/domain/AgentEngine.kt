@@ -77,15 +77,24 @@ open class AgentEngine(
         ragAttribution: RagAttribution? = null,
         /** Структурированный JSON-ответ RAG: без блока инструментов, схема answer/sources/quotes. */
         ragStructuredOutput: Boolean = false,
+        /** Соответствует [AgentState.workflowStagesEnabled]: только в workflow-режиме в промпт попадает стадия. */
+        injectWorkflowStageIntoPrompt: Boolean = true,
     ): PreparedLlmRequest {
-        val systemPrompt = prepareSystemPrompt(agent, stage, ragContext, ragAttribution, ragStructuredOutput)
+        val systemPrompt = prepareSystemPrompt(
+            agent,
+            stage,
+            ragContext,
+            ragAttribution,
+            ragStructuredOutput,
+            injectWorkflowStageIntoPrompt,
+        )
         val inputMessages = prepareInputMessages(agent)
         val snapshot = LlmRequestSnapshot(
             effectiveSystemPrompt = systemPrompt,
             inputMessagesText = formatLlmInputMessagesText(inputMessages),
             providerName = agent.provider.name,
             model = agent.provider.model,
-            agentStage = stage.toString(),
+            agentStage = if (injectWorkflowStageIntoPrompt) stage.toString() else "CHAT",
             temperature = agent.temperature,
             maxTokens = agent.maxTokens,
             isJsonMode = isJsonMode,
@@ -222,9 +231,11 @@ open class AgentEngine(
         ragContext: String? = null,
         ragAttribution: RagAttribution? = null,
         ragStructuredOutput: Boolean = false,
+        injectWorkflowStageIntoPrompt: Boolean = true,
     ): String {
         val basePrompt = memoryManager.wrapSystemPrompt(agent)
-        val stageContext = "\n[SYSTEM INFO] CURRENT STAGE: $stage\n"
+        val stageContext =
+            if (injectWorkflowStageIntoPrompt) "\n[SYSTEM INFO] CURRENT STAGE: $stage\n" else ""
 
         // Любой ход с атрибуцией RAG — ответ «из базы», без смешивания с MCP/[TOOL:] (как при ragStructuredOutput).
         val suppressToolsForRagTurn = ragStructuredOutput || ragAttribution != null
