@@ -1,10 +1,21 @@
 package com.example.ai_develop.presentation.compose
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -12,9 +23,35 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,13 +59,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.ai_develop.data.McpToolBindingRecord
-import com.example.ai_develop.domain.agent.*
-import com.example.ai_develop.domain.chat.*
-import com.example.ai_develop.domain.task.*
-import com.example.ai_develop.domain.rag.*
-import com.example.ai_develop.domain.llm.*
+import com.example.ai_develop.domain.agent.UserProfile
+import com.example.ai_develop.domain.chat.Agent
+import com.example.ai_develop.domain.chat.AgentTemplate
+import com.example.ai_develop.domain.chat.ChatMemoryStrategy
+import com.example.ai_develop.domain.llm.GENERAL_CHAT_ID
+import com.example.ai_develop.domain.llm.LLMProvider
+import com.example.ai_develop.domain.llm.LLMStateModel
 import com.example.ai_develop.presentation.LLMViewModel
-import com.example.ai_develop.presentation.*
 import kotlinx.coroutines.delay
 
 @Suppress("UnusedBoxWithConstraintsScope")
@@ -46,7 +84,7 @@ internal fun AgentsContent(
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isMobile = maxWidth < 600.dp
-        
+
         if (isMobile) {
             MobileAgentsContent(
                 state = state,
@@ -96,9 +134,9 @@ private fun DesktopAgentsContent(
             onSelectAgent = onSelectAgent,
             modifier = Modifier.width(300.dp).fillMaxHeight()
         )
-        
+
         VerticalDivider()
-        
+
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             val selectedAgent = state.selectedAgent
             if (selectedAgent != null) {
@@ -107,7 +145,19 @@ private fun DesktopAgentsContent(
                     viewModel = viewModel,
                     templates = templates,
                     canDelete = selectedAgent.id != GENERAL_CHAT_ID,
-                    onUpdateAgent = { n, p, t, pr, s, m, k, r -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k, r) },
+                    onUpdateAgent = { n, p, t, pr, s, m, k, r ->
+                        onUpdateAgent(
+                            selectedAgent.id,
+                            n,
+                            p,
+                            t,
+                            pr,
+                            s,
+                            m,
+                            k,
+                            r
+                        )
+                    },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
                     onDuplicateAgent = { onDuplicateAgent(selectedAgent.id) }
@@ -158,7 +208,19 @@ private fun MobileAgentsContent(
                     viewModel = viewModel,
                     templates = templates,
                     canDelete = selectedAgent.id != GENERAL_CHAT_ID,
-                    onUpdateAgent = { n, p, t, pr, s, m, k, r -> onUpdateAgent(selectedAgent.id, n, p, t, pr, s, m, k, r) },
+                    onUpdateAgent = { n, p, t, pr, s, m, k, r ->
+                        onUpdateAgent(
+                            selectedAgent.id,
+                            n,
+                            p,
+                            t,
+                            pr,
+                            s,
+                            m,
+                            k,
+                            r
+                        )
+                    },
                     onUpdateProfile = { onUpdateProfile(selectedAgent.id, it) },
                     onDeleteAgent = { onDeleteAgent(selectedAgent.id) },
                     onDuplicateAgent = { onDuplicateAgent(selectedAgent.id) }
@@ -183,7 +245,11 @@ private fun AgentListSideBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Агенты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "Агенты",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             IconButton(onClick = onCreateAgent) {
                 Icon(Icons.Default.Add, contentDescription = "Создать агента")
             }
@@ -245,7 +311,8 @@ private fun AgentItem(
     onClick: () -> Unit
 ) {
     val bgColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    val contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val contentColor =
+        if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
 
     Row(
         modifier = Modifier
@@ -269,7 +336,7 @@ private fun AgentItem(
                 )
             }
         }
-        
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 agent.name,
@@ -300,7 +367,7 @@ private fun AgentDetails(
     onDuplicateAgent: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    
+
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = selectedTab) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
@@ -313,7 +380,7 @@ private fun AgentDetails(
                 Text("MCP", modifier = Modifier.padding(12.dp))
             }
         }
-        
+
         Box(modifier = Modifier.weight(1f).padding(16.dp)) {
             when (selectedTab) {
                 0 -> AgentSettingsTab(
@@ -324,10 +391,12 @@ private fun AgentDetails(
                     onDeleteAgent = onDeleteAgent,
                     onDuplicateAgent = onDuplicateAgent
                 )
+
                 1 -> UserMemoryTab(
                     agent = agent,
                     onUpdateProfile = onUpdateProfile
                 )
+
                 2 -> AgentMcpAssignmentTab(agent = agent, viewModel = viewModel)
             }
         }
@@ -438,7 +507,16 @@ private fun AgentSettingsTab(
         ragEnabled = agent.ragEnabled
     }
 
-    LaunchedEffect(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy, ragEnabled) {
+    LaunchedEffect(
+        name,
+        systemPrompt,
+        temperature,
+        provider,
+        stopWord,
+        maxTokens,
+        memoryStrategy,
+        ragEnabled
+    ) {
         if (name != agent.name ||
             systemPrompt != agent.systemPrompt ||
             temperature != agent.temperature ||
@@ -449,7 +527,16 @@ private fun AgentSettingsTab(
             ragEnabled != agent.ragEnabled
         ) {
             delay(500)
-            onUpdateAgent(name, systemPrompt, temperature, provider, stopWord, maxTokens, memoryStrategy, ragEnabled)
+            onUpdateAgent(
+                name,
+                systemPrompt,
+                temperature,
+                provider,
+                stopWord,
+                maxTokens,
+                memoryStrategy,
+                ragEnabled
+            )
         }
     }
 
@@ -538,34 +625,52 @@ private fun AgentSettingsTab(
             }
             Switch(
                 checked = ragEnabled,
-                onCheckedChange = { ragEnabled = it }
+                onCheckedChange = {
+                    ragEnabled = it
+                    // Сохраняем немедленно, чтобы при переключении вкладок состояние не потерялось
+                    onUpdateAgent(
+                        name,
+                        systemPrompt,
+                        temperature,
+                        provider,
+                        stopWord,
+                        maxTokens,
+                        memoryStrategy,
+                        it
+                    )
+                }
             )
         }
-        
+
         MemoryStrategySelector(
-            currentStrategy = memoryStrategy, 
+            currentStrategy = memoryStrategy,
             windowSize = windowSize,
             onStrategyChange = { memoryStrategy = it }
         )
 
         OutlinedTextField(
             value = windowSize.toString(),
-            onValueChange = { it.toIntOrNull()?.let { v -> 
-                windowSize = v 
-                memoryStrategy = when(val s = memoryStrategy) {
-                    is ChatMemoryStrategy.SlidingWindow -> s.copy(windowSize = v)
-                    is ChatMemoryStrategy.StickyFacts -> s.copy(windowSize = v)
-                    is ChatMemoryStrategy.Branching -> s.copy(windowSize = v)
-                    is ChatMemoryStrategy.Summarization -> s.copy(windowSize = v)
-                    is ChatMemoryStrategy.TaskOriented -> s.copy(windowSize = v)
+            onValueChange = {
+                it.toIntOrNull()?.let { v ->
+                    windowSize = v
+                    memoryStrategy = when (val s = memoryStrategy) {
+                        is ChatMemoryStrategy.SlidingWindow -> s.copy(windowSize = v)
+                        is ChatMemoryStrategy.StickyFacts -> s.copy(windowSize = v)
+                        is ChatMemoryStrategy.Branching -> s.copy(windowSize = v)
+                        is ChatMemoryStrategy.Summarization -> s.copy(windowSize = v)
+                        is ChatMemoryStrategy.TaskOriented -> s.copy(windowSize = v)
+                    }
                 }
-            } },
+            },
             label = { Text("Размер окна контекста (сообщений)") },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp)
         )
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             OutlinedButton(
                 onClick = onDuplicateAgent,
                 modifier = Modifier.weight(1f),
@@ -606,8 +711,12 @@ private fun UserMemoryTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Профиль пользователя", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-        
+        Text(
+            "Профиль пользователя",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold
+        )
+
         OutlinedTextField(
             value = profile.preferences,
             onValueChange = { profile = profile.copy(preferences = it) },
@@ -637,9 +746,21 @@ private fun UserMemoryTab(
 @Composable
 private fun EmptyAgentState(onCreateAgent: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-            Text("Выберите агента или создайте нового", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Icon(
+                Icons.Default.Face,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            )
+            Text(
+                "Выберите агента или создайте нового",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Button(onClick = onCreateAgent, shape = RoundedCornerShape(12.dp)) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
