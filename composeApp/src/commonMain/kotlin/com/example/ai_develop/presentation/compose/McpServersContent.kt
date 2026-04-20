@@ -120,7 +120,7 @@ fun McpServersContent(
                 )
                 Row {
                     OutlinedTextField(
-                        value = ui.testInput,
+                        value = ui.bindingTest.input,
                         onValueChange = viewModel::setTestInput,
                         label = { Text("Текст для теста вызова (один строковый аргумент по схеме)") },
                         modifier = Modifier.weight(1f),
@@ -140,7 +140,7 @@ fun McpServersContent(
                         }
                     }
                 }
-                ui.testResult?.let { tr ->
+                ui.bindingTest.result?.let { tr ->
                     Spacer(Modifier.height(8.dp))
                     Text("Результат теста:", style = MaterialTheme.typography.labelMedium)
                     Text(tr, style = MaterialTheme.typography.bodySmall)
